@@ -1,0 +1,29 @@
+{
+  "name": "project-memografter",
+  "version": "1.0.0",
+  "description": "Semantic conversational memory framework backed by Postgres and pgvector.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b && node dist/index.js",
+    "test": "tsc -b && node dist/tests/test-openai.js",
+    "test:graft": "tsc -b && node dist/tests/test-graft-opeain.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "openai": "^4.0.0",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.2"
+  },
+  "peerDependencies": {
+    "openai": "^4.0.0"
+  }
+}
