@@ -4,3 +4,5 @@ dist
 *.tsbuildinfo
 .npm-cache
 Plan.md
+*.tsbuildinfo
+tsconfig.tsbuildinfo
