@@ -25,7 +25,7 @@ npm run build
 Fill `.env` with your local services:
 
 ```bash
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/memograffer
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
 OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
@@ -54,7 +54,7 @@ import {
   MemoGrafterAgent,
   OpenAIEmbedAdapter,
   OpenAILLMAdapter,
-} from "memograffer";
+} from "memo-grafter";
 
 const agent = new MemoGrafterAgent({
   db: { connectionString: process.env.DATABASE_URL! },
@@ -108,7 +108,7 @@ Queue jobs use retries and exponential backoff. Queue failures log warnings and 
 ## Configuration
 
 ```ts
-import { MemoGrafter } from "memograffer";
+import { MemoGrafter } from "memo-grafter";
 
 const memo = new MemoGrafter({
   db: { connectionString: process.env.DATABASE_URL! },
@@ -187,7 +187,7 @@ Copied nodes are inserted into the target session with new IDs and `grafted` edg
 Fleets group color-scoped worker agents and a conductor that can graft memory across workers.
 
 ```ts
-import { MemoGrafterFleet } from "memograffer";
+import { MemoGrafterFleet } from "memo-grafter";
 
 const fleet = new MemoGrafterFleet({
   db: { connectionString: process.env.DATABASE_URL! },

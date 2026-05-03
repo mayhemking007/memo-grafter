@@ -1,6 +1,6 @@
 {
-  "name": "memograffer",
-  "version": "1.0.0",
+  "name": "memo-grafter",
+  "version": "0.1.0",
   "description": "Semantic conversational memory framework backed by Postgres and pgvector.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
