@@ -1,29 +1,58 @@
 {
-  "name": "project-memografter",
+  "name": "memograffer",
   "version": "1.0.0",
   "description": "Semantic conversational memory framework backed by Postgres and pgvector.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    ".env.example",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsc -b && node dist/index.js",
-    "test": "tsc -b && node dist/tests/test-openai.js",
-    "test:graft": "tsc -b && node dist/tests/test-graft-opeain.js"
+    "test": "npm run test:core && npm run test:fleet",
+    "test:core": "tsx --env-file=.env tests/core/run.ts",
+    "test:fleet": "tsx --env-file=.env tests/fleet/run.ts"
   },
-  "keywords": [],
+  "keywords": [
+    "memory",
+    "chatbot",
+    "rag",
+    "pgvector",
+    "postgres"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "openai": "^4.0.0",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "dotenv": "^17.4.2",
+    "openai": "^4.0.0",
+    "tsx": "^4.0.0",
     "typescript": "^6.0.2"
   },
   "peerDependencies": {
     "openai": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": true
+    }
   }
 }

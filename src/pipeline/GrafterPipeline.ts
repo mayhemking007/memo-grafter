@@ -16,13 +16,17 @@ export class GrafterPipeline {
       return { systemPrompt: "", nodes: [], tokenCount: 0 };
     }
 
-    const neighbourhood = await this.store.getNeighbours(topicIds, this.config.hopDepth);
-    const nodes = neighbourhood.sort((a, b) => a.messageRange[0] - b.messageRange[0]);
+    const neighbourhood = await this.store.getNeighbours(topicIds, this.config.hopDepth, sessionId);
+    const nodes = neighbourhood.sort((a, b) =>
+      a.messageRange[0] - b.messageRange[0]
+      || a.messageRange[1] - b.messageRange[1]
+      || a.topicOrder - b.topicOrder
+    );
     const fittedNodes = [...nodes];
     let systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
     let tokenCount = this.countTokens(systemPrompt);
 
-    while (tokenCount > this.config.tokenBudget && fittedNodes.length > 1) {
+    while (tokenCount > this.config.tokenBudget && fittedNodes.length > 0) {
       fittedNodes.pop();
       systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
       tokenCount = this.countTokens(systemPrompt);
@@ -36,6 +40,8 @@ export class GrafterPipeline {
   }
 
   private async assemblePrompt(sessionId: string, nodes: TopicNode[]): Promise<string> {
+    if (nodes.length === 0) return "";
+
     const blocks: string[] = [];
 
     for (const node of nodes) {
@@ -45,7 +51,13 @@ export class GrafterPipeline {
       blocks.push(this.formatNode(node, messages));
     }
 
-    return blocks.join("\n---\n");
+    return [
+      "MemoGrafter retrieved memory context:",
+      "Use these memories as prior conversation context when answering the user.",
+      "If the user asks what you remember, answer from these memories instead of saying you have no record.",
+      "",
+      blocks.join("\n---\n"),
+    ].join("\n");
   }
 
   private formatNode(node: TopicNode, messages: Message[]): string {

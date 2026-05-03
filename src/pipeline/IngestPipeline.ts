@@ -2,7 +2,7 @@ import type { GraphStore } from "../store/GraphStore.js";
 import type { EmbedAdapter, LLMAdapter, Message, TopicNode } from "../types.js";
 import { normalizeText } from "../utils/normalizeText.js";
 import { SegmentProcessor } from "./SegmentProcessor.js";
-import { TopicDriftDetector, type DriftState } from "./TopicDriftDetector.js";
+import { TopicDriftDetector } from "./TopicDriftDetector.js";
 
 export class IngestPipeline {
   private readonly driftDetector: TopicDriftDetector;
@@ -12,7 +12,7 @@ export class IngestPipeline {
     private readonly store: GraphStore,
     llm: LLMAdapter,
     private readonly embedder: EmbedAdapter,
-    config: {
+    private readonly config: {
       windowSize: number;
       threshold: number;
       topK: number;
@@ -36,32 +36,17 @@ export class IngestPipeline {
     if (messages.length === 0) return [];
 
     await this.store.saveMessages(sessionId, messages);
-    await this.store.clearSessionGraph(sessionId);
+    await this.store.clearSession(sessionId);
 
-    let driftState: DriftState | null = null;
+    const embeddings = await Promise.all(messages.map((message) => this.embedMessage(message)));
+    const segments = this.driftDetector.detectSegments(messages, embeddings);
     const nodes: TopicNode[] = [];
 
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index];
-      if (!message) continue;
-
-      const embedding = await this.embedMessage(message);
-      driftState ??= this.driftDetector.createInitialState(index);
-
-      const result = this.driftDetector.processMessage(driftState, message, embedding, index);
-      driftState = result.state;
-
-      if (result.segment) {
-        nodes.push(await this.segmentProcessor.process(result.segment, messages, sessionId));
-      }
+    for (const segment of segments) {
+      nodes.push(await this.segmentProcessor.process(segment, messages, sessionId));
     }
 
-    if (driftState) {
-      const finalSegment = this.driftDetector.createFinalSegment(driftState);
-      if (finalSegment) {
-        nodes.push(await this.segmentProcessor.process(finalSegment, messages, sessionId));
-      }
-    }
+    await this.store.rebuildEdgesForSession(sessionId, this.config.topK);
 
     return nodes;
   }

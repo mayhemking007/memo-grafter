@@ -1,7 +1,9 @@
-﻿export interface Message {
+export interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+export type DriftMode = "window" | "intent";
 
 export interface TopicNode {
   id: string;
@@ -11,8 +13,11 @@ export interface TopicNode {
   summary: string;
   embedding: number[];
   messageRange: [number, number];
-  topicOrder?: number;
-  driftScore?: number;
+  topicOrder: number;
+  driftScore: number;
+  agentColor: string | null;
+  fleetId: string | null;
+  agentId: string | null;
   createdAt: Date;
 }
 
@@ -20,7 +25,7 @@ export interface TopicEdge {
   srcId: string;
   dstId: string;
   weight: number;
-  type: "semantic" | "temporal";
+  type: string;
 }
 
 export interface TopicSegment {
@@ -39,6 +44,13 @@ export interface InjectionResult {
   tokenCount: number;
 }
 
+export interface AbsorbFromAgentOptions {
+  topicIds?: string[];
+  prompt?: string;
+  minSimilarity?: number;
+  limit?: number;
+}
+
 export interface LLMAdapter {
   complete(messages: Message[], system?: string): Promise<string>;
 }
@@ -47,22 +59,36 @@ export interface EmbedAdapter {
   embed(text: string): Promise<number[]>;
 }
 
+export interface MemoGrafterDriftConfig {
+  mode?: DriftMode;
+  windowSize?: number;
+  threshold?: number;
+  minSegmentMessages?: number;
+}
+
+export interface MemoGrafterGraphConfig {
+  topK?: number;
+  hopDepth?: number;
+}
+
+export interface MemoGrafterInjectConfig {
+  bufferSize?: number;
+  tokenBudget?: number;
+}
+
+export interface MemoGrafterQueueConfig {
+  redisUrl: string;
+  queueName?: string;
+  removeOnComplete?: boolean | number;
+  removeOnFail?: boolean | number;
+}
+
 export interface MemoGrafterConfig {
   db: { connectionString: string };
   llm: LLMAdapter;
   embedder: EmbedAdapter;
-  drift?: {
-    windowSize?: number;
-    threshold?: number;
-    mode?: "window" | "intent";
-    minSegmentMessages?: number;
-  };
-  graph?: {
-    topK?: number;
-    hopDepth?: number;
-  };
-  inject?: {
-    bufferSize?: number;
-    tokenBudget?: number;
-  };
+  drift?: MemoGrafterDriftConfig;
+  graph?: MemoGrafterGraphConfig;
+  inject?: MemoGrafterInjectConfig;
+  queue?: MemoGrafterQueueConfig;
 }

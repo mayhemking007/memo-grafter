@@ -1,6 +1,13 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { MemoGrafter } from "./MemoGrafter.js";
-import type { InjectionResult, MemoGrafterConfig, Message, TopicNode, TopicSegment } from "./types.js";
+import type {
+  AbsorbFromAgentOptions,
+  InjectionResult,
+  MemoGrafterConfig,
+  Message,
+  TopicNode,
+  TopicSegment,
+} from "./types.js";
 
 export class MemoGrafterAgent {
   private readonly core: MemoGrafter;
@@ -18,14 +25,15 @@ export class MemoGrafterAgent {
   async invoke(userMessage: string): Promise<string> {
     this.history.push({ role: "user", content: userMessage });
 
-    await this.core.ingest(this.history, this.sessionId);
     const { nodes } = await this.core.getTopics(this.sessionId);
     const topicIds = nodes.map((node) => node.id);
     const { systemPrompt } = await this.core.inject(this.sessionId, topicIds);
     const response = await this.core.llm.complete(this.history, systemPrompt);
 
     this.history.push({ role: "assistant", content: response });
-    await this.core.ingest(this.history, this.sessionId);
+    await this.core.enqueueIngest(this.history, this.sessionId).catch((error: unknown) => {
+      console.warn("MemoGrafter background ingest warning:", error);
+    });
 
     return response;
   }
@@ -52,6 +60,15 @@ export class MemoGrafterAgent {
     const { nodes } = await this.core.getTopics(this.sessionId);
     const selectedTopicIds = topicIds ?? nodes.map((node) => node.id);
     return this.core.inject(this.sessionId, selectedTopicIds);
+  }
+
+  ingestGraftedNodes(nodes: TopicNode[]): Promise<TopicNode[]> {
+    return this.core.ingestGraftedNodes(nodes, this.sessionId);
+  }
+
+  async absorbFromAgent(sourceAgent: MemoGrafterAgent, options: AbsorbFromAgentOptions = {}): Promise<TopicNode[]> {
+    const nodes = await sourceAgent.core.selectNodesForAbsorb(sourceAgent.getSessionId(), options);
+    return this.core.absorbNodes(nodes, this.sessionId);
   }
 
   close(): Promise<void> {
