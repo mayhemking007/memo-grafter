@@ -6,3 +6,4 @@ dist
 Plan.md
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+.npm-pack-cache
