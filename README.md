@@ -1,28 +1,59 @@
 # MemoGrafter
 
-MemoGrafter is a Node.js and TypeScript framework for structured chatbot memory. It stores conversations as message buffers, topic segments, topic nodes, and graph edges, then grafts relevant memory back into later chatbot turns or related chatbot sessions.
+Experimental structured memory for TypeScript chatbots.
 
-MemoGrafter is a chatbot memory framework, not an autonomous agent runtime.
+MemoGrafter turns chatbot conversations into topic segments, topic nodes, and graph edges, then injects relevant memory into future turns. Its core idea is memory grafting: copying useful conversational memory from one chatbot or session into another.
 
-## Requirements
+MemoGrafter is a chatbot memory framework. It is not an autonomous agent runtime.
 
-- Node.js 18 or newer
-- PostgreSQL with the `pgvector` extension enabled
-- Redis when queue mode is enabled
-- An LLM adapter and embedding adapter
-- A server-side Node.js runtime
+## Why MemoGrafter?
 
-## Clone And Build
+Most chatbots either forget old context or keep stuffing long chat history back into the prompt. MemoGrafter explores a different shape:
+
+- store conversations as structured memory
+- detect topic shifts
+- summarize topic segments into memory nodes
+- connect related nodes in a graph
+- inject only relevant memory into later calls
+- graft selected memory into another chatbot/session
+
+The project is early-stage and experimental, but it is useful for demos, prototypes, and exploring memory workflows beyond plain chat history.
+
+## How It Works
+
+```text
+chat messages
+  -> topic segments
+  -> topic nodes
+  -> graph edges
+  -> memory injection
+  -> selective grafting into another chatbot
+```
+
+On each chatbot call, MemoGrafter can retrieve existing topic memory and pass it to the LLM as a system prompt. After the response, it ingests the updated conversation so future turns have better memory.
+
+## Installation
+
+```bash
+npm install memo-grafter
+```
+
+For local development from this repository:
 
 ```bash
 git clone <repo-url> project-memoGrafter
 cd project-memoGrafter
 npm install
-cp .env.example .env
 npm run build
 ```
 
-Fill `.env` with your local services:
+Then install it from a local app:
+
+```bash
+npm install D:/cohort/projects/project-memoGrafter
+```
+
+## Environment
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
@@ -30,26 +61,17 @@ OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
 
-`REDIS_URL` is only required when you want background queue ingestion. Without `queue` config, MemoGrafter ingests synchronously.
+`DATABASE_URL` is required. PostgreSQL must have `pgvector` enabled.
 
-## Use In A Local App
+`OPENAI_API_KEY` is only needed when using the included OpenAI adapters.
 
-From your chat app project, install MemoGrafter from the local clone:
+`REDIS_URL` is optional and only needed for queue mode.
 
-```bash
-cd path/to/your-chat-app
-npm install ../project-memoGrafter
-```
-
-If your app is in another folder, use the correct relative or absolute path:
-
-```bash
-npm install D:/cohort/projects/project-memoGrafter
-```
-
-Then import it normally from your app:
+## Minimal Usage
 
 ```ts
+import "dotenv/config";
+
 import {
   MemoGrafterAgent,
   OpenAIEmbedAdapter,
@@ -57,189 +79,103 @@ import {
 } from "memo-grafter";
 
 const agent = new MemoGrafterAgent({
-  db: { connectionString: process.env.DATABASE_URL! },
+  db: {
+    connectionString: process.env.DATABASE_URL!,
+  },
   llm: new OpenAILLMAdapter("gpt-4o"),
   embedder: new OpenAIEmbedAdapter("text-embedding-3-small"),
 });
 
 await agent.initialize();
 
-const answer = await agent.invoke("Help me remember the Japan itinerary.");
-console.log(answer);
+console.log(await agent.invoke("I am planning a Japan trip."));
+console.log(await agent.invoke("I like quiet towns, bookstores, and local cafes."));
+
+const nodes = await agent.getActiveNodes();
+console.log(nodes.map((node) => ({ label: node.label, summary: node.summary })));
 
 await agent.close();
 ```
 
-If you edit MemoGrafter source after installing it locally, rebuild MemoGrafter:
+Run with:
 
 ```bash
-cd path/to/project-memoGrafter
-npm run build
+npx tsx --env-file=.env src/index.ts
 ```
 
-Then reinstall it in your app if needed:
+## Memory Grafting
 
-```bash
-cd path/to/your-chat-app
-npm install ../project-memoGrafter
-```
-
-## Queue Mode
-
-Without `queue` config, ingestion runs synchronously during `invoke()`.
-
-With `queue` config, the chatbot returns the LLM answer first and enqueues memory ingestion through BullMQ and Redis:
+Memory grafting copies selected memory from one chatbot/session into another.
 
 ```ts
-const agent = new MemoGrafterAgent({
-  db: { connectionString: process.env.DATABASE_URL! },
-  llm: new OpenAILLMAdapter("gpt-4o"),
-  embedder: new OpenAIEmbedAdapter("text-embedding-3-small"),
-  queue: {
-    redisUrl: process.env.REDIS_URL!,
-    removeOnComplete: true,
-    removeOnFail: true,
-  },
+const travelBot = new MemoGrafterAgent(config);
+const writingBot = new MemoGrafterAgent(config);
+
+await travelBot.initialize();
+await writingBot.initialize();
+
+await travelBot.invoke("I am planning a Japan trip.");
+await travelBot.invoke("I like quiet towns, bookstores, and local cafes.");
+await travelBot.invoke("My budget is around 2500 dollars.");
+
+await writingBot.absorbFromAgent(travelBot, {
+  prompt: "Japan travel preferences",
+  minSimilarity: 0.6,
+  limit: 3,
 });
+
+const intro = await writingBot.invoke(
+  "Suggest a reflective blog intro for my Japan trip."
+);
+
+console.log(intro);
+
+await travelBot.close();
+await writingBot.close();
 ```
 
-Queue jobs use retries and exponential backoff. Queue failures log warnings and do not throw from chatbot invocation.
-
-## Configuration
+You can also preview a graft before copying it:
 
 ```ts
-import { MemoGrafter } from "memo-grafter";
-
-const memo = new MemoGrafter({
-  db: { connectionString: process.env.DATABASE_URL! },
-  llm,
-  embedder,
-  drift: {
-    mode: "intent",
-    windowSize: 5,
-    threshold: 0.3,
-    minSegmentMessages: 3,
-  },
-  graph: {
-    topK: 5,
-    hopDepth: 2,
-  },
-  inject: {
-    bufferSize: 8,
-    tokenBudget: 2000,
-  },
-});
-```
-
-Configuration sections:
-
-- `db.connectionString`: PostgreSQL connection string.
-- `llm`: adapter with `complete(messages, system?)`.
-- `embedder`: adapter with `embed(text)`.
-- `drift`: controls topic boundary detection.
-- `graph`: controls semantic neighbors and graph traversal depth.
-- `inject`: controls message buffer size and prompt token budget.
-- `queue`: enables BullMQ background ingestion.
-
-## Grafting
-
-`graft()` returns a system prompt, selected topic nodes, and an estimated token count.
-
-```ts
-const graft = await sourceAgent.graft();
+const graft = await travelBot.graft();
 
 console.log(graft.systemPrompt);
 console.log(graft.nodes);
 console.log(graft.tokenCount);
 ```
 
-To copy grafted memory into another agent, call `ingestGraftedNodes()`.
+## Key Features
 
-```ts
-const graft = await sourceAgent.graft();
-const copiedNodes = await targetAgent.ingestGraftedNodes(graft.nodes);
+- Structured chatbot memory over PostgreSQL and pgvector.
+- Topic drift detection for splitting conversations into segments.
+- Topic nodes with summaries, embeddings, message ranges, and graph edges.
+- Automatic memory injection during chatbot calls.
+- Selective memory grafting by topic ID or semantic prompt.
+- Optional BullMQ/Redis queue mode for background ingestion.
+- OpenAI adapters included.
+- Custom LLM and embedding adapters supported.
+- Minimal fleet API for color-scoped worker chatbots and conductor grafting.
+
+## Requirements
+
+- Node.js 18 or newer.
+- Server-side Node.js runtime.
+- PostgreSQL with `pgvector`.
+- An LLM adapter and embedding adapter.
+- OpenAI API key if using `OpenAILLMAdapter` or `OpenAIEmbedAdapter`.
+- Redis only if using queue mode.
+
+MemoGrafter does not run in browser code.
+
+## Learn More
+
+Read the full [USER_GUIDE.md](./USER_GUIDE.md) for setup, concepts, configuration, queue mode, custom adapters, fleet usage, examples, and troubleshooting.
+
+This repository also includes a runnable demo:
+
+```text
+examples/chatbot-memory-demo
 ```
-
-Agents can also absorb memory from another agent by topic IDs:
-
-```ts
-const sourceNodes = await sourceAgent.getActiveNodes();
-
-await targetAgent.absorbFromAgent(sourceAgent, {
-  topicIds: [sourceNodes[0]!.id],
-});
-```
-
-Or by semantic prompt:
-
-```ts
-await targetAgent.absorbFromAgent(sourceAgent, {
-  prompt: "Japan itinerary details",
-  minSimilarity: 0.6,
-  limit: 3,
-});
-```
-
-Copied nodes are inserted into the target session with new IDs and `grafted` edges back to the originals.
-
-## Fleet
-
-Fleets group color-scoped worker agents and a conductor that can graft memory across workers.
-
-```ts
-import { MemoGrafterFleet } from "memo-grafter";
-
-const fleet = new MemoGrafterFleet({
-  db: { connectionString: process.env.DATABASE_URL! },
-  llm,
-  embedder,
-}, {
-  id: "support-fleet",
-  name: "Support Fleet",
-});
-
-await fleet.initialize();
-
-const conductor = fleet.createConductor();
-const billing = await fleet.createWorker({ color: "billing" });
-const technical = await fleet.createWorker({ color: "technical" });
-
-await billing.invoke("Remember this billing workflow.");
-await conductor.graftColorIntoAgent("billing", technical);
-
-await fleet.close();
-```
-
-Prompt-guided conductor grafting:
-
-```ts
-await conductor.graftByPrompt("billing refund policy", technical, {
-  minSimilarity: 0.6,
-  limit: 3,
-});
-```
-
-The reserved worker color `conductor` is rejected.
-
-## Manual Smoke Test
-
-After setting `.env`, you can run the two-chatbot graft flow:
-
-```bash
-npx tsx --env-file=.env tests/manual/two-chatbots-graft-flow.ts
-```
-
-This uses real OpenAI, Postgres, and Redis if `REDIS_URL` is set. It creates two chatbot agents, seeds memory in one, grafts memory into the other, adds a different topic, then grafts that topic back.
-
-## Test
-
-```bash
-npm run build
-npm run test:core
-npm run test:fleet
-```
-
-Tests use deterministic fake adapters. Database-backed tests skip cleanly when `DATABASE_URL` is missing or unreachable.
 
 ## License
 

@@ -1,35 +1,32 @@
 {
   "name": "memo-grafter",
   "version": "0.1.0",
-  "description": "Semantic conversational memory framework backed by Postgres and pgvector.",
+  "description": "Structured conversational memory for LLM chatbot applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
     "dist",
     ".env.example",
     "README.md",
+    "USER_GUIDE.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -b",
+    "prepublishOnly": "npm run build",
     "test": "npm run test:core && npm run test:fleet",
     "test:core": "tsx --env-file=.env tests/core/run.ts",
     "test:fleet": "tsx --env-file=.env tests/fleet/run.ts"
   },
-  "keywords": [
-    "memory",
-    "chatbot",
-    "rag",
-    "pgvector",
-    "postgres"
-  ],
-  "author": "",
+  "keywords": ["llm", "memory", "chatbot", "rag", "knowledge-graph", "langchain", "openai"],
+  "author": "Sarthak Chaturvedi <sarthakchat2018@gmail.com>",
   "license": "MIT",
   "type": "module",
   "engines": {
