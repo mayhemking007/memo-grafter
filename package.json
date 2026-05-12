@@ -2,6 +2,14 @@
   "name": "memo-grafter",
   "version": "0.1.0",
   "description": "Structured conversational memory for LLM chatbot applications",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayhemking007/memo-grafter.git"
+  },
+  "homepage": "https://github.com/mayhemking007/memo-grafter",
+  "bugs": {
+    "url": "https://github.com/mayhemking007/memo-grafter/issues"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

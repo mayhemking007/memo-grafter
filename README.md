@@ -1,4 +1,5 @@
 # MemoGrafter
+[![npm version](https://img.shields.io/npm/v/memo-grafter.svg)](https://www.npmjs.com/package/memo-grafter)
 
 Experimental structured memory for TypeScript chatbots.
 
@@ -169,7 +170,7 @@ MemoGrafter does not run in browser code.
 
 ## Learn More
 
-Read the full [USER_GUIDE.md](./USER_GUIDE.md) for setup, concepts, configuration, queue mode, custom adapters, fleet usage, examples, and troubleshooting.
+Read the full [USER_GUIDE.md](https://github.com/mayhemking007/memo-grafter/blob/main/USER_GUIDE.md) for setup, concepts, configuration, queue mode, custom adapters, fleet usage, examples, and troubleshooting.
 
 This repository also includes a runnable demo:
 
