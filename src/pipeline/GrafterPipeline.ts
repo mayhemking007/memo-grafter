@@ -1,5 +1,6 @@
-﻿import type { GraphStore } from "../store/GraphStore.js";
-import type { InjectionResult, Message, TopicNode } from "../types.js";
+import { buildMemoryInjectionPrompt, formatMemoryNode } from "../prompts/memoryInjectionPrompt.js";
+import type { GraphStore } from "../store/GraphStore.js";
+import type { InjectionResult, TopicNode } from "../types.js";
 
 export class GrafterPipeline {
   constructor(
@@ -48,24 +49,10 @@ export class GrafterPipeline {
       const start = Math.max(0, node.messageRange[0] - this.config.bufferSize);
       const end = node.messageRange[1] + this.config.bufferSize;
       const messages = await this.store.getBufferMessages(sessionId, start, end);
-      blocks.push(this.formatNode(node, messages));
+      blocks.push(formatMemoryNode(node, messages));
     }
 
-    return [
-      "MemoGrafter retrieved memory context:",
-      "Use these memories as prior conversation context when answering the user.",
-      "If the user asks what you remember, answer from these memories instead of saying you have no record.",
-      "",
-      blocks.join("\n---\n"),
-    ].join("\n");
-  }
-
-  private formatNode(node: TopicNode, messages: Message[]): string {
-    const context = messages
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n");
-
-    return `[Topic: ${node.label}]\nSummary: ${node.summary}\nContext:\n${context}`;
+    return buildMemoryInjectionPrompt(blocks);
   }
 
   private countTokens(prompt: string): number {
