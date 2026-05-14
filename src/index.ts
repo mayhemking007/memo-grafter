@@ -3,6 +3,7 @@ export { MemoGrafter } from "./MemoGrafter.js";
 export { ConductorAgent } from "./fleet/ConductorAgent.js";
 export { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
 export { WorkerAgent } from "./fleet/WorkerAgent.js";
+export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
 export type {
   AbsorbFromAgentOptions,
