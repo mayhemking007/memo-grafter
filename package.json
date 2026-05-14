@@ -1,6 +1,6 @@
 {
   "name": "memo-grafter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Structured conversational memory for LLM chatbot applications",
   "repository": {
     "type": "git",
@@ -33,7 +33,15 @@
     "test:core": "tsx --env-file=.env tests/core/run.ts",
     "test:fleet": "tsx --env-file=.env tests/fleet/run.ts"
   },
-  "keywords": ["llm", "memory", "chatbot", "rag", "knowledge-graph", "langchain", "openai"],
+  "keywords": [
+    "llm",
+    "memory",
+    "chatbot",
+    "rag",
+    "knowledge-graph",
+    "langchain",
+    "openai"
+  ],
   "author": "Sarthak Chaturvedi <sarthakchat2018@gmail.com>",
   "license": "MIT",
   "type": "module",
