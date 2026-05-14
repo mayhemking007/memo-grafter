@@ -58,6 +58,7 @@ npm install D:/cohort/projects/project-memoGrafter
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
+ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
@@ -65,6 +66,8 @@ REDIS_URL=redis://localhost:6379
 `DATABASE_URL` is required. PostgreSQL must have `pgvector` enabled.
 
 `OPENAI_API_KEY` is only needed when using the included OpenAI adapters.
+
+`ANTHROPIC_API_KEY` is only needed when using the included Anthropic LLM adapter.
 
 `REDIS_URL` is optional and only needed for queue mode.
 
@@ -153,7 +156,8 @@ console.log(graft.tokenCount);
 - Automatic memory injection during chatbot calls.
 - Selective memory grafting by topic ID or semantic prompt.
 - Optional BullMQ/Redis queue mode for background ingestion.
-- OpenAI adapters included.
+- OpenAI LLM and embedding adapters included.
+- Anthropic LLM adapter included.
 - Custom LLM and embedding adapters supported.
 - Minimal fleet API for color-scoped worker chatbots and conductor grafting.
 
@@ -164,6 +168,7 @@ console.log(graft.tokenCount);
 - PostgreSQL with `pgvector`.
 - An LLM adapter and embedding adapter.
 - OpenAI API key if using `OpenAILLMAdapter` or `OpenAIEmbedAdapter`.
+- Anthropic API key if using `AnthropicLLMAdapter`.
 - Redis only if using queue mode.
 
 MemoGrafter does not run in browser code.

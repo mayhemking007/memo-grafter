@@ -16,6 +16,7 @@ The most important idea is memory grafting. A chatbot can build useful memory du
 - An LLM adapter.
 - An embedding adapter.
 - An OpenAI API key only if using the included OpenAI adapters.
+- An Anthropic API key only if using the included Anthropic LLM adapter.
 - Redis only if enabling queue mode.
 
 MemoGrafter is server-side only. Do not run it in browser code.
@@ -49,6 +50,7 @@ Create a `.env` file in your app:
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
+ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
@@ -56,6 +58,8 @@ REDIS_URL=redis://localhost:6379
 `DATABASE_URL` is required.
 
 `OPENAI_API_KEY` is required only when using `OpenAILLMAdapter` or `OpenAIEmbedAdapter`.
+
+`ANTHROPIC_API_KEY` is required only when using `AnthropicLLMAdapter`.
 
 `REDIS_URL` is optional and only needed when you pass `queue` config.
 
@@ -396,6 +400,12 @@ llm: new OpenAILLMAdapter("gpt-4o")
 
 Adapter used to generate assistant responses and summarize segments.
 
+Anthropic models can be used with the included Anthropic adapter:
+
+```ts
+llm: new AnthropicLLMAdapter("claude-sonnet-4-5")
+```
+
 ### `embedder`
 
 ```ts
@@ -403,6 +413,8 @@ embedder: new OpenAIEmbedAdapter("text-embedding-3-small")
 ```
 
 Adapter used to create vectors for semantic search.
+
+Anthropic does not provide a native embedding API. Pair `AnthropicLLMAdapter` with `OpenAIEmbedAdapter` or another custom `EmbedAdapter`.
 
 ### `drift`
 
@@ -684,6 +696,7 @@ Main exports:
 - `MemoGrafterFleet`
 - `WorkerAgent`
 - `ConductorAgent`
+- `AnthropicLLMAdapter`
 - `OpenAILLMAdapter`
 - `OpenAIEmbedAdapter`
 - public shared and fleet types

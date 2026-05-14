@@ -46,6 +46,7 @@
     "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
     "@types/node": "^25.6.0",
     "dotenv": "^17.4.2",
     "openai": "^4.0.0",
@@ -53,9 +54,13 @@
     "typescript": "^6.0.2"
   },
   "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
     "openai": "^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
     "openai": {
       "optional": true
     }
