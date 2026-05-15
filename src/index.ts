@@ -4,6 +4,7 @@ export { ConductorAgent } from "./fleet/ConductorAgent.js";
 export { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
 export { WorkerAgent } from "./fleet/WorkerAgent.js";
 export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
+export { GeminiEmbedAdapter, GeminiLLMAdapter } from "./adapters/GeminiAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
 export type {
   AbsorbFromAgentOptions,
