@@ -17,6 +17,7 @@ The most important idea is memory grafting. A chatbot can build useful memory du
 - An embedding adapter.
 - An OpenAI API key only if using the included OpenAI adapters.
 - An Anthropic API key only if using the included Anthropic LLM adapter.
+- A Gemini API key only if using the included Gemini adapters.
 - Redis only if enabling queue mode.
 
 MemoGrafter is server-side only. Do not run it in browser code.
@@ -51,6 +52,7 @@ Create a `.env` file in your app:
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
 ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
 OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
@@ -60,6 +62,8 @@ REDIS_URL=redis://localhost:6379
 `OPENAI_API_KEY` is required only when using `OpenAILLMAdapter` or `OpenAIEmbedAdapter`.
 
 `ANTHROPIC_API_KEY` is required only when using `AnthropicLLMAdapter`.
+
+`GEMINI_API_KEY` is required only when using `GeminiLLMAdapter` or `GeminiEmbedAdapter`.
 
 `REDIS_URL` is optional and only needed when you pass `queue` config.
 
@@ -406,6 +410,12 @@ Anthropic models can be used with the included Anthropic adapter:
 llm: new AnthropicLLMAdapter("claude-sonnet-4-5")
 ```
 
+Gemini models can be used with the included Gemini adapter:
+
+```ts
+llm: new GeminiLLMAdapter("gemini-2.5-flash")
+```
+
 ### `embedder`
 
 ```ts
@@ -415,6 +425,14 @@ embedder: new OpenAIEmbedAdapter("text-embedding-3-small")
 Adapter used to create vectors for semantic search.
 
 Anthropic does not provide a native embedding API. Pair `AnthropicLLMAdapter` with `OpenAIEmbedAdapter` or another custom `EmbedAdapter`.
+
+Gemini embeddings can be used with the included Gemini embedder:
+
+```ts
+embedder: new GeminiEmbedAdapter("gemini-embedding-001")
+```
+
+`GeminiEmbedAdapter` requests 1536-dimensional embeddings by default to match MemoGrafter's current `vector(1536)` database schema. If you change the schema dimension, pass the matching value as the second constructor argument.
 
 ### `drift`
 
@@ -697,6 +715,8 @@ Main exports:
 - `WorkerAgent`
 - `ConductorAgent`
 - `AnthropicLLMAdapter`
+- `GeminiLLMAdapter`
+- `GeminiEmbedAdapter`
 - `OpenAILLMAdapter`
 - `OpenAIEmbedAdapter`
 - public shared and fleet types

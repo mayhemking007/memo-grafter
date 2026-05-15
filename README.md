@@ -36,10 +36,12 @@ MemoGrafter stores conversation turns, detects topic shifts, summarizes segments
 npm install memo-grafter
 ```
 
-MemoGrafter runs server-side on Node.js and requires PostgreSQL with `pgvector`. The included OpenAI adapters also require `OPENAI_API_KEY`.
+MemoGrafter runs server-side on Node.js and requires PostgreSQL with `pgvector`. Included provider adapters require their matching API keys.
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
 OPENAI_API_KEY=sk-...
 ```
 
@@ -67,6 +69,32 @@ console.log(await agent.invoke("I like quiet towns, bookstores, and local cafes.
 console.log(await agent.invoke("What do you remember about my travel preferences?"));
 
 await agent.close();
+```
+
+## Adapters
+
+MemoGrafter includes provider adapters such as `OpenAILLMAdapter`, `OpenAIEmbedAdapter`, `AnthropicLLMAdapter`, `GeminiLLMAdapter`, and `GeminiEmbedAdapter`. You can also bring any provider by implementing the public adapter interfaces:
+
+```ts
+import {
+  type EmbedAdapter,
+  type LLMAdapter,
+  type Message,
+} from "memo-grafter";
+
+class MyLLMAdapter implements LLMAdapter {
+  async complete(messages: Message[], system?: string): Promise<string> {
+    // Call your model provider here.
+    return "Assistant response";
+  }
+}
+
+class MyEmbedAdapter implements EmbedAdapter {
+  async embed(text: string): Promise<number[]> {
+    // Return an embedding vector matching your pgvector schema.
+    return [];
+  }
+}
 ```
 
 ## Memory Grafting
