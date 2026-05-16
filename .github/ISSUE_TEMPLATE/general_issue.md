@@ -1,3 +1,11 @@
+---
+name: General issue
+about: Create a structured issue for memo-grafter
+title: ""
+labels: ""
+assignees: ""
+---
+
 ## What
 
 Describe the change.
