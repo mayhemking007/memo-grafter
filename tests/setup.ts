@@ -35,7 +35,7 @@ export async function skipWithoutDatabase(testName: string): Promise<boolean> {
 }
 
 export class FakeLLMAdapter implements LLMAdapter {
-  async complete(messages: { role: "user" | "assistant"; content: string }[]): Promise<string> {
+  async complete(messages: { role: "system" | "user" | "assistant"; content: string }[]): Promise<string> {
     const last = messages.at(-1)?.content ?? "";
     if (last.includes("Conversation segment:")) {
       return this.extractMemory(last);
