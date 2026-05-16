@@ -1,5 +1,5 @@
 export interface Message {
-  role: "user" | "assistant";
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -87,6 +87,7 @@ export interface MemoGrafterConfig {
   db: { connectionString: string };
   llm: LLMAdapter;
   embedder: EmbedAdapter;
+  systemPrompt?: string;
   drift?: MemoGrafterDriftConfig;
   graph?: MemoGrafterGraphConfig;
   inject?: MemoGrafterInjectConfig;

@@ -12,15 +12,21 @@ export class GeminiLLMAdapter implements LLMAdapter {
   constructor(private readonly model = "gemini-2.5-flash") {}
 
   async complete(messages: Message[], system?: string): Promise<string> {
-    const contents: Content[] = messages.map((message) => ({
-      role: message.role === "assistant" ? "model" : "user",
-      parts: [{ text: message.content }],
-    }));
+    const systemMessages = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content);
+    const contents: Content[] = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role === "assistant" ? "model" : "user",
+        parts: [{ text: message.content }],
+      }));
+    const systemInstruction = [system, ...systemMessages].filter(Boolean).join("\n\n");
 
     const response = await this.client.models.generateContent({
       model: this.model,
       contents,
-      ...(system ? { config: { systemInstruction: system } } : {}),
+      ...(systemInstruction ? { config: { systemInstruction } } : {}),
     });
 
     return response.text ?? "";

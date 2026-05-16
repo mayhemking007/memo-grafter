@@ -11,15 +11,21 @@ export class AnthropicLLMAdapter implements LLMAdapter {
   ) {}
 
   async complete(messages: Message[], system?: string): Promise<string> {
-    const anthropicMessages: MessageParam[] = messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
+    const systemMessages = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content);
+    const anthropicMessages: MessageParam[] = messages
+      .filter((message): message is Message & { role: "user" | "assistant" } => message.role !== "system")
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+    const systemPrompt = [system, ...systemMessages].filter(Boolean).join("\n\n");
 
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: this.maxTokens,
-      ...(system ? { system } : {}),
+      ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: anthropicMessages,
     });
 
