@@ -29,7 +29,9 @@
   "scripts": {
     "build": "tsc -b",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:core && npm run test:fleet",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
     "test:core": "tsx --env-file=.env tests/core/run.ts",
     "test:fleet": "tsx --env-file=.env tests/fleet/run.ts"
   },
@@ -60,7 +62,8 @@
     "dotenv": "^17.4.2",
     "openai": "^4.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.6"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
