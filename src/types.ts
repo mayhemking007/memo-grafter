@@ -38,9 +38,62 @@ export interface TopicSegment {
   createdAt: Date;
 }
 
+export type MemoryType = "fact" | "insight" | "question" | "task" | "reference";
+export type MemorySourceType = "conversation" | "note" | "document" | "code";
+
+export interface MemoryNode {
+  id: string;
+  segmentId: string;
+  topicNodeId: string;
+  agentId: string | null;
+  sessionId: string;
+  memoryType: MemoryType;
+  sourceType: MemorySourceType;
+  subject: string;
+  predicate: string;
+  value: string;
+  confidence: number;
+  embedding: number[];
+  sourceUrl: string | null;
+  sourceTitle: string | null;
+  supersededBy: string | null;
+  decayed: boolean;
+  agentColor: string | null;
+  fleetId: string | null;
+  createdAt: Date;
+}
+
+export interface MemoryNodeInsert extends Omit<MemoryNode, "createdAt"> {}
+
+export interface MemoryEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  edgeType: "semantic" | "conflicts" | "updates" | "related";
+  weight: number;
+  createdAt: Date;
+}
+
+export interface ExtractedMemory {
+  memoryType: MemoryType;
+  subject: string;
+  predicate: string;
+  value: string;
+  confidence: number;
+}
+
+export interface SegmentExtractionResult {
+  label: string;
+  userIntent: string;
+  outcome: string;
+  open: string | null;
+  memories: ExtractedMemory[];
+}
+
 export interface InjectionResult {
   systemPrompt: string;
   nodes: TopicNode[];
+  memories?: MemoryNode[];
   tokenCount: number;
 }
 
