@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { buildSegmentExtractionPrompt } from "../prompts/segmentExtractionPrompt.js";
-import type { GraphStore } from "../store/GraphStore.js";
+import type { GraphStore } from "../store/index.js";
 import type {
   EmbedAdapter,
   ExtractedMemory,

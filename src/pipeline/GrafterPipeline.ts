@@ -1,5 +1,5 @@
 import { buildMemoryInjectionPrompt, formatMemoryNode } from "../prompts/memoryInjectionPrompt.js";
-import type { GraphStore } from "../store/GraphStore.js";
+import type { GraphStore } from "../store/index.js";
 import type { InjectionResult, TopicNode } from "../types.js";
 
 export class GrafterPipeline {

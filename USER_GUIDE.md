@@ -12,7 +12,7 @@ The most important idea is memory grafting. A chatbot can build useful memory du
 
 - Node.js 18 or newer.
 - TypeScript or modern JavaScript using ES modules.
-- PostgreSQL with the `pgvector` extension enabled.
+- PostgreSQL with the `pgvector` extension enabled for the built-in `PostgresGraphStore`.
 - An LLM adapter.
 - An embedding adapter.
 - An OpenAI API key only if using the included OpenAI adapters.
@@ -57,7 +57,7 @@ OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379
 ```
 
-`DATABASE_URL` is required.
+`DATABASE_URL` is required when using the built-in PostgreSQL storage.
 
 `OPENAI_API_KEY` is required only when using `OpenAILLMAdapter` or `OpenAIEmbedAdapter`.
 
@@ -73,7 +73,7 @@ Enable `pgvector` in PostgreSQL:
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-MemoGrafter creates its own tables during `initialize()`.
+The built-in `PostgresGraphStore` creates its own tables during `initialize()`.
 
 Current v1 tables:
 
@@ -81,6 +81,8 @@ Current v1 tables:
 - `mg_segments`
 - `mg_topic_nodes`
 - `mg_topic_edges`
+- `mg_memory_nodes`
+- `mg_memory_edges`
 - `mg_fleets`
 - `mg_fleet_agents`
 
@@ -394,7 +396,20 @@ db: {
 }
 ```
 
-PostgreSQL connection string.
+PostgreSQL connection string used by the built-in `PostgresGraphStore`.
+
+MemoGrafter currently constructs `PostgresGraphStore` from this config internally. Advanced users can also import the storage contract directly:
+
+```ts
+import {
+  PostgresGraphStore,
+  type GraphStore,
+} from "memo-grafter";
+
+const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
+```
+
+`GraphStore` is the public storage interface. `PostgresGraphStore` is the default PostgreSQL and pgvector implementation.
 
 ### `llm`
 
@@ -548,6 +563,34 @@ const agent = new MemoGrafterAgent({
 ```
 
 Your embedding vector dimension must match the vector dimension expected by the database schema.
+
+## Storage Backends
+
+MemoGrafter exposes storage through the `GraphStore` interface. The built-in implementation is `PostgresGraphStore`, which stores relational data, graph edges, and vector search data in PostgreSQL with `pgvector`.
+
+Most users do not need to instantiate a store directly. `MemoGrafter` and `MemoGrafterAgent` use `PostgresGraphStore` from the `db.connectionString` config:
+
+```ts
+const agent = new MemoGrafterAgent({
+  db: {
+    connectionString: process.env.DATABASE_URL!,
+  },
+  llm,
+  embedder,
+});
+```
+
+If you are extending MemoGrafter, use `GraphStore` as the contract and keep concrete storage details behind an implementation:
+
+```ts
+import type { GraphStore } from "memo-grafter";
+
+class MyGraphStore implements GraphStore {
+  // Implement the full GraphStore contract.
+}
+```
+
+Future storage implementations can use the same interface without changing pipeline or fleet code. For example, a SQLite plus vector-database implementation would implement `GraphStore` while preserving the same behavior expected by ingestion, grafting, and fleet APIs.
 
 ## Fleet API
 
@@ -719,6 +762,9 @@ Main exports:
 - `GeminiEmbedAdapter`
 - `OpenAILLMAdapter`
 - `OpenAIEmbedAdapter`
+- `PostgresGraphStore`
+- `GraphStore`
+- `FleetAgentRecord`
 - public shared and fleet types
 
 Common `MemoGrafterAgent` methods:

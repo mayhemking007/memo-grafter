@@ -36,7 +36,7 @@ MemoGrafter stores conversation turns, detects topic shifts, summarizes segments
 npm install memo-grafter
 ```
 
-MemoGrafter runs server-side on Node.js and requires PostgreSQL with `pgvector`. Included provider adapters require their matching API keys.
+MemoGrafter runs server-side on Node.js. The built-in storage implementation is `PostgresGraphStore`, which requires PostgreSQL with `pgvector`. Included provider adapters require their matching API keys.
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/memo_grafter
@@ -91,11 +91,26 @@ class MyLLMAdapter implements LLMAdapter {
 
 class MyEmbedAdapter implements EmbedAdapter {
   async embed(text: string): Promise<number[]> {
-    // Return an embedding vector matching your pgvector schema.
+    // Return an embedding vector matching your storage schema.
     return [];
   }
 }
 ```
+
+## Storage
+
+MemoGrafter uses a public `GraphStore` interface internally. The default implementation is `PostgresGraphStore`, backed by PostgreSQL and `pgvector`, and this is what `MemoGrafter` and `MemoGrafterAgent` construct from the `db.connectionString` config today.
+
+```ts
+import {
+  PostgresGraphStore,
+  type GraphStore,
+} from "memo-grafter";
+
+const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
+```
+
+The interface boundary keeps the Postgres implementation isolated and gives future storage backends a clear contract to implement.
 
 ## Memory Grafting
 

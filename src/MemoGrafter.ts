@@ -1,9 +1,10 @@
 import { GrafterPipeline } from "./pipeline/GrafterPipeline.js";
 import { IngestPipeline } from "./pipeline/IngestPipeline.js";
 import { IngestQueue } from "./queue/IngestQueue.js";
-import { GraphStore } from "./store/GraphStore.js";
+import { PostgresGraphStore } from "./store/index.js";
 import { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
 import type { MemoGrafterFleetOptions } from "./fleet/types.js";
+import type { GraphStore } from "./store/index.js";
 import type {
   AbsorbFromAgentOptions,
   EmbedAdapter,
@@ -37,7 +38,7 @@ export class MemoGrafter {
 
     this.llm = config.llm;
     this.embedder = config.embedder;
-    this.store = new GraphStore(config.db.connectionString);
+    this.store = new PostgresGraphStore(config.db.connectionString);
     this.ingestPipeline = new IngestPipeline(this.store, config.llm, config.embedder, {
       windowSize,
       threshold,
