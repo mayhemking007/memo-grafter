@@ -6,6 +6,7 @@ export { WorkerAgent } from "./fleet/WorkerAgent.js";
 export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
 export { GeminiEmbedAdapter, GeminiLLMAdapter } from "./adapters/GeminiAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
+export { PostgresGraphStore } from "./store/index.js";
 export type {
   AbsorbFromAgentOptions,
   DriftMode,
@@ -38,3 +39,4 @@ export type {
   MemoGrafterFleetOptions,
   WorkerAgentConfig,
 } from "./fleet/types.js";
+export type { FleetAgentRecord, GraphStore } from "./store/index.js";

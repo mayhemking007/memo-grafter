@@ -1,4 +1,4 @@
-import type { GraphStore } from "../store/GraphStore.js";
+import type { GraphStore } from "../store/index.js";
 import type { EmbedAdapter, LLMAdapter, Message, TopicNode } from "../types.js";
 import { normalizeText } from "../utils/normalizeText.js";
 import { SegmentProcessor } from "./SegmentProcessor.js";

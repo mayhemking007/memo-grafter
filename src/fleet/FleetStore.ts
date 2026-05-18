@@ -1,4 +1,4 @@
-import type { GraphStore } from "../store/GraphStore.js";
+import type { GraphStore } from "../store/index.js";
 import type { FleetAgentInfo, FleetGraph } from "./types.js";
 
 export class FleetStore {
