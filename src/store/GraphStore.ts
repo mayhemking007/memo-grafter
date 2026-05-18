@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
-import type { Message, TopicEdge, TopicNode, TopicSegment } from "../types.js";
+import type { MemoryNode, MemoryNodeInsert, Message, TopicEdge, TopicNode, TopicSegment } from "../types.js";
+import { cosineSimilarity } from "../utils/drift/cosineSimilarity.js";
 import { parseVector, toVectorLiteral } from "../utils/vectorLiteral.js";
 
 interface TopicNodeRow {
@@ -26,6 +27,28 @@ interface TopicSegmentRow {
   end_index: number;
   topic_order: number;
   drift_score: number;
+  created_at: Date;
+}
+
+interface MemoryNodeRow {
+  id: string;
+  segment_id: string;
+  topic_node_id: string;
+  agent_id: string | null;
+  session_id: string;
+  memory_type: MemoryNode["memoryType"];
+  source_type: MemoryNode["sourceType"];
+  subject: string;
+  predicate: string;
+  value: string;
+  confidence: number;
+  embedding: string | number[] | null;
+  source_url: string | null;
+  source_title: string | null;
+  superseded_by: string | null;
+  decayed: boolean;
+  agent_color: string | null;
+  fleet_id: string | null;
   created_at: Date;
 }
 
@@ -70,6 +93,7 @@ export class GraphStore {
 
   async initialize(): Promise<void> {
     await this.sql`CREATE EXTENSION IF NOT EXISTS vector`;
+    await this.sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`;
 
     await this.sql`
       CREATE TABLE IF NOT EXISTS mg_message_buffer (
@@ -120,6 +144,41 @@ export class GraphStore {
         weight  FLOAT NOT NULL,
         type    TEXT NOT NULL,
         PRIMARY KEY (src_id, dst_id)
+      )
+    `;
+
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS mg_memory_nodes (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        segment_id    TEXT NOT NULL REFERENCES mg_segments(id) ON DELETE CASCADE,
+        topic_node_id TEXT NOT NULL REFERENCES mg_topic_nodes(id) ON DELETE CASCADE,
+        agent_id      TEXT,
+        session_id    TEXT NOT NULL,
+        memory_type   TEXT NOT NULL CHECK (memory_type IN ('fact','insight','question','task','reference')),
+        source_type   TEXT NOT NULL DEFAULT 'conversation' CHECK (source_type IN ('conversation','note','document','code')),
+        subject       TEXT NOT NULL,
+        predicate     TEXT NOT NULL,
+        value         TEXT NOT NULL,
+        confidence    FLOAT NOT NULL DEFAULT 1.0,
+        embedding     vector(1536),
+        source_url    TEXT,
+        source_title  TEXT,
+        superseded_by UUID REFERENCES mg_memory_nodes(id),
+        decayed       BOOLEAN NOT NULL DEFAULT FALSE,
+        agent_color   TEXT,
+        fleet_id      TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS mg_memory_edges (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source_id  UUID NOT NULL REFERENCES mg_memory_nodes(id) ON DELETE CASCADE,
+        target_id  UUID NOT NULL REFERENCES mg_memory_nodes(id) ON DELETE CASCADE,
+        edge_type  TEXT NOT NULL CHECK (edge_type IN ('semantic','conflicts','updates','related')),
+        weight     FLOAT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
 
@@ -299,6 +358,136 @@ export class GraphStore {
     `;
 
     return rows.map((row) => this.rowToSegment(row));
+  }
+
+  async insertMemories(nodes: MemoryNodeInsert[]): Promise<void> {
+    if (nodes.length === 0) return;
+
+    const rows = nodes.map((node) => ({
+      id: node.id,
+      segment_id: node.segmentId,
+      topic_node_id: node.topicNodeId,
+      agent_id: node.agentId,
+      session_id: node.sessionId,
+      memory_type: node.memoryType,
+      source_type: node.sourceType,
+      subject: node.subject,
+      predicate: node.predicate,
+      value: node.value,
+      confidence: node.confidence,
+      embedding: toVectorLiteral(node.embedding),
+      source_url: node.sourceUrl,
+      source_title: node.sourceTitle,
+      superseded_by: node.supersededBy,
+      decayed: node.decayed,
+      agent_color: node.agentColor,
+      fleet_id: node.fleetId,
+    }));
+
+    await this.sql`
+      INSERT INTO mg_memory_nodes ${this.sql(
+        rows,
+        "id",
+        "segment_id",
+        "topic_node_id",
+        "agent_id",
+        "session_id",
+        "memory_type",
+        "source_type",
+        "subject",
+        "predicate",
+        "value",
+        "confidence",
+        "embedding",
+        "source_url",
+        "source_title",
+        "superseded_by",
+        "decayed",
+        "agent_color",
+        "fleet_id",
+      )}
+    `;
+  }
+
+  async getMemoriesBySegment(segmentId: string): Promise<MemoryNode[]> {
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT * FROM mg_memory_nodes
+      WHERE segment_id = ${segmentId}
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async getMemoriesByTopic(topicNodeId: string): Promise<MemoryNode[]> {
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT * FROM mg_memory_nodes
+      WHERE topic_node_id = ${topicNodeId}
+        AND decayed = false
+        AND superseded_by IS NULL
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async searchMemories(
+    embedding: number[],
+    sessionId: string,
+    limit: number,
+    minSimilarity: number,
+  ): Promise<(MemoryNode & { similarity: number })[]> {
+    const rows = await this.sql<Array<MemoryNodeRow & { similarity: number }>>`
+      SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
+      FROM mg_memory_nodes
+      WHERE session_id = ${sessionId}
+        AND decayed = false
+        AND superseded_by IS NULL
+        AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${minSimilarity}
+      ORDER BY similarity DESC
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      ...this.rowToMemoryNode(row),
+      similarity: row.similarity,
+    }));
+  }
+
+  async buildMemoryEdges(topicNodeId: string, sessionId: string, threshold: number): Promise<void> {
+    try {
+      const memories = (await this.getMemoriesByTopic(topicNodeId))
+        .filter((memory) => memory.sessionId === sessionId);
+      if (memories.length < 2) return;
+
+      for (let sourceIndex = 0; sourceIndex < memories.length; sourceIndex += 1) {
+        const source = memories[sourceIndex];
+        if (!source) continue;
+
+        for (let targetIndex = sourceIndex + 1; targetIndex < memories.length; targetIndex += 1) {
+          const target = memories[targetIndex];
+          if (!target || source.id === target.id) continue;
+
+          const similarity = cosineSimilarity(source.embedding, target.embedding);
+          if (!Number.isFinite(similarity) || similarity < threshold) continue;
+
+          const existing = await this.sql<{ id: string }[]>`
+            SELECT id FROM mg_memory_edges
+            WHERE (source_id = ${source.id}::uuid AND target_id = ${target.id}::uuid)
+               OR (source_id = ${target.id}::uuid AND target_id = ${source.id}::uuid)
+            LIMIT 1
+          `;
+          if (existing.length > 0) continue;
+
+          await this.sql`
+            INSERT INTO mg_memory_edges (source_id, target_id, edge_type, weight)
+            VALUES (${source.id}::uuid, ${target.id}::uuid, 'semantic', ${similarity})
+          `;
+        }
+      }
+    } catch (error) {
+      console.warn("GraphStore memory edge build warning:", error);
+    }
   }
 
   async getTopKSimilar(nodeId: string, embedding: number[], sessionId: string, k: number): Promise<TopicNode[]> {
@@ -657,6 +846,38 @@ export class GraphStore {
       USING ivfflat (embedding vector_cosine_ops)
       WITH (lists = 100)
     `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_topic
+      ON mg_memory_nodes(topic_node_id)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_segment
+      ON mg_memory_nodes(segment_id)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_session
+      ON mg_memory_nodes(session_id)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_embedding
+      ON mg_memory_nodes
+      USING ivfflat (embedding vector_cosine_ops)
+      WITH (lists = 100)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_edges_source
+      ON mg_memory_edges(source_id)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_edges_target
+      ON mg_memory_edges(target_id)
+    `;
   }
 
   private cleanAssistantMessage(content: string, maxChars: number): string {
@@ -720,6 +941,30 @@ export class GraphStore {
       agentColor: row.agent_color,
       fleetId: row.fleet_id,
       agentId: row.agent_id,
+      createdAt: row.created_at,
+    };
+  }
+
+  private rowToMemoryNode(row: MemoryNodeRow): MemoryNode {
+    return {
+      id: row.id,
+      segmentId: row.segment_id,
+      topicNodeId: row.topic_node_id,
+      agentId: row.agent_id,
+      sessionId: row.session_id,
+      memoryType: row.memory_type,
+      sourceType: row.source_type,
+      subject: row.subject,
+      predicate: row.predicate,
+      value: row.value,
+      confidence: row.confidence,
+      embedding: parseVector(row.embedding),
+      sourceUrl: row.source_url,
+      sourceTitle: row.source_title,
+      supersededBy: row.superseded_by,
+      decayed: row.decayed,
+      agentColor: row.agent_color,
+      fleetId: row.fleet_id,
       createdAt: row.created_at,
     };
   }
