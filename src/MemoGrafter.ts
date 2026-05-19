@@ -29,8 +29,12 @@ export class MemoGrafter {
 
     const windowSize = config.drift?.windowSize ?? 5;
     const mode = config.drift?.mode ?? "intent";
-    const threshold = config.drift?.threshold ?? 0.3;
+    const threshold = config.drift?.threshold;
+    const driftSensitivity = config.drift?.driftSensitivity;
     const minSegmentMessages = config.drift?.minSegmentMessages ?? 3;
+    const llmAmbiguityDetection = config.drift?.llmAmbiguityDetection;
+    const reentryDetection = config.drift?.reentryDetection;
+    const reentryThreshold = config.drift?.reentryThreshold;
     const topK = config.graph?.topK ?? 5;
     const hopDepth = config.graph?.hopDepth ?? 1;
     const bufferSize = config.inject?.bufferSize ?? 1;
@@ -39,12 +43,20 @@ export class MemoGrafter {
     this.llm = config.llm;
     this.embedder = config.embedder;
     this.store = new PostgresGraphStore(config.db.connectionString);
-    this.ingestPipeline = new IngestPipeline(this.store, config.llm, config.embedder, {
+    const ingestConfig = {
       windowSize,
-      threshold,
       topK,
       mode,
       minSegmentMessages,
+    };
+
+    this.ingestPipeline = new IngestPipeline(this.store, config.llm, config.embedder, {
+      ...ingestConfig,
+      ...(threshold !== undefined ? { threshold } : {}),
+      ...(driftSensitivity !== undefined ? { driftSensitivity } : {}),
+      ...(llmAmbiguityDetection !== undefined ? { llmAmbiguityDetection } : {}),
+      ...(reentryDetection !== undefined ? { reentryDetection } : {}),
+      ...(reentryThreshold !== undefined ? { reentryThreshold } : {}),
     });
     this.grafterPipeline = new GrafterPipeline(this.store, {
       hopDepth,

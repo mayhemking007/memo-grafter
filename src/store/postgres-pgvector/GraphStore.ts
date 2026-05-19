@@ -293,6 +293,23 @@ export class PostgresGraphStore implements GraphStore {
     `;
   }
 
+  async getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]> {
+    const rows = await this.sql<EdgeRow[]>`
+      SELECT e.*
+      FROM mg_topic_edges e
+      JOIN mg_topic_nodes n ON n.id = e.src_id
+      WHERE n.session_id = ${sessionId}
+        AND e.type = ${type}
+    `;
+
+    return rows.map((row) => ({
+      srcId: row.src_id,
+      dstId: row.dst_id,
+      weight: row.weight,
+      type: row.type,
+    }));
+  }
+
   async clearSession(sessionId: string): Promise<void> {
     const nodeRows = await this.sql<{ id: string }[]>`
       SELECT id FROM mg_topic_nodes

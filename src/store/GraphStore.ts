@@ -22,6 +22,7 @@ export interface GraphStore {
   saveSegment(segment: TopicSegment): Promise<TopicSegment>;
   saveNode(node: TopicNode): Promise<void>;
   saveEdge(edge: TopicEdge): Promise<void>;
+  getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]>;
   clearSession(sessionId: string): Promise<void>;
   clearSessionGraph(sessionId: string): Promise<void>;
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;

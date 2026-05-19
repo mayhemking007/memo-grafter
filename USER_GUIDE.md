@@ -146,6 +146,14 @@ export interface Message {
 
 A segment is a range of messages that belong to the same topic. MemoGrafter uses drift detection to decide where topic boundaries are.
 
+Drift detection combines several signals:
+
+- how far the current message is from the current topic embedding,
+- whether the current message is a sharp pivot from the previous user message,
+- whether the message contains structural phrases such as "by the way", "different topic", or "going back to",
+- short-message dampening so filler like "okay" or "got it" is less likely to create false boundaries,
+- optional LLM classification for ambiguous topic-shift scores.
+
 Example:
 
 ```text
@@ -174,7 +182,12 @@ Topic nodes are stored in `mg_topic_nodes`.
 
 ### Graph Edges
 
-Edges connect related topic nodes. They can represent temporal, semantic, or grafted relationships.
+Edges connect related topic nodes. They can represent temporal, semantic, grafted, or reentry relationships.
+
+- `temporal`: one topic followed another in the conversation.
+- `semantic`: two topics are similar by embedding search.
+- `grafted`: a topic was copied from another session or chatbot.
+- `reentry`: the conversation returned to an earlier topic after discussing something else.
 
 Edges are stored in `mg_topic_edges`.
 
@@ -374,8 +387,11 @@ const agent = new MemoGrafterAgent({
   drift: {
     mode: "intent",
     windowSize: 5,
-    threshold: 0.3,
+    driftSensitivity: "medium",
     minSegmentMessages: 3,
+    llmAmbiguityDetection: false,
+    reentryDetection: true,
+    reentryThreshold: 0.85,
   },
   graph: {
     topK: 5,
@@ -410,6 +426,12 @@ const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
 ```
 
 `GraphStore` is the public storage interface. `PostgresGraphStore` is the default PostgreSQL and pgvector implementation.
+
+Useful store inspection methods include:
+
+- `getNodesBySession(sessionId)`: read topic nodes for a session.
+- `getSegmentsBySession(sessionId)`: read topic segments for a session.
+- `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
 
 ### `llm`
 
@@ -455,8 +477,11 @@ embedder: new GeminiEmbedAdapter("gemini-embedding-001")
 drift: {
   mode: "intent",
   windowSize: 5,
-  threshold: 0.3,
+  driftSensitivity: "medium",
   minSegmentMessages: 3,
+  llmAmbiguityDetection: false,
+  reentryDetection: true,
+  reentryThreshold: 0.85,
 }
 ```
 
@@ -464,10 +489,38 @@ Controls topic boundary detection.
 
 - `mode`: `"intent"` or `"window"`.
 - `windowSize`: message window size for window mode.
-- `threshold`: drift sensitivity.
+- `driftSensitivity`: preferred sensitivity preset, one of `"low"`, `"medium"`, or `"high"`.
+- `threshold`: deprecated numeric threshold. It still works when `driftSensitivity` is not set, but MemoGrafter logs a one-time warning.
 - `minSegmentMessages`: minimum messages before a boundary.
+- `llmAmbiguityDetection`: optional LLM check for borderline topic shifts. Defaults to `false`.
+- `reentryDetection`: whether to link later topic returns back to earlier topic nodes. Defaults to `true`.
+- `reentryThreshold`: embedding similarity threshold for reentry detection. Defaults to `0.85`.
 
 Use `"intent"` for most chatbot memory demos. In intent mode, user messages drive topic shifts.
+
+Sensitivity presets resolve internally to numeric thresholds:
+
+- `"low"`: `0.25`
+- `"medium"`: `0.35`
+- `"high"`: `0.50`
+
+Use `"medium"` first. Boundaries are cut when a drift score exceeds the resolved threshold, so lower numeric thresholds split more readily and higher numeric thresholds require stronger evidence.
+
+If both `driftSensitivity` and `threshold` are provided, `driftSensitivity` wins.
+
+#### Reentry Detection
+
+Reentry detection handles conversations that leave a topic and later return to it:
+
+```text
+database choice -> authentication flow -> database connection pooling
+```
+
+Without reentry detection, the later database discussion is just another topic node. With reentry detection, MemoGrafter creates a `reentry` edge from the later database node back to the earlier database node.
+
+This helps graph traversal and memory injection recover earlier related context. A later question about connection pooling can still be connected to the original PostgreSQL/ACID discussion.
+
+Reentry edges are written between the current rebuilt topic nodes. They do not point at deleted nodes from previous ingestion passes.
 
 ### `graph`
 
@@ -702,8 +755,28 @@ For small demos, try:
 ```ts
 drift: {
   mode: "intent",
-  threshold: 0.3,
+  driftSensitivity: "medium",
   minSegmentMessages: 3,
+}
+```
+
+If segments are too coarse, try a lower resolved threshold:
+
+```ts
+drift: {
+  mode: "intent",
+  driftSensitivity: "low",
+  minSegmentMessages: 2,
+}
+```
+
+If segments are too fragmented, try a higher resolved threshold:
+
+```ts
+drift: {
+  mode: "intent",
+  driftSensitivity: "high",
+  minSegmentMessages: 4,
 }
 ```
 
@@ -766,6 +839,12 @@ Main exports:
 - `GraphStore`
 - `FleetAgentRecord`
 - public shared and fleet types
+
+Useful `GraphStore` inspection methods:
+
+- `getNodesBySession(sessionId)`
+- `getSegmentsBySession(sessionId)`
+- `getEdgesByType(sessionId, type)`
 
 Common `MemoGrafterAgent` methods:
 

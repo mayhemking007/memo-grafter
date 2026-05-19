@@ -24,7 +24,11 @@ const detector = new TopicDriftDetector({
   windowSize: 5,
   threshold: 0.3,
   minSegmentMessages: 3,
+  llmAmbiguityDetection: false,
+  reentryDetection: true,
+  reentryThreshold: 0.85,
 });
 
 assert.deepEqual(detector.detect(messages, embeddings), [4]);
-assert.equal(detector.detectSegments(messages, embeddings).length, 2);
+const { segments } = await detector.detectSegments(messages, embeddings);
+assert.equal(segments.length, 2);
