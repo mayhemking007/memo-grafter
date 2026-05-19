@@ -10,6 +10,7 @@ export { PostgresGraphStore } from "./store/index.js";
 export type {
   AbsorbFromAgentOptions,
   DriftMode,
+  DriftSensitivity,
   EmbedAdapter,
   ExtractedMemory,
   InjectionResult,

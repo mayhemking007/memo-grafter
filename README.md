@@ -28,7 +28,7 @@ chat messages
   -> optional memory grafting
 ```
 
-MemoGrafter stores conversation turns, detects topic shifts, summarizes segments into memory nodes, links related nodes, and injects relevant memory into future LLM calls. Memory grafting lets one chatbot or session copy selected memory from another.
+MemoGrafter stores conversation turns, detects topic shifts, summarizes segments into memory nodes, links related nodes, and injects relevant memory into future LLM calls. Drift detection uses embedding distance, sharp message pivots, short-message dampening, and structural phrases like "by the way" or "going back to" to split conversations into useful topic segments. Memory grafting lets one chatbot or session copy selected memory from another.
 
 ## Install
 
@@ -122,6 +122,28 @@ await writingBot.absorbFromAgent(travelBot, {
   limit: 3,
 });
 ```
+
+## Drift And Reentry
+
+Use `driftSensitivity` for developer-friendly topic segmentation:
+
+```ts
+const agent = new MemoGrafterAgent({
+  db: { connectionString: process.env.DATABASE_URL! },
+  llm,
+  embedder,
+  drift: {
+    mode: "intent",
+    driftSensitivity: "medium",
+    minSegmentMessages: 3,
+    reentryDetection: true,
+  },
+});
+```
+
+Sensitivity presets are `"low"`, `"medium"`, and `"high"`. The older numeric `threshold` option is still accepted for compatibility, but `driftSensitivity` is preferred.
+
+When a conversation returns to an earlier topic, MemoGrafter can create a `reentry` edge between the new topic node and the earlier related topic node. For example, a chat can move from database decisions to authentication, then back to database pooling; the later database segment is linked back to the original database topic instead of becoming an isolated duplicate.
 
 ## Learn More
 

@@ -4,6 +4,7 @@ export interface Message {
 }
 
 export type DriftMode = "window" | "intent";
+export type DriftSensitivity = "low" | "medium" | "high";
 
 export interface TopicNode {
   id: string;
@@ -115,8 +116,13 @@ export interface EmbedAdapter {
 export interface MemoGrafterDriftConfig {
   mode?: DriftMode;
   windowSize?: number;
+  driftSensitivity?: DriftSensitivity;
+  /** @deprecated Use driftSensitivity instead. */
   threshold?: number;
   minSegmentMessages?: number;
+  llmAmbiguityDetection?: boolean;
+  reentryDetection?: boolean;
+  reentryThreshold?: number;
 }
 
 export interface MemoGrafterGraphConfig {
