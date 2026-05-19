@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { MemoGrafter } from "./MemoGrafter.js";
 import { formatCompressedTopic } from "./prompts/historyCompressionPrompt.js";
+import { countApproxTokens } from "./utils/text/tokenCount.js";
 import type {
   AbsorbFromAgentOptions,
   InjectionResult,
@@ -87,7 +88,7 @@ export class MemoGrafterAgent {
   }
 
   private async buildHistory(): Promise<Message[]> {
-    const tokenCount = this.countTokens(this.history.map((message) => message.content).join("\n"));
+    const tokenCount = countApproxTokens(this.history.map((message) => message.content).join("\n"));
     const overflowThreshold = this.historyTokenBudget * 0.8;
 
     if (tokenCount < overflowThreshold) {
@@ -108,10 +109,6 @@ export class MemoGrafterAgent {
     const recentMessages = this.history.slice(lastCoveredIndex + 1);
 
     return [...summaryBlocks, ...recentMessages];
-  }
-
-  private countTokens(prompt: string): number {
-    return Math.ceil(prompt.length / 4);
   }
 
   close(): Promise<void> {

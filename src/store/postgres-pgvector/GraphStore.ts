@@ -3,7 +3,7 @@ import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
 import type { MemoryNode, MemoryNodeInsert, Message, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
-import { parseVector, toVectorLiteral } from "../../utils/vectorLiteral.js";
+import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
 
 interface TopicNodeRow {
   id: string;

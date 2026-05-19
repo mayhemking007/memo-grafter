@@ -1,5 +1,7 @@
 import type { DriftMode, LLMAdapter, Message, TopicNode } from "../types.js";
-import { cosineSimilarity } from "../utils/drift/cosineSimilarity.js";
+import { buildIntentShiftPrompt } from "../prompts/intentShiftPrompt.js";
+import { computeDriftScore } from "../utils/drift/driftScore.js";
+import { findReentryNodeId } from "../utils/drift/reentryMatch.js";
 import { avg } from "../utils/drift/vectorAvg.js";
 
 export interface DriftSegment {
@@ -21,30 +23,6 @@ interface DriftBoundary {
 }
 
 export class TopicDriftDetector {
-  private static readonly SHIFT_MARKERS = [
-    "by the way",
-    "changing topic",
-    "different question",
-    "actually",
-    "separately",
-    "on another note",
-    "forget that",
-    "never mind",
-    "different topic",
-    "unrelated question",
-  ];
-
-  private static readonly CONTINUATION_MARKERS = [
-    "also",
-    "additionally",
-    "following up",
-    "as i mentioned",
-    "going back to",
-    "continuing",
-    "furthermore",
-    "moreover",
-  ];
-
   constructor(
     private readonly config: {
       windowSize: number;
@@ -150,7 +128,13 @@ export class TopicDriftDetector {
         continue;
       }
 
-      let driftScore = this.computeDriftScore(embedding, message, avg(topicEmbeddings), previousUserEmbedding);
+      let driftScore = computeDriftScore(
+        embedding,
+        message,
+        avg(topicEmbeddings),
+        previousUserEmbedding,
+        this.config.threshold,
+      );
       driftScore = await this.resolveAmbiguousScore(driftScore, messages.slice(Math.max(0, index - 3), index), message);
 
       const segmentLength = index - segmentStart;
@@ -202,11 +186,12 @@ export class TopicDriftDetector {
 
       if (!currentMessage) continue;
 
-      let driftScore = this.computeDriftScore(
+      let driftScore = computeDriftScore(
         currentEmbedding,
         currentMessage,
         avg(previous.map((item) => item.embedding)),
         previousEmbedding,
+        this.config.threshold,
       );
       driftScore = await this.resolveAmbiguousScore(
         driftScore,
@@ -247,7 +232,13 @@ export class TopicDriftDetector {
         continue;
       }
 
-      const driftScore = this.computeDriftScore(embedding, message, avg(topicEmbeddings), previousUserEmbedding);
+      const driftScore = computeDriftScore(
+        embedding,
+        message,
+        avg(topicEmbeddings),
+        previousUserEmbedding,
+        this.config.threshold,
+      );
       const segmentLength = index - segmentStart;
 
       if (driftScore > this.config.threshold && segmentLength >= this.config.minSegmentMessages) {
@@ -289,11 +280,12 @@ export class TopicDriftDetector {
 
       if (!currentMessage) continue;
 
-      const driftScore = this.computeDriftScore(
+      const driftScore = computeDriftScore(
         currentEmbedding,
         currentMessage,
         avg(previous.map((item) => item.embedding)),
         previousEmbedding,
+        this.config.threshold,
       );
       const segmentLength = boundaryIndex - segmentStart;
 
@@ -305,29 +297,6 @@ export class TopicDriftDetector {
     }
 
     return boundaries;
-  }
-
-  private computeDriftScore(
-    currentEmbedding: number[],
-    currentMessage: Message,
-    centroidEmbedding: number[],
-    previousEmbedding: number[] | null,
-  ): number {
-    const tokenEstimate = currentMessage.content.trim().split(/\s+/).filter(Boolean).length;
-    const lengthWeight = Math.min(1, tokenEstimate / 20);
-    const centroidDrift = (1 - cosineSimilarity(centroidEmbedding, currentEmbedding)) * lengthWeight;
-    const pointDrift = previousEmbedding ? 1 - cosineSimilarity(previousEmbedding, currentEmbedding) : 0;
-    const sharpShiftBoost = pointDrift > this.config.threshold * 1.5 ? pointDrift * 0.3 : 0;
-    const structuralMultiplier = this.structuralMultiplier(currentMessage.content);
-
-    return (centroidDrift + sharpShiftBoost) * structuralMultiplier;
-  }
-
-  private structuralMultiplier(content: string): number {
-    const normalized = content.toLowerCase();
-    if (TopicDriftDetector.SHIFT_MARKERS.some((marker) => normalized.includes(marker))) return 1.3;
-    if (TopicDriftDetector.CONTINUATION_MARKERS.some((marker) => normalized.includes(marker))) return 0.7;
-    return 1;
   }
 
   private async resolveAmbiguousScore(
@@ -346,14 +315,7 @@ export class TopicDriftDetector {
   }
 
   private async classifyIntentShift(recentMessages: Message[], currentMessage: Message): Promise<boolean> {
-    const recent = recentMessages.map((message) => `[${message.role}]: ${message.content}`).join("\n");
-    const prompt = [
-      "You are a conversation topic classifier.",
-      "Given recent conversation messages and a new message, determine if the new message starts a new topic or continues the current one.",
-      `Recent messages: ${recent}`,
-      `New message: ${currentMessage.content}`,
-      "Reply with exactly one word: NEW_TOPIC or CONTINUATION",
-    ].join("\n");
+    const prompt = buildIntentShiftPrompt(recentMessages, currentMessage);
 
     try {
       const response = await this.llm?.complete([{ role: "user", content: prompt }]);
@@ -365,15 +327,6 @@ export class TopicDriftDetector {
 
   private maybeCheckReentry(embedding: number[], existingNodes: TopicNode[]): string | undefined {
     if (!this.config.reentryDetection || existingNodes.length === 0) return undefined;
-    return this.checkReentry(embedding, existingNodes) ?? undefined;
-  }
-
-  private checkReentry(embedding: number[], existingNodes: TopicNode[]): string | null {
-    for (const node of existingNodes) {
-      const similarity = cosineSimilarity(embedding, node.embedding);
-      if (similarity >= this.config.reentryThreshold) return node.id;
-    }
-
-    return null;
+    return findReentryNodeId(embedding, existingNodes, this.config.reentryThreshold) ?? undefined;
   }
 }

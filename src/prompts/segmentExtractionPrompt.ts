@@ -1,5 +1,5 @@
 import type { Message } from "../types.js";
-import { normalizeText } from "../utils/normalizeText.js";
+import { normalizeText } from "../utils/text/normalizeText.js";
 
 export function buildSegmentExtractionPrompt(messages: Message[]): string {
   const messageContent = messages

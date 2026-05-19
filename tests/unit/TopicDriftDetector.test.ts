@@ -3,6 +3,10 @@ import { IngestPipeline } from "../../src/pipeline/IngestPipeline.js";
 import { TopicDriftDetector } from "../../src/pipeline/TopicDriftDetector.js";
 import type { GraphStore } from "../../src/store/index.js";
 import type { EmbedAdapter, LLMAdapter, Message, TopicEdge, TopicNode, TopicSegment } from "../../src/types.js";
+import {
+  resetDriftThresholdWarningForTests,
+  resolveDriftThreshold,
+} from "../../src/utils/drift/driftThreshold.js";
 
 function makeEmbedding(primary: number, secondary = 0): number[] {
   const raw = [0, 0, 0, 0];
@@ -135,14 +139,10 @@ describe("TopicDriftDetector — multi-signal scoring", () => {
     expect(withMarker.segments).toHaveLength(1);
   });
 
-  it("driftSensitivity mapping", async () => {
-    const resolveThreshold = (IngestPipeline as unknown as {
-      resolveDriftThreshold(config: { driftSensitivity?: string; threshold?: number }): number;
-    }).resolveDriftThreshold;
-
-    expect(resolveThreshold({ driftSensitivity: "low" })).toBe(0.25);
-    expect(resolveThreshold({ driftSensitivity: "medium" })).toBe(0.35);
-    expect(resolveThreshold({ driftSensitivity: "high" })).toBe(0.5);
+  it("driftSensitivity mapping", () => {
+    expect(resolveDriftThreshold({ driftSensitivity: "low" })).toBe(0.25);
+    expect(resolveDriftThreshold({ driftSensitivity: "medium" })).toBe(0.35);
+    expect(resolveDriftThreshold({ driftSensitivity: "high" })).toBe(0.5);
   });
 
   it("reentry detection skipped when store not provided", async () => {
@@ -185,7 +185,7 @@ describe("TopicDriftDetector — multi-signal scoring", () => {
 
   it("deprecated threshold warning logged once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    (IngestPipeline as unknown as { thresholdWarningLogged: boolean }).thresholdWarningLogged = false;
+    resetDriftThresholdWarningForTests();
 
     const store = {} as GraphStore;
     const llm: LLMAdapter = { complete: vi.fn(async () => "CONTINUATION") };
