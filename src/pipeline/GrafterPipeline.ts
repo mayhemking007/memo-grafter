@@ -1,6 +1,7 @@
 import { buildMemoryInjectionPrompt, formatMemoryNode } from "../prompts/memoryInjectionPrompt.js";
 import type { GraphStore } from "../store/index.js";
 import type { InjectionResult, TopicNode } from "../types.js";
+import { countApproxTokens } from "../utils/text/tokenCount.js";
 
 export class GrafterPipeline {
   constructor(
@@ -25,12 +26,12 @@ export class GrafterPipeline {
     );
     const fittedNodes = [...nodes];
     let systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
-    let tokenCount = this.countTokens(systemPrompt);
+    let tokenCount = countApproxTokens(systemPrompt);
 
     while (tokenCount > this.config.tokenBudget && fittedNodes.length > 0) {
       fittedNodes.pop();
       systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
-      tokenCount = this.countTokens(systemPrompt);
+      tokenCount = countApproxTokens(systemPrompt);
     }
 
     return {
@@ -55,7 +56,4 @@ export class GrafterPipeline {
     return buildMemoryInjectionPrompt(blocks);
   }
 
-  private countTokens(prompt: string): number {
-    return Math.ceil(prompt.length / 4);
-  }
 }
