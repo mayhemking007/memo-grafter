@@ -98,6 +98,19 @@ export interface InjectionResult {
   tokenCount: number;
 }
 
+export interface RetrieverConfig {
+  limit?: number;
+  minSimilarity?: number;
+  tokenBudget?: number;
+}
+
+export interface RetrievalResult {
+  facts: (MemoryNode & { similarity: number })[];
+  nodes: TopicNode[];
+  systemPrompt: string;
+  tokenCount: number;
+}
+
 export interface AbsorbFromAgentOptions {
   topicIds?: string[];
   prompt?: string;
