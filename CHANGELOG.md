@@ -11,3 +11,22 @@ All notable changes to this project will be documented here.
 ### Changed
 
 - Refactored prompts into dedicated prompts folder structure
+
+## [0.2.0] - 2026-05-20
+
+### Added
+
+- Gemini adapter support
+- Atomic fact extraction and storage as a second memory graph layer
+- RetrieverPipeline for semantic fact retrieval and recall workflows
+
+### Changed
+
+- Redesigned drift detection with multi-signal scoring and adaptive thresholds
+- Introduced pluggable `GraphStore` interface for future database/vector store extensibility
+
+### Internal
+
+- Refactored reusable domain utilities out of pipeline classes
+- Removed mid-session graph injection from invoke pipeline
+- Added Vitest unit testing setup
