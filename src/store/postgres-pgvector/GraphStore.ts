@@ -340,6 +340,17 @@ export class PostgresGraphStore implements GraphStore {
     await this.clearSession(sessionId);
   }
 
+  async getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null> {
+    const rows = await this.sql<TopicNodeRow[]>`
+      SELECT * FROM mg_topic_nodes
+      WHERE id = ${topicNodeId}
+        ${sessionId ? this.sql`AND session_id = ${sessionId}` : this.sql``}
+      LIMIT 1
+    `;
+
+    return rows[0] ? this.rowToNode(rows[0]) : null;
+  }
+
   async getNodeBySegment(segmentId: string): Promise<TopicNode | null> {
     const rows = await this.sql<TopicNodeRow[]>`
       SELECT * FROM mg_topic_nodes

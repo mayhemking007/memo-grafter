@@ -25,6 +25,7 @@ export interface GraphStore {
   getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]>;
   clearSession(sessionId: string): Promise<void>;
   clearSessionGraph(sessionId: string): Promise<void>;
+  getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null>;
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;
   getNodesBySession(sessionId: string): Promise<TopicNode[]>;
   getSegmentsBySession(sessionId: string): Promise<TopicSegment[]>;
