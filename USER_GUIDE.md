@@ -180,6 +180,21 @@ Important fields:
 
 Topic nodes are stored in `mg_topic_nodes`.
 
+### Memory Nodes
+
+Memory nodes are typed atomic memories attached to topic nodes. They are the units used by targeted recall.
+
+Important fields:
+
+- `memoryType`: `"fact"`, `"insight"`, `"question"`, `"task"`, or `"reference"`.
+- `subject`, `predicate`, `value`: the structured memory triple.
+- `confidence`: confidence score from `0` to `1`.
+- `topicNodeId`: parent topic node ID.
+- `decayed`: whether the memory is stale.
+- `supersededBy`: newer memory ID when this memory has been replaced.
+
+Memory nodes are stored in `mg_memory_nodes`.
+
 ### Graph Edges
 
 Edges connect related topic nodes. They can represent temporal, semantic, grafted, or reentry relationships.
@@ -244,6 +259,40 @@ On every call, `invoke()`:
 6. Ingests the updated conversation into the memory graph.
 
 On the first turn there may be no memory to inject. Later turns can use memory created from earlier turns.
+
+### Targeted Recall
+
+Use `recall()` when you want to retrieve structured memory by meaning without asking the LLM to produce an answer.
+
+```ts
+const result = await agent.recall("deployment config", {
+  limit: 8,
+  minSimilarity: 0.55,
+  tokenBudget: 1000,
+});
+
+console.log(result.facts);
+console.log(result.nodes);
+console.log(result.systemPrompt);
+console.log(result.tokenCount);
+```
+
+`recall()` returns a `RetrievalResult`:
+
+- `facts`: matching memory nodes with a `similarity` score.
+- `nodes`: parent topic nodes for the included facts.
+- `systemPrompt`: a formatted memory block that can be passed to an LLM if you choose.
+- `tokenCount`: approximate token count for the included fact blocks.
+
+Options:
+
+- `limit`: max memory nodes to fetch before filtering. Defaults to `10`.
+- `minSimilarity`: cosine similarity floor. Defaults to `0.6`.
+- `tokenBudget`: max approximate tokens for included fact blocks. Defaults to `1200`.
+
+`recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, does not mutate local history, and does not inject the result automatically. Your application decides whether to display the memories, add `result.systemPrompt` to a model call, or ignore the result.
+
+If you call `recall()` immediately after `invoke()`, it only sees memory that has already been ingested into storage. In queue mode, wait for your background worker to finish before expecting newly created memories to appear.
 
 ## Inspecting Memory
 
@@ -430,6 +479,7 @@ const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
 Useful store inspection methods include:
 
 - `getNodesBySession(sessionId)`: read topic nodes for a session.
+- `getTopicNode(topicNodeId, sessionId?)`: read one topic node by ID.
 - `getSegmentsBySession(sessionId)`: read topic segments for a session.
 - `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
 
@@ -798,6 +848,24 @@ await targetAgent.absorbFromAgent(sourceAgent, {
 });
 ```
 
+### Recall Returns Zero Facts
+
+`recall()` searches atomic memory nodes, not raw chat messages. If it returns no facts:
+
+- Make sure ingestion has completed.
+- Confirm memory nodes exist for the session.
+- Try a lower `minSimilarity`.
+- Try a more specific query that uses the same vocabulary as the original conversation.
+
+Example:
+
+```ts
+const result = await agent.recall("Japan travel preferences", {
+  minSimilarity: 0.3,
+  limit: 5,
+});
+```
+
 ### Redis Warnings
 
 Redis is only required when you pass `queue` config. If you do not need background ingestion, remove the `queue` section.
@@ -838,10 +906,13 @@ Main exports:
 - `PostgresGraphStore`
 - `GraphStore`
 - `FleetAgentRecord`
+- `RetrievalResult`
+- `RetrieverConfig`
 - public shared and fleet types
 
 Useful `GraphStore` inspection methods:
 
+- `getTopicNode(topicNodeId, sessionId?)`
 - `getNodesBySession(sessionId)`
 - `getSegmentsBySession(sessionId)`
 - `getEdgesByType(sessionId, type)`
@@ -854,6 +925,7 @@ Common `MemoGrafterAgent` methods:
 - `getSessionId()`: read the current session ID.
 - `getActiveNodes()`: inspect topic nodes.
 - `getActiveSegments()`: inspect topic segments.
+- `recall(query, options?)`: retrieve structured memory by semantic query.
 - `graft(topicIds?)`: preview memory injection.
 - `ingestGraftedNodes(nodes)`: copy provided nodes into this agent.
 - `absorbFromAgent(sourceAgent, options)`: select and copy memory from another agent.

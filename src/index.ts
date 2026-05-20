@@ -26,6 +26,8 @@ export type {
   MemoGrafterInjectConfig,
   MemoGrafterQueueConfig,
   Message,
+  RetrievalResult,
+  RetrieverConfig,
   SegmentExtractionResult,
   TopicEdge,
   TopicNode,
