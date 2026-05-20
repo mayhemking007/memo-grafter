@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MemoGrafter } from "./MemoGrafter.js";
+import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 import { formatCompressedTopic } from "./prompts/historyCompressionPrompt.js";
 import { countApproxTokens } from "./utils/text/tokenCount.js";
 import type {
@@ -7,6 +8,8 @@ import type {
   InjectionResult,
   MemoGrafterConfig,
   Message,
+  RetrievalResult,
+  RetrieverConfig,
   TopicNode,
   TopicSegment,
 } from "./types.js";
@@ -70,6 +73,11 @@ export class MemoGrafterAgent {
 
   ingestGraftedNodes(nodes: TopicNode[]): Promise<TopicNode[]> {
     return this.core.ingestGraftedNodes(nodes, this.sessionId);
+  }
+
+  async recall(query: string, options: RetrieverConfig = {}): Promise<RetrievalResult> {
+    const pipeline = new RetrieverPipeline(this.core.store, this.core.embedder, options);
+    return pipeline.run(query, this.getSessionId());
   }
 
   async absorbFromAgent(sourceAgent: MemoGrafterAgent, options: AbsorbFromAgentOptions = {}): Promise<TopicNode[]> {

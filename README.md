@@ -68,6 +68,14 @@ console.log(await agent.invoke("I am planning a Japan trip."));
 console.log(await agent.invoke("I like quiet towns, bookstores, and local cafes."));
 console.log(await agent.invoke("What do you remember about my travel preferences?"));
 
+const recall = await agent.recall("travel preferences", {
+  limit: 5,
+  minSimilarity: 0.6,
+});
+
+console.log(recall.facts);
+console.log(recall.systemPrompt);
+
 await agent.close();
 ```
 
@@ -111,6 +119,25 @@ const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
 ```
 
 The interface boundary keeps the Postgres implementation isolated and gives future storage backends a clear contract to implement.
+
+## Targeted Recall
+
+Use `agent.recall()` when you want structured memory back without asking the LLM to answer yet. It searches atomic memory nodes by meaning, filters stale memories, groups them with their parent topic summaries, and returns a prompt block you can inspect or pass to your own model call.
+
+```ts
+const result = await agent.recall("deployment config", {
+  limit: 8,
+  minSimilarity: 0.55,
+  tokenBudget: 1000,
+});
+
+console.log(result.facts);
+console.log(result.nodes);
+console.log(result.systemPrompt);
+console.log(result.tokenCount);
+```
+
+`recall()` is side-effect free. It does not call `invoke()`, does not mutate chat history, and does not inject anything automatically.
 
 ## Memory Grafting
 
