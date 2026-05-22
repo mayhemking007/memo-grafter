@@ -9,7 +9,7 @@ MemoGrafter is a server-side TypeScript memory framework for chatbot application
 The main runtime layers are:
 
 - `MemoGrafterAgent`: the high-level conversational wrapper used by most applications.
-- `MemoGrafter`: the internal coordinator that wires storage, pipelines, adapters, and optional queueing.
+- `MemoGrafter`: the internal coordinator that wires storage, pipelines, adapters, optional queueing, and optional recall caching.
 - Pipeline classes: ingestion, drift detection, segment processing, retrieval, and graft prompt assembly.
 - `GraphStore`: the persistence boundary for messages, segments, topic nodes, memory nodes, edges, and fleet metadata.
 - `PostgresGraphStore`: the current built-in `GraphStore` implementation, backed by PostgreSQL and `pgvector`.
@@ -149,6 +149,8 @@ Targeted recall is handled by `RetrieverPipeline`, which is used by `MemoGrafter
 
 The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, groups facts by parent topic node, ranks those topic blocks by best fact similarity, and formats a token-budgeted system prompt.
 
+When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, and a short hash of the embedding: `mg:recall:${sessionId}:${limit}:${minSimilarity}:${embeddingHash}`. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
+
 `MemoGrafterAgent.buildHistory()` also uses this path when the local chat history crosses 80% of the configured history token budget. It builds a query from the last six message contents, calls `recall()` with `{ limit: 5, minSimilarity: 0.65 }`, injects the returned `systemPrompt` as a single pinned system message, and keeps only the last `inject.recentWindowSize` raw messages. If recall fails, the agent logs a warning and falls back to those recent raw messages without failing the foreground `invoke()` call.
 
 This read-side path is separate from grafting:
@@ -189,4 +191,5 @@ During session rebuilds, non-grafted topic edges for that session are regenerate
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
 - **Token-budgeted reads:** overflowed chat history uses targeted recall plus a recent raw window, while graft prompt assembly respects token budgets by trimming context.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
+- **Optional recall cache:** recall can cache raw memory search results in Redis for a short bounded TTL without caching final prompt assembly.
 - **Grafting is explicit:** memory transfer copies selected topic nodes into a target session and records graph edges instead of silently mixing sessions.
