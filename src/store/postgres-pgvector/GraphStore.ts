@@ -310,6 +310,26 @@ export class PostgresGraphStore implements GraphStore {
     }));
   }
 
+  async getEdgesBySession(sessionId: string): Promise<TopicEdge[]> {
+    const nodes = await this.getNodesBySession(sessionId);
+    if (nodes.length === 0) return [];
+
+    const nodeIds = nodes.map((node) => node.id);
+    const rows = await this.sql<EdgeRow[]>`
+      SELECT src_id, dst_id, weight, type
+      FROM mg_topic_edges
+      WHERE src_id = ANY(${this.sql.array(nodeIds)})
+         OR dst_id = ANY(${this.sql.array(nodeIds)})
+    `;
+
+    return rows.map((row) => ({
+      srcId: row.src_id,
+      dstId: row.dst_id,
+      weight: row.weight,
+      type: row.type,
+    }));
+  }
+
   async clearSession(sessionId: string): Promise<void> {
     const nodeRows = await this.sql<{ id: string }[]>`
       SELECT id FROM mg_topic_nodes
@@ -446,6 +466,16 @@ export class PostgresGraphStore implements GraphStore {
       WHERE topic_node_id = ${topicNodeId}
         AND decayed = false
         AND superseded_by IS NULL
+      ORDER BY created_at ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async getMemoriesBySession(sessionId: string): Promise<MemoryNode[]> {
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT * FROM mg_memory_nodes
+      WHERE session_id = ${sessionId}
       ORDER BY created_at ASC
     `;
 

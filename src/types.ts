@@ -98,6 +98,14 @@ export interface InjectionResult {
   tokenCount: number;
 }
 
+export interface GraphSnapshot {
+  sessionId: string;
+  nodes: TopicNode[];
+  edges: TopicEdge[];
+  memories: MemoryNode[];
+  capturedAt: string;
+}
+
 export interface RetrieverConfig {
   limit?: number;
   minSimilarity?: number;

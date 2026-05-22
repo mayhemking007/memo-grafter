@@ -4,6 +4,7 @@ import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 import { countApproxTokens } from "./utils/text/tokenCount.js";
 import type {
   AbsorbFromAgentOptions,
+  GraphSnapshot,
   InjectionResult,
   MemoGrafterConfig,
   Message,
@@ -65,6 +66,21 @@ export class MemoGrafterAgent {
     await this.pendingIngest;
     const { segments } = await this.core.getTopics(this.sessionId);
     return segments;
+  }
+
+  async getGraphSnapshot(): Promise<GraphSnapshot> {
+    await this.pendingIngest;
+    const { nodes } = await this.core.getTopics(this.sessionId);
+    const edges = await this.core.store.getEdgesBySession(this.sessionId);
+    const memories = await this.core.store.getMemoriesBySession(this.sessionId);
+
+    return {
+      sessionId: this.sessionId,
+      nodes,
+      edges,
+      memories,
+      capturedAt: new Date().toISOString(),
+    };
   }
 
   async graft(topicIds?: string[]): Promise<InjectionResult> {
