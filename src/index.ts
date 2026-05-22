@@ -6,6 +6,9 @@ export { WorkerAgent } from "./fleet/WorkerAgent.js";
 export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
 export { GeminiEmbedAdapter, GeminiLLMAdapter } from "./adapters/GeminiAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
+export { GrafterPipeline } from "./pipeline/GrafterPipeline.js";
+export { IngestPipeline } from "./pipeline/IngestPipeline.js";
+export { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 export { PostgresGraphStore } from "./store/index.js";
 export type {
   AbsorbFromAgentOptions,

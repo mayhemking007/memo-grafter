@@ -11,9 +11,13 @@ export class IngestPipeline {
   private readonly segmentProcessor: SegmentProcessor;
 
   constructor(
+    /** @internal */
     private readonly store: GraphStore,
+    /** @internal */
     llm: LLMAdapter,
+    /** @internal */
     private readonly embedder: EmbedAdapter,
+    /** @internal */
     private readonly config: {
       windowSize: number;
       threshold?: number;
