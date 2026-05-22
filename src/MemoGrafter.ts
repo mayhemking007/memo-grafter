@@ -1,3 +1,4 @@
+import { Redis } from "ioredis";
 import { GrafterPipeline } from "./pipeline/GrafterPipeline.js";
 import { IngestPipeline } from "./pipeline/IngestPipeline.js";
 import { IngestQueue } from "./queue/IngestQueue.js";
@@ -20,6 +21,7 @@ export class MemoGrafter {
   readonly llm: LLMAdapter;
   readonly embedder: EmbedAdapter;
   readonly store: GraphStore;
+  readonly recallCache: Redis | null;
   private readonly ingestPipeline: IngestPipeline;
   private readonly grafterPipeline: GrafterPipeline;
   private readonly ingestQueue: IngestQueue | null;
@@ -43,6 +45,15 @@ export class MemoGrafter {
     this.llm = config.llm;
     this.embedder = config.embedder;
     this.store = new PostgresGraphStore(config.db.connectionString);
+    this.recallCache = config.cache
+      ? new Redis(config.cache.connectionString, {
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 1,
+      })
+      : null;
+    this.recallCache?.on("error", (error: Error) => {
+      console.warn("MemoGrafter recall cache Redis warning:", error.message);
+    });
     const ingestConfig = {
       windowSize,
       topK,
@@ -138,6 +149,10 @@ export class MemoGrafter {
 
   async close(): Promise<void> {
     await this.ingestQueue?.close();
+    await this.recallCache?.quit().catch((error: unknown) => {
+      console.warn("MemoGrafter recall cache close warning:", error);
+      this.recallCache?.disconnect();
+    });
     await this.store.close();
   }
 

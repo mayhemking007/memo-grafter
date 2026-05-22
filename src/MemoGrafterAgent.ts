@@ -20,6 +20,7 @@ export class MemoGrafterAgent {
   private readonly baseSystemPrompt: string;
   private readonly historyTokenBudget: number;
   private readonly recentWindowSize: number;
+  private readonly cacheConfig: MemoGrafterConfig["cache"];
   private pendingIngest: Promise<void> = Promise.resolve();
 
   constructor(config: MemoGrafterConfig) {
@@ -27,6 +28,7 @@ export class MemoGrafterAgent {
     this.baseSystemPrompt = config.systemPrompt ?? "";
     this.historyTokenBudget = config.inject?.tokenBudget ?? 4000;
     this.recentWindowSize = config.inject?.recentWindowSize ?? 20;
+    this.cacheConfig = config.cache;
   }
 
   initialize(): Promise<void> {
@@ -77,7 +79,20 @@ export class MemoGrafterAgent {
   }
 
   async recall(query: string, options: RetrieverConfig = {}): Promise<RetrievalResult> {
-    const pipeline = new RetrieverPipeline(this.core.store, this.core.embedder, options);
+    const cacheConfig = options.cache ?? (this.cacheConfig
+      ? {
+        ...(this.cacheConfig.ttlSeconds !== undefined ? { ttlSeconds: this.cacheConfig.ttlSeconds } : {}),
+      }
+      : undefined);
+    const pipeline = new RetrieverPipeline(
+      this.core.store,
+      this.core.embedder,
+      {
+        ...options,
+        ...(cacheConfig !== undefined ? { cache: cacheConfig } : {}),
+      },
+      this.core.recallCache,
+    );
     return pipeline.run(query, this.getSessionId());
   }
 

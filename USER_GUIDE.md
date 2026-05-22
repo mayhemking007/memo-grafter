@@ -18,7 +18,7 @@ The most important idea is memory grafting. A chatbot can build useful memory du
 - An OpenAI API key only if using the included OpenAI adapters.
 - An Anthropic API key only if using the included Anthropic LLM adapter.
 - A Gemini API key only if using the included Gemini adapters.
-- Redis only if enabling queue mode.
+- Redis only if enabling queue mode or the optional recall cache.
 
 MemoGrafter is server-side only. Do not run it in browser code.
 
@@ -65,7 +65,7 @@ REDIS_URL=redis://localhost:6379
 
 `GEMINI_API_KEY` is required only when using `GeminiLLMAdapter` or `GeminiEmbedAdapter`.
 
-`REDIS_URL` is optional and only needed when you pass `queue` config.
+`REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
 
 Enable `pgvector` in PostgreSQL:
 
@@ -271,6 +271,9 @@ const result = await agent.recall("deployment config", {
   limit: 8,
   minSimilarity: 0.55,
   tokenBudget: 1000,
+  cache: {
+    ttlSeconds: 90,
+  },
 });
 
 console.log(result.facts);
@@ -291,6 +294,7 @@ Options:
 - `limit`: max memory nodes to fetch before filtering. Defaults to `10`.
 - `minSimilarity`: cosine similarity floor. Defaults to `0.6`.
 - `tokenBudget`: max approximate tokens for included fact blocks. Defaults to `1200`.
+- `cache.ttlSeconds`: per-call recall cache TTL override when `MemoGrafterConfig.cache` is enabled. Values are clamped to 60-120 seconds.
 
 `recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result.
 
@@ -455,6 +459,10 @@ const agent = new MemoGrafterAgent({
     tokenBudget: 1500,
     recentWindowSize: 20,
   },
+  cache: {
+    connectionString: process.env.REDIS_URL!,
+    ttlSeconds: 90,
+  },
 });
 ```
 
@@ -608,6 +616,22 @@ Controls memory prompt sizing and the raw history window kept when chat history 
 - `recentWindowSize`: number of newest raw chat messages to keep after the pinned recall block during overflow. Defaults to `20`.
 
 When `MemoGrafterAgent` detects overflow, it builds a recall query from the last six message contents, calls recall with `{ limit: 5, minSimilarity: 0.65 }`, prepends the returned memory prompt as a system message, and keeps the last `recentWindowSize` raw messages. If recall fails, it uses only that recent raw window.
+
+### `cache`
+
+```ts
+cache: {
+  connectionString: process.env.REDIS_URL!,
+  ttlSeconds: 90,
+}
+```
+
+Enables an opt-in Redis cache for targeted recall. MemoGrafter creates one shared Redis client and uses it to cache only the raw `searchMemories()` result. It does not cache final prompts, filtered blocks, or `RetrievalResult`, so different `tokenBudget` values still assemble fresh output.
+
+- `connectionString`: Redis URL.
+- `ttlSeconds`: cache TTL in seconds. Defaults to `90` and is clamped between `60` and `120`.
+
+Recall cache keys include the session ID, `limit`, `minSimilarity`, and a deterministic hash of the query embedding. Redis failures are logged as warnings and recall falls back to PostgreSQL search. The cache is disabled unless this section is present.
 
 ## Queue Mode
 
@@ -877,7 +901,7 @@ const result = await agent.recall("Japan travel preferences", {
 
 ### Redis Warnings
 
-Redis is only required when you pass `queue` config. If you do not need background ingestion, remove the `queue` section.
+Redis is only required when you pass `queue` or `cache` config. If you do not need background ingestion or recall caching, remove those sections.
 
 ### Browser Runtime Error
 
@@ -893,6 +917,7 @@ Practical notes:
 - Use PostgreSQL with `pgvector` enabled.
 - Tune `tokenBudget` to control prompt size and cost.
 - Use queue mode if ingestion becomes slow.
+- Use the optional recall cache for long sessions with repeated or automatic overflow recall.
 - Store your own user/session mapping outside MemoGrafter.
 - Call `close()` during graceful shutdown.
 - Do not expose database credentials or OpenAI keys to browser code.

@@ -102,6 +102,9 @@ export interface RetrieverConfig {
   limit?: number;
   minSimilarity?: number;
   tokenBudget?: number;
+  cache?: {
+    ttlSeconds?: number;
+  };
 }
 
 export interface RetrievalResult {
@@ -157,6 +160,11 @@ export interface MemoGrafterQueueConfig {
   removeOnFail?: boolean | number;
 }
 
+export interface MemoGrafterCacheConfig {
+  connectionString: string;
+  ttlSeconds?: number;
+}
+
 export interface MemoGrafterConfig {
   db: { connectionString: string };
   llm: LLMAdapter;
@@ -166,4 +174,5 @@ export interface MemoGrafterConfig {
   graph?: MemoGrafterGraphConfig;
   inject?: MemoGrafterInjectConfig;
   queue?: MemoGrafterQueueConfig;
+  cache?: MemoGrafterCacheConfig;
 }

@@ -9,6 +9,7 @@ import type {
   MemoGrafterConfig,
   Message,
   RetrievalResult,
+  RetrieverConfig,
   TopicNode,
 } from "../../src/types.js";
 
@@ -18,6 +19,10 @@ type SearchMemoriesCall = {
   sessionId: string;
   limit: number;
   minSimilarity: number;
+};
+type PipelineThis = {
+  config: RetrieverConfig;
+  cacheRedis: unknown;
 };
 
 class FakeLLMAdapter implements LLMAdapter {
@@ -176,6 +181,62 @@ describe("MemoGrafterAgent.recall", () => {
       sessionId: agent.getSessionId(),
       limit: 5,
       minSimilarity: 0.7,
+    });
+  });
+
+  it("threads agent cache config into RetrieverPipeline", async () => {
+    const agent = createAgent();
+    const fakeRedis = { get: async () => null };
+    (agent as unknown as { cacheConfig: MemoGrafterConfig["cache"] }).cacheConfig = {
+      connectionString: "redis://localhost:6379",
+      ttlSeconds: 70,
+    };
+    (agent as unknown as { core: { recallCache: unknown } }).core.recallCache = fakeRedis;
+    let observedConfig: RetrieverConfig | undefined;
+    let observedCacheRedis: unknown;
+    RetrieverPipeline.prototype.run = async function run(this: PipelineThis): Promise<RetrievalResult> {
+      observedConfig = this.config;
+      observedCacheRedis = this.cacheRedis;
+      return {
+        facts: [],
+        nodes: [],
+        systemPrompt: "empty",
+        tokenCount: 0,
+      };
+    };
+
+    await agent.recall("deployment", { limit: 4 });
+
+    expect(observedConfig).toEqual({
+      limit: 4,
+      cache: { ttlSeconds: 70 },
+    });
+    expect(observedCacheRedis).toBe(fakeRedis);
+  });
+
+  it("lets per-call cache options override agent cache defaults", async () => {
+    const agent = createAgent();
+    (agent as unknown as { cacheConfig: MemoGrafterConfig["cache"] }).cacheConfig = {
+      connectionString: "redis://localhost:6379",
+      ttlSeconds: 70,
+    };
+    let observedConfig: RetrieverConfig | undefined;
+    RetrieverPipeline.prototype.run = async function run(this: PipelineThis): Promise<RetrievalResult> {
+      observedConfig = this.config;
+      return {
+        facts: [],
+        nodes: [],
+        systemPrompt: "empty",
+        tokenCount: 0,
+      };
+    };
+
+    await agent.recall("deployment", {
+      cache: { ttlSeconds: 110 },
+    });
+
+    expect(observedConfig).toEqual({
+      cache: { ttlSeconds: 110 },
     });
   });
 

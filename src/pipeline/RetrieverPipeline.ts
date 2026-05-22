@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { Redis } from "ioredis";
 import {
   buildFactRetrievalPrompt,
   formatFactBlock,
@@ -25,6 +27,7 @@ export class RetrieverPipeline {
     private store: GraphStore,
     private embedder: EmbedAdapter,
     private config: RetrieverConfig,
+    private cacheRedis: Redis | null = null,
   ) {}
 
   async run(query: string, sessionId: string): Promise<RetrievalResult> {
@@ -33,12 +36,7 @@ export class RetrieverPipeline {
     const tokenBudget = this.config.tokenBudget ?? 1200;
 
     const embedding = await this.embedder.embed(query);
-    const searchedFacts = await this.store.searchMemories(
-      embedding,
-      sessionId,
-      limit,
-      minSimilarity,
-    );
+    const searchedFacts = await this.searchMemories(embedding, sessionId, limit, minSimilarity);
     const activeFacts = searchedFacts.filter((fact) =>
       fact.decayed === false && fact.supersededBy == null
     );
@@ -79,6 +77,56 @@ export class RetrieverPipeline {
       systemPrompt: buildFactRetrievalPrompt(includedBlocks),
       tokenCount,
     };
+  }
+
+  private async searchMemories(
+    embedding: number[],
+    sessionId: string,
+    limit: number,
+    minSimilarity: number,
+  ): Promise<ScoredMemoryNode[]> {
+    if (!this.config.cache || !this.cacheRedis) {
+      return this.store.searchMemories(
+        embedding,
+        sessionId,
+        limit,
+        minSimilarity,
+      );
+    }
+
+    const ttl = Math.min(Math.max(this.config.cache.ttlSeconds ?? 90, 60), 120);
+    const cacheKey = `mg:recall:${sessionId}:${limit}:${minSimilarity}:${this.hashEmbedding(embedding)}`;
+
+    try {
+      const hit = await this.cacheRedis.get(cacheKey);
+
+      if (hit) {
+        return JSON.parse(hit) as ScoredMemoryNode[];
+      }
+
+      const searchedFacts = await this.store.searchMemories(
+        embedding,
+        sessionId,
+        limit,
+        minSimilarity,
+      );
+      await this.cacheRedis.setex(cacheKey, ttl, JSON.stringify(searchedFacts));
+
+      return searchedFacts;
+    } catch (error: unknown) {
+      console.warn("MemoGrafter recall cache warning:", error);
+      return this.store.searchMemories(
+        embedding,
+        sessionId,
+        limit,
+        minSimilarity,
+      );
+    }
+  }
+
+  private hashEmbedding(embedding: number[]): string {
+    const str = embedding.map((value) => value.toFixed(6)).join(",");
+    return createHash("sha1").update(str).digest("hex").slice(0, 16);
   }
 
   private async buildBlocks(
