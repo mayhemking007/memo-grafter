@@ -135,12 +135,12 @@ A message is one user or assistant turn:
 
 ```ts
 export interface Message {
-  role: "user" | "assistant";
+  role: "system" | "user" | "assistant";
   content: string;
 }
 ```
 
-`MemoGrafterAgent` keeps an in-memory history for the current session and stores messages in PostgreSQL during ingestion.
+`MemoGrafterAgent` keeps an in-memory user/assistant history for the current session and stores messages in PostgreSQL during ingestion. System messages can be added to LLM calls internally when memory recall is pinned into an overflowing context window.
 
 ### Segments
 
@@ -252,13 +252,15 @@ await agent.close();
 On every call, `invoke()`:
 
 1. Adds the user message to local history.
-2. Loads existing topic nodes for the session.
-3. Builds a memory injection prompt from those nodes.
-4. Sends history plus memory prompt to the LLM.
+2. Builds the message list for the LLM.
+3. If history is under the configured budget, sends the raw local history.
+4. If history crosses the overflow threshold, calls targeted recall using recent conversation context, prepends the recall result as one pinned system message, and keeps only the recent raw message window.
 5. Adds the assistant response to history.
-6. Ingests the updated conversation into the memory graph.
+6. Queues ingestion of the updated conversation into the memory graph.
 
-On the first turn there may be no memory to inject. Later turns can use memory created from earlier turns.
+The overflow threshold is 80% of `inject.tokenBudget`. Recall failures are logged as warnings and fall back to the recent raw message window, so a retrieval or embedder problem should not crash the foreground chatbot turn.
+
+On the first turn there may be no memory to recall. Later turns can use memory created from earlier turns once ingestion has completed.
 
 ### Targeted Recall
 
@@ -290,7 +292,9 @@ Options:
 - `minSimilarity`: cosine similarity floor. Defaults to `0.6`.
 - `tokenBudget`: max approximate tokens for included fact blocks. Defaults to `1200`.
 
-`recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, does not mutate local history, and does not inject the result automatically. Your application decides whether to display the memories, add `result.systemPrompt` to a model call, or ignore the result.
+`recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result.
+
+`MemoGrafterAgent.invoke()` also calls `recall()` internally when local history overflows the configured history budget. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window.
 
 If you call `recall()` immediately after `invoke()`, it only sees memory that has already been ingested into storage. In queue mode, wait for your background worker to finish before expecting newly created memories to appear.
 
@@ -449,6 +453,7 @@ const agent = new MemoGrafterAgent({
   inject: {
     bufferSize: 4,
     tokenBudget: 1500,
+    recentWindowSize: 20,
   },
 });
 ```
@@ -592,13 +597,17 @@ Controls graph retrieval and traversal.
 inject: {
   bufferSize: 4,
   tokenBudget: 1500,
+  recentWindowSize: 20,
 }
 ```
 
-Controls how much memory is inserted into the prompt.
+Controls memory prompt sizing and the raw history window kept when chat history overflows.
 
 - `bufferSize`: nearby raw messages to include.
-- `tokenBudget`: approximate memory prompt budget.
+- `tokenBudget`: approximate token budget used for memory prompts and agent history overflow checks. `MemoGrafterAgent` starts overflow handling at 80% of this value.
+- `recentWindowSize`: number of newest raw chat messages to keep after the pinned recall block during overflow. Defaults to `20`.
+
+When `MemoGrafterAgent` detects overflow, it builds a recall query from the last six message contents, calls recall with `{ limit: 5, minSimilarity: 0.65 }`, prepends the returned memory prompt as a system message, and keeps the last `recentWindowSize` raw messages. If recall fails, it uses only that recent raw window.
 
 ## Queue Mode
 

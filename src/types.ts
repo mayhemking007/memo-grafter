@@ -146,6 +146,8 @@ export interface MemoGrafterGraphConfig {
 export interface MemoGrafterInjectConfig {
   bufferSize?: number;
   tokenBudget?: number;
+  /** Default 20. How many raw messages to keep after the pinned recall block. */
+  recentWindowSize?: number;
 }
 
 export interface MemoGrafterQueueConfig {
