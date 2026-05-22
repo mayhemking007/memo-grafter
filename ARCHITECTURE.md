@@ -39,7 +39,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 6. The full history snapshot is queued for background ingestion.
 7. Ingestion persists messages, rebuilds topic state for the session, and updates graph edges.
 
-This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `graft()`, and `close()`, wait for pending ingestion to finish.
+This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
 
 ## Ingestion Flow
 
@@ -71,6 +71,7 @@ Its responsibilities include:
 - calling the configured LLM with raw history while under budget, or a pinned recall memory block plus recent raw turns on overflow;
 - scheduling ingestion after assistant responses;
 - exposing active topic nodes and segments for the current session;
+- exposing a read-only graph snapshot for visualization and inspection;
 - providing high-level grafting and absorbing helpers;
 - providing targeted recall through `RetrieverPipeline`;
 - waiting for pending ingestion before reads that depend on memory state.
@@ -135,6 +136,7 @@ The interface covers:
 - message buffer persistence;
 - segment, topic node, and topic edge persistence;
 - memory node insertion, memory lookup, and memory edge construction;
+- session snapshot reads for topic edges and memory nodes;
 - vector similarity queries for topic and memory retrieval;
 - graph neighbourhood traversal;
 - grafted node absorption;
@@ -142,6 +144,8 @@ The interface covers:
 - session graph rebuilding.
 
 The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_fleets`, and `mg_fleet_agents`.
+
+`MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, active topic nodes, topic edges that touch the session's nodes, all memory nodes for the session, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include decayed and superseded memory rows so callers such as visualizers can decide what to show.
 
 ## Recall Path
 
@@ -156,6 +160,7 @@ When `cache` config is provided, `MemoGrafter` owns one shared Redis client for 
 This read-side path is separate from grafting:
 
 - recall returns atomic memories and parent topics for a query;
+- graph snapshots return raw graph inspection data for a session;
 - grafting assembles broader topic context from selected topic nodes and their neighbours;
 - absorbing copies selected topic nodes into another session.
 

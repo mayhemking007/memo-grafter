@@ -304,6 +304,28 @@ If you call `recall()` immediately after `invoke()`, it only sees memory that ha
 
 ## Inspecting Memory
 
+Read a complete session graph snapshot:
+
+```ts
+const snapshot = await agent.getGraphSnapshot();
+
+console.log(snapshot.sessionId);
+console.log(snapshot.nodes);
+console.log(snapshot.edges);
+console.log(snapshot.memories);
+console.log(snapshot.capturedAt);
+```
+
+`getGraphSnapshot()` returns a `GraphSnapshot`:
+
+- `sessionId`: current agent session ID.
+- `nodes`: active topic nodes for the session.
+- `edges`: topic edges where either endpoint belongs to a session topic node.
+- `memories`: all memory nodes for the session, including decayed or superseded rows.
+- `capturedAt`: ISO timestamp for when the snapshot was produced.
+
+This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
+
 Read active topic nodes:
 
 ```ts
@@ -495,6 +517,8 @@ Useful store inspection methods include:
 - `getTopicNode(topicNodeId, sessionId?)`: read one topic node by ID.
 - `getSegmentsBySession(sessionId)`: read topic segments for a session.
 - `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
+- `getEdgesBySession(sessionId)`: read all topic edges where either endpoint belongs to the session's topic nodes.
+- `getMemoriesBySession(sessionId)`: read all memory nodes for a session, including decayed and superseded rows.
 
 ### `llm`
 
@@ -1007,6 +1031,8 @@ Useful `GraphStore` inspection methods:
 - `getNodesBySession(sessionId)`
 - `getSegmentsBySession(sessionId)`
 - `getEdgesByType(sessionId, type)`
+- `getEdgesBySession(sessionId)`
+- `getMemoriesBySession(sessionId)`
 
 Common `MemoGrafterAgent` methods:
 
@@ -1014,6 +1040,7 @@ Common `MemoGrafterAgent` methods:
 - `invoke(message)`: send a user message and receive an assistant response.
 - `getHistory()`: read local chat history.
 - `getSessionId()`: read the current session ID.
+- `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.
 - `getActiveNodes()`: inspect topic nodes.
 - `getActiveSegments()`: inspect topic segments.
 - `recall(query, options?)`: retrieve structured memory by semantic query.
