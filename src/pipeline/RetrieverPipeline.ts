@@ -24,9 +24,12 @@ interface RetrievedBlock {
 
 export class RetrieverPipeline {
   constructor(
+    /** @internal */
     private store: GraphStore,
+    /** @internal */
     private embedder: EmbedAdapter,
     private config: RetrieverConfig,
+    /** @internal */
     private cacheRedis: Redis | null = null,
   ) {}
 

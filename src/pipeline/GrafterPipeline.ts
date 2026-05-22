@@ -5,7 +5,9 @@ import { countApproxTokens } from "../utils/text/tokenCount.js";
 
 export class GrafterPipeline {
   constructor(
+    /** @internal */
     private store: GraphStore,
+    /** @internal */
     private config: {
       hopDepth: number;
       bufferSize: number;

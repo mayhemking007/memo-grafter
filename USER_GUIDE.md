@@ -728,6 +728,60 @@ class MyGraphStore implements GraphStore {
 
 Future storage implementations can use the same interface without changing pipeline or fleet code. For example, a SQLite plus vector-database implementation would implement `GraphStore` while preserving the same behavior expected by ingestion, grafting, and fleet APIs.
 
+## Using Pipelines Directly
+
+`MemoGrafterAgent` is the recommended starting point, but the underlying
+pipeline classes are also exported for developers who want to build custom
+agent loops or integrate MemoGrafter memory primitives into an existing
+orchestration framework.
+
+Pipeline classes are exported for composability. Their constructors and
+internal behavior are not covered by semver stability guarantees until v1.0.
+Breaking changes to pipeline internals may occur in minor versions.
+
+Available pipeline exports:
+
+- `IngestPipeline`: segments messages, builds topic nodes, extracts memory nodes, and writes graph edges.
+- `RetrieverPipeline`: embeds a query, searches memory nodes, and returns a structured `RetrievalResult`.
+- `GrafterPipeline`: traverses the topic graph and assembles a token-budget-fitted system prompt.
+
+Example using `RetrieverPipeline` directly:
+
+```ts
+import {
+  PostgresGraphStore,
+  RetrieverPipeline,
+  OpenAIEmbedAdapter,
+} from "memo-grafter";
+
+const store = new PostgresGraphStore(process.env.DATABASE_URL!);
+await store.initialize();
+
+const embedder = new OpenAIEmbedAdapter("text-embedding-3-small");
+
+const retriever = new RetrieverPipeline(store, embedder, {
+  limit: 8,
+  minSimilarity: 0.55,
+  tokenBudget: 1000,
+});
+
+const result = await retriever.run(
+  "deployment config and Kubernetes namespace",
+  sessionId,
+);
+
+console.log(result.facts);
+console.log(result.systemPrompt);
+
+await store.close();
+```
+
+When using pipelines directly you are responsible for managing the store
+connection lifecycle. Call `store.close()` during graceful shutdown.
+
+`MemoGrafterAgent` remains the batteries-included default. Existing code
+that uses `MemoGrafterAgent` does not need to change.
+
 ## Fleet API
 
 Fleets let you group color-scoped worker chatbots and use a conductor to graft memory across workers.
@@ -938,6 +992,9 @@ Main exports:
 - `OpenAILLMAdapter`
 - `OpenAIEmbedAdapter`
 - `PostgresGraphStore`
+- `GrafterPipeline`
+- `IngestPipeline`
+- `RetrieverPipeline`
 - `GraphStore`
 - `FleetAgentRecord`
 - `RetrievalResult`
