@@ -16,6 +16,7 @@ export type {
   DriftSensitivity,
   EmbedAdapter,
   ExtractedMemory,
+  GraphSnapshot,
   InjectionResult,
   LLMAdapter,
   MemoryEdge,
