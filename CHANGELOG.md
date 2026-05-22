@@ -41,3 +41,9 @@ All notable changes to this project will be documented here.
 ### Changed
 
 - Integrated `recall()` into `buildHistory()` for context window overflow handling
+
+## [0.2.2] - 2026-05-22
+
+### Added
+
+- Added `getGraphSnapshot()` method for retrieving a snapshot of the current session graph, including memory state and graph structure
