@@ -1,4 +1,5 @@
 import type { Message } from "../../types.js";
+import { countApproxTokens } from "../text/tokenCount.js";
 import { cosineSimilarity } from "./cosineSimilarity.js";
 import { structuralMultiplier } from "./driftMarkers.js";
 
@@ -9,7 +10,7 @@ export function computeDriftScore(
   previousEmbedding: number[] | null,
   threshold: number,
 ): number {
-  const tokenEstimate = currentMessage.content.trim().split(/\s+/).filter(Boolean).length;
+  const tokenEstimate = countApproxTokens(currentMessage.content);
   const lengthWeight = Math.min(1, tokenEstimate / 20);
   const centroidDrift = (1 - cosineSimilarity(centroidEmbedding, currentEmbedding)) * lengthWeight;
   const pointDrift = previousEmbedding ? 1 - cosineSimilarity(previousEmbedding, currentEmbedding) : 0;

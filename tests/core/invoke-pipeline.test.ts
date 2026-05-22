@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { MemoGrafterAgent, type EmbedAdapter, type LLMAdapter, type Message, type MemoGrafterConfig, type TopicNode, type TopicSegment } from "../../src/index.js";
-import { formatCompressedTopic } from "../../src/prompts/historyCompressionPrompt.js";
+import { MemoGrafterAgent, type EmbedAdapter, type LLMAdapter, type Message, type MemoGrafterConfig, type RetrievalResult, type RetrieverConfig, type TopicNode, type TopicSegment } from "../../src/index.js";
 
 console.log("invoke() pipeline - no mid-session graph injection");
 
@@ -127,25 +126,81 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
     inject: {
       bufferSize: 1,
       tokenBudget: 20,
+      recentWindowSize: 2,
     },
   });
   const core = patchCore(agent);
-  const node = createNode();
-  core.getTopics = async () => ({
-    nodes: [node],
-    segments: [createSegment({ endIndex: 1 })],
-  });
+  let getTopicsCallCount = 0;
+  core.getTopics = async () => {
+    getTopicsCallCount += 1;
+    return { nodes: [], segments: [] };
+  };
+  const recallCalls: Array<{ query: string; options: RetrieverConfig }> = [];
+  (agent as unknown as { recall: (query: string, options?: RetrieverConfig) => Promise<RetrievalResult> }).recall = async (query, options = {}) => {
+    recallCalls.push({ query, options });
+    return {
+      facts: [],
+      nodes: [],
+      systemPrompt: "retrieved memory",
+      tokenCount: 4,
+    };
+  };
   const history = historyOf(agent);
+  history.push({ role: "user", content: "Earlier setup." });
   history.push({ role: "user", content: "a".repeat(80) });
   history.push({ role: "assistant", content: "b".repeat(80) });
   history.push({ role: "user", content: "Recent user question." });
 
   const messages = await buildHistory(agent);
 
+  assert.equal(getTopicsCallCount, 0);
+  assert.deepEqual(recallCalls, [
+    {
+      query: [
+        "Earlier setup.",
+        "a".repeat(80),
+        "b".repeat(80),
+        "Recent user question.",
+      ].join("\n"),
+      options: { limit: 5, minSimilarity: 0.65 },
+    },
+  ]);
   assert.deepEqual(messages, [
-    { role: "system", content: formatCompressedTopic(node) },
+    { role: "system", content: "retrieved memory" },
+    { role: "assistant", content: "b".repeat(80) },
     { role: "user", content: "Recent user question." },
   ]);
+}
+
+{
+  const agent = createAgent({
+    inject: {
+      bufferSize: 1,
+      tokenBudget: 20,
+      recentWindowSize: 2,
+    },
+  });
+  patchCore(agent);
+  const warn = console.warn;
+  console.warn = () => undefined;
+  (agent as unknown as { recall: (query: string, options?: RetrieverConfig) => Promise<RetrievalResult> }).recall = async () => {
+    throw new Error("recall failed");
+  };
+  const history = historyOf(agent);
+  history.push({ role: "user", content: "a".repeat(80) });
+  history.push({ role: "assistant", content: "b".repeat(80) });
+  history.push({ role: "user", content: "Recent user question." });
+
+  try {
+    const messages = await buildHistory(agent);
+
+    assert.deepEqual(messages, [
+      { role: "assistant", content: "b".repeat(80) },
+      { role: "user", content: "Recent user question." },
+    ]);
+  } finally {
+    console.warn = warn;
+  }
 }
 
 {

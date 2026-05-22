@@ -1,11 +1,11 @@
 import type { Message } from "../../types.js";
+import { isShortMessage } from "../text/tokenCount.js";
 import { contentTerms } from "../text/terms.js";
 import { hasReentryCue } from "./reentryCues.js";
 import type { ReentrySegmentRange } from "./types.js";
 
 export function isMeaningfulReentryMessage(message: Message): boolean {
-  const tokenEstimate = message.content.trim().split(/\s+/).filter(Boolean).length;
-  return tokenEstimate >= 5 || hasReentryCue(message.content);
+  return !isShortMessage(message.content, 5) || hasReentryCue(message.content);
 }
 
 export function segmentHasReentryCue(segment: ReentrySegmentRange, messages: Message[]): boolean {

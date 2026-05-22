@@ -33,7 +33,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 
 1. The user message is appended to the agent's in-memory session history.
 2. The agent builds the message history for the LLM call.
-3. If the current history is near the injection token budget, older covered history can be represented as compressed topic summaries.
+3. If the current history is near the history token budget, the agent recalls relevant structured memory from the recent conversation and prepends it as one pinned system message.
 4. The configured `LLMAdapter` produces the assistant response.
 5. The assistant response is appended to session history.
 6. The full history snapshot is queued for background ingestion.
@@ -68,7 +68,7 @@ The current ingestion model rebuilds the session's non-grafted topic graph from 
 Its responsibilities include:
 
 - accepting user messages through `invoke()`;
-- calling the configured LLM with either raw recent history or compressed topic summaries plus recent uncovered turns;
+- calling the configured LLM with raw history while under budget, or a pinned recall memory block plus recent raw turns on overflow;
 - scheduling ingestion after assistant responses;
 - exposing active topic nodes and segments for the current session;
 - providing high-level grafting and absorbing helpers;
@@ -149,6 +149,8 @@ Targeted recall is handled by `RetrieverPipeline`, which is used by `MemoGrafter
 
 The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, groups facts by parent topic node, ranks those topic blocks by best fact similarity, and formats a token-budgeted system prompt.
 
+`MemoGrafterAgent.buildHistory()` also uses this path when the local chat history crosses 80% of the configured history token budget. It builds a query from the last six message contents, calls `recall()` with `{ limit: 5, minSimilarity: 0.65 }`, injects the returned `systemPrompt` as a single pinned system message, and keeps only the last `inject.recentWindowSize` raw messages. If recall fails, the agent logs a warning and falls back to those recent raw messages without failing the foreground `invoke()` call.
+
 This read-side path is separate from grafting:
 
 - recall returns atomic memories and parent topics for a query;
@@ -185,6 +187,6 @@ During session rebuilds, non-grafted topic edges for that session are regenerate
 - **Storage boundary:** core logic depends on `GraphStore`; PostgreSQL with `pgvector` is the current implementation, not a requirement baked into pipeline code.
 - **Session graph rebuilds:** ingestion rebuilds session topic state from the latest message snapshot to keep segment and edge state coherent.
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
-- **Token-budgeted reads:** both history compression and graft prompt assembly respect token budgets by summarizing or trimming context.
+- **Token-budgeted reads:** overflowed chat history uses targeted recall plus a recent raw window, while graft prompt assembly respects token budgets by trimming context.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
 - **Grafting is explicit:** memory transfer copies selected topic nodes into a target session and records graph edges instead of silently mixing sessions.

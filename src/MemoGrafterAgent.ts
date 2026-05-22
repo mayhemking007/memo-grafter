@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MemoGrafter } from "./MemoGrafter.js";
 import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
-import { formatCompressedTopic } from "./prompts/historyCompressionPrompt.js";
 import { countApproxTokens } from "./utils/text/tokenCount.js";
 import type {
   AbsorbFromAgentOptions,
@@ -20,12 +19,14 @@ export class MemoGrafterAgent {
   private readonly history: Message[] = [];
   private readonly baseSystemPrompt: string;
   private readonly historyTokenBudget: number;
+  private readonly recentWindowSize: number;
   private pendingIngest: Promise<void> = Promise.resolve();
 
   constructor(config: MemoGrafterConfig) {
     this.core = new MemoGrafter(config);
     this.baseSystemPrompt = config.systemPrompt ?? "";
     this.historyTokenBudget = config.inject?.tokenBudget ?? 4000;
+    this.recentWindowSize = config.inject?.recentWindowSize ?? 20;
   }
 
   initialize(): Promise<void> {
@@ -103,20 +104,24 @@ export class MemoGrafterAgent {
       return this.history;
     }
 
-    const { nodes, segments } = await this.core.getTopics(this.sessionId);
+    const recentMessages = this.history.slice(-this.recentWindowSize);
+    const recentContext = this.history
+      .slice(-6)
+      .map((message) => message.content)
+      .join("\n");
 
-    if (nodes.length === 0 || segments.length === 0) {
-      return this.history;
+    try {
+      const result = await this.recall(recentContext, { limit: 5, minSimilarity: 0.65 });
+      const pinnedMessage: Message = {
+        role: "system",
+        content: result.systemPrompt,
+      };
+
+      return [pinnedMessage, ...recentMessages];
+    } catch (error: unknown) {
+      console.warn("MemoGrafter recall warning:", error);
+      return recentMessages;
     }
-
-    const lastCoveredIndex = Math.max(...segments.map((segment) => segment.endIndex));
-    const summaryBlocks: Message[] = nodes.map((node) => ({
-      role: "system",
-      content: formatCompressedTopic(node),
-    }));
-    const recentMessages = this.history.slice(lastCoveredIndex + 1);
-
-    return [...summaryBlocks, ...recentMessages];
   }
 
   close(): Promise<void> {
