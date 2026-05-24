@@ -1,0 +1,20 @@
+{
+  "name": "basic-chat-memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-agent MemoGrafter memory persistence demo.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.2"
+  }
+}

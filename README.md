@@ -66,7 +66,8 @@ await agent.close();
 
 - [USER_GUIDE.md](https://github.com/mayhemking007/memo-grafter/blob/main/USER_GUIDE.md) covers setup, configuration, adapters, queue mode, fleet APIs, examples, and troubleshooting.
 - [ARCHITECTURE.md](https://github.com/mayhemking007/memo-grafter/blob/main/ARCHITECTURE.md) explains the current high-level implementation.
-- `examples` contains runnable demo.
+- `examples/basic-chat-memory` is the simplest runnable single-agent memory demo.
+- `examples/chatbot-memory-demo` shows the larger two-agent grafting workflow.
 
 ## License
 
