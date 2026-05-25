@@ -860,15 +860,29 @@ await conductor.graftByPrompt("invoice credit policy", technical, {
 });
 ```
 
-## Example Project
+## Example Projects
 
-This repository includes a runnable example:
+This repository includes two runnable examples:
 
 ```text
+examples/basic-chat-memory
 examples/chatbot-memory-demo
 ```
 
-Run it:
+Run the single-agent memory demo:
+
+```bash
+cd D:/cohort/projects/project-memoGrafter
+npm install
+npm run build
+
+cd examples/basic-chat-memory
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Run the two-agent grafting demo:
 
 ```bash
 cd D:/cohort/projects/project-memoGrafter
