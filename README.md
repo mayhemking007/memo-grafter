@@ -7,6 +7,11 @@ MemoGrafter helps chatbot applications remember conversations without stuffing e
 
 It is a memory framework, not an autonomous agent runtime. It does not run tools, schedule work, or decide goals for an agent.
 
+## Playground
+
+- Try the [MemoGrafter Playground](https://mgplayground-green.vercel.app/).
+- View the playground demo repo at [mayhemking007/mg-demo](https://github.com/mayhemking007/mg-demo).
+
 ## What It Is For
 
 - Chatbots that need long-running memory.
