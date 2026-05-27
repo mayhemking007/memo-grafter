@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { MemoGrafterAgent, type EmbedAdapter, type LLMAdapter, type Message, type MemoGrafterConfig, type RetrievalResult, type RetrieverConfig, type TopicNode, type TopicSegment } from "../../src/index.js";
 
-console.log("invoke() pipeline - no mid-session graph injection");
+console.log("invoke() pipeline - proactive memory recall");
 
 type TestCore = {
   getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }>;
   inject(sessionId: string, topicIds: string[]): Promise<{ systemPrompt: string; nodes: TopicNode[]; tokenCount: number }>;
   enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
+  store: {
+    getSessionNodeCount(sessionId: string): Promise<number>;
+  };
 };
 
 class CapturingLLMAdapter implements LLMAdapter {
@@ -50,10 +53,6 @@ function historyOf(agent: MemoGrafterAgent): Message[] {
   return (agent as unknown as { history: Message[] }).history;
 }
 
-function buildHistory(agent: MemoGrafterAgent): Promise<Message[]> {
-  return (agent as unknown as { buildHistory: () => Promise<Message[]> }).buildHistory();
-}
-
 function createNode(overrides: Partial<TopicNode> = {}): TopicNode {
   return {
     id: "node-1",
@@ -90,9 +89,14 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
   const agent = createAgent();
   const core = patchCore(agent);
   let getTopicsCallCount = 0;
+  let getSessionNodeCountCallCount = 0;
   core.getTopics = async () => {
     getTopicsCallCount += 1;
     return { nodes: [], segments: [] };
+  };
+  core.store.getSessionNodeCount = async () => {
+    getSessionNodeCountCallCount += 1;
+    return 0;
   };
 
   await agent.invoke("Plan a Japan trip.");
@@ -100,33 +104,36 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
   await agent.invoke("Now discuss the budget.");
 
   assert.equal(getTopicsCallCount, 0);
+  assert.equal(getSessionNodeCountCallCount, 3);
   assert.equal(agent.getHistory().length, 6);
 }
 
 {
-  const agent = createAgent();
+  const llm = new CapturingLLMAdapter();
+  const agent = createAgent({ llm });
   const core = patchCore(agent);
   let getTopicsCallCount = 0;
   core.getTopics = async () => {
     getTopicsCallCount += 1;
     return { nodes: [], segments: [] };
   };
-  const history = historyOf(agent);
-  history.push({ role: "user", content: "Short question." });
-  history.push({ role: "assistant", content: "Short answer." });
+  core.store.getSessionNodeCount = async () => 0;
 
-  const messages = await buildHistory(agent);
+  await agent.invoke("Short question.");
 
-  assert.equal(messages, history);
+  assert.deepEqual(llm.calls[0]?.messages, [{ role: "user", content: "Short question." }]);
   assert.equal(getTopicsCallCount, 0);
 }
 
 {
+  const llm = new CapturingLLMAdapter();
   const agent = createAgent({
+    llm,
     inject: {
       bufferSize: 1,
-      tokenBudget: 20,
       recentWindowSize: 2,
+      recallLimit: 4,
+      recallMinSimilarity: 0.7,
     },
   });
   const core = patchCore(agent);
@@ -135,11 +142,33 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
     getTopicsCallCount += 1;
     return { nodes: [], segments: [] };
   };
+  core.store.getSessionNodeCount = async () => 1;
   const recallCalls: Array<{ query: string; options: RetrieverConfig }> = [];
   (agent as unknown as { recall: (query: string, options?: RetrieverConfig) => Promise<RetrievalResult> }).recall = async (query, options = {}) => {
     recallCalls.push({ query, options });
     return {
-      facts: [],
+      facts: [{
+        id: "memory-1",
+        segmentId: "segment-1",
+        topicNodeId: "node-1",
+        agentId: null,
+        sessionId: "session-1",
+        memoryType: "fact",
+        sourceType: "conversation",
+        subject: "traveler",
+        predicate: "prefers",
+        value: "quiet towns",
+        confidence: 1,
+        embedding: [],
+        sourceUrl: null,
+        sourceTitle: null,
+        supersededBy: null,
+        decayed: false,
+        agentColor: null,
+        fleetId: null,
+        createdAt: new Date(0),
+        similarity: 0.9,
+      }],
       nodes: [],
       systemPrompt: "retrieved memory",
       tokenCount: 4,
@@ -151,36 +180,34 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
   history.push({ role: "assistant", content: "b".repeat(80) });
   history.push({ role: "user", content: "Recent user question." });
 
-  const messages = await buildHistory(agent);
+  await agent.invoke("New question.");
 
   assert.equal(getTopicsCallCount, 0);
   assert.deepEqual(recallCalls, [
     {
-      query: [
-        "Earlier setup.",
-        "a".repeat(80),
-        "b".repeat(80),
-        "Recent user question.",
-      ].join("\n"),
-      options: { limit: 5, minSimilarity: 0.65 },
+      query: "New question.",
+      options: { limit: 4, minSimilarity: 0.7 },
     },
   ]);
-  assert.deepEqual(messages, [
+  assert.deepEqual(llm.calls[0]?.messages, [
     { role: "system", content: "retrieved memory" },
     { role: "assistant", content: "b".repeat(80) },
     { role: "user", content: "Recent user question." },
+    { role: "user", content: "New question." },
   ]);
 }
 
 {
+  const llm = new CapturingLLMAdapter();
   const agent = createAgent({
+    llm,
     inject: {
       bufferSize: 1,
-      tokenBudget: 20,
       recentWindowSize: 2,
     },
   });
-  patchCore(agent);
+  const core = patchCore(agent);
+  core.store.getSessionNodeCount = async () => 1;
   const warn = console.warn;
   console.warn = () => undefined;
   (agent as unknown as { recall: (query: string, options?: RetrieverConfig) => Promise<RetrievalResult> }).recall = async () => {
@@ -192,11 +219,12 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
   history.push({ role: "user", content: "Recent user question." });
 
   try {
-    const messages = await buildHistory(agent);
+    await agent.invoke("New question.");
 
-    assert.deepEqual(messages, [
+    assert.deepEqual(llm.calls[0]?.messages, [
       { role: "assistant", content: "b".repeat(80) },
       { role: "user", content: "Recent user question." },
+      { role: "user", content: "New question." },
     ]);
   } finally {
     console.warn = warn;
@@ -231,7 +259,8 @@ function createSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
     llm,
     systemPrompt: "You are a test bot.",
   });
-  patchCore(agent);
+  const core = patchCore(agent);
+  core.store.getSessionNodeCount = async () => 0;
 
   await agent.invoke("Hello.");
 

@@ -29,6 +29,7 @@ export interface GraphStore {
   clearSessionGraph(sessionId: string): Promise<void>;
   getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null>;
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;
+  getSessionNodeCount(sessionId: string): Promise<number>;
   getNodesBySession(sessionId: string): Promise<TopicNode[]>;
   getSegmentsBySession(sessionId: string): Promise<TopicSegment[]>;
   insertMemories(nodes: MemoryNodeInsert[]): Promise<void>;

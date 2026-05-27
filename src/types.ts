@@ -159,6 +159,10 @@ export interface MemoGrafterInjectConfig {
   tokenBudget?: number;
   /** Default 20. How many raw messages to keep after the pinned recall block. */
   recentWindowSize?: number;
+  /** Default 6. How many recalled facts to inject before each invoke. */
+  recallLimit?: number;
+  /** Default 0.55. Minimum similarity for recalled facts injected before each invoke. */
+  recallMinSimilarity?: number;
 }
 
 export interface MemoGrafterQueueConfig {

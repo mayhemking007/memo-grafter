@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MemoGrafter } from "./MemoGrafter.js";
 import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
-import { countApproxTokens } from "./utils/text/tokenCount.js";
 import type {
   AbsorbFromAgentOptions,
   GraphSnapshot,
@@ -19,16 +18,18 @@ export class MemoGrafterAgent {
   private readonly sessionId = randomUUID();
   private readonly history: Message[] = [];
   private readonly baseSystemPrompt: string;
-  private readonly historyTokenBudget: number;
   private readonly recentWindowSize: number;
+  private readonly recallLimit: number;
+  private readonly recallMinSimilarity: number;
   private readonly cacheConfig: MemoGrafterConfig["cache"];
   private pendingIngest: Promise<void> = Promise.resolve();
 
   constructor(config: MemoGrafterConfig) {
     this.core = new MemoGrafter(config);
     this.baseSystemPrompt = config.systemPrompt ?? "";
-    this.historyTokenBudget = config.inject?.tokenBudget ?? 4000;
     this.recentWindowSize = config.inject?.recentWindowSize ?? 20;
+    this.recallLimit = config.inject?.recallLimit ?? 6;
+    this.recallMinSimilarity = config.inject?.recallMinSimilarity ?? 0.55;
     this.cacheConfig = config.cache;
   }
 
@@ -37,11 +38,19 @@ export class MemoGrafterAgent {
   }
 
   async invoke(userMessage: string): Promise<string> {
-    this.history.push({ role: "user", content: userMessage });
-
-    const messages = await this.buildHistory();
+    const memoryContext = await this._buildMemoryContext(userMessage, {
+      limit: this.recallLimit,
+      minSimilarity: this.recallMinSimilarity,
+    });
+    const recentMessages = this.history.slice(-this.recentWindowSize);
+    const messages: Message[] = [
+      ...(memoryContext ? [{ role: "system" as const, content: memoryContext }] : []),
+      ...recentMessages,
+      { role: "user", content: userMessage },
+    ];
     const response = await this.core.llm.complete(messages, this.baseSystemPrompt);
 
+    this.history.push({ role: "user", content: userMessage });
     this.history.push({ role: "assistant", content: response });
     this.enqueueBackgroundIngest();
 
@@ -127,31 +136,25 @@ export class MemoGrafterAgent {
       });
   }
 
-  private async buildHistory(): Promise<Message[]> {
-    const tokenCount = countApproxTokens(this.history.map((message) => message.content).join("\n"));
-    const overflowThreshold = this.historyTokenBudget * 0.8;
-
-    if (tokenCount < overflowThreshold) {
-      return this.history;
-    }
-
-    const recentMessages = this.history.slice(-this.recentWindowSize);
-    const recentContext = this.history
-      .slice(-6)
-      .map((message) => message.content)
-      .join("\n");
-
+  private async _buildMemoryContext(
+    query: string,
+    options: { limit: number; minSimilarity: number },
+  ): Promise<string | null> {
     try {
-      const result = await this.recall(recentContext, { limit: 5, minSimilarity: 0.65 });
-      const pinnedMessage: Message = {
-        role: "system",
-        content: result.systemPrompt,
-      };
+      const nodeCount = await this.core.store.getSessionNodeCount(this.sessionId);
+      if (nodeCount === 0) return null;
 
-      return [pinnedMessage, ...recentMessages];
+      const result = await this.recall(query, {
+        limit: options.limit,
+        minSimilarity: options.minSimilarity,
+      });
+
+      if (result.facts.length === 0) return null;
+
+      return result.systemPrompt;
     } catch (error: unknown) {
       console.warn("MemoGrafter recall warning:", error);
-      return recentMessages;
+      return null;
     }
   }
 

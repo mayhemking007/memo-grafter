@@ -381,6 +381,16 @@ export class PostgresGraphStore implements GraphStore {
     return rows[0] ? this.rowToNode(rows[0]) : null;
   }
 
+  async getSessionNodeCount(sessionId: string): Promise<number> {
+    const rows = await this.sql<{ count: number }[]>`
+      SELECT COUNT(*)::int AS count
+      FROM mg_topic_nodes
+      WHERE session_id = ${sessionId}
+    `;
+
+    return rows[0]?.count ?? 0;
+  }
+
   async getNodesBySession(sessionId: string): Promise<TopicNode[]> {
     const rows = await this.sql<TopicNodeRow[]>`
       SELECT * FROM mg_topic_nodes
@@ -770,6 +780,7 @@ export class PostgresGraphStore implements GraphStore {
       };
 
       await this.saveNode(copy);
+      await this.copyActiveMemoriesForAbsorbedNode(node, copy, targetSessionId);
       await this.saveEdge({
         srcId: copy.id,
         dstId: node.id,
@@ -780,6 +791,57 @@ export class PostgresGraphStore implements GraphStore {
     }
 
     return copiedNodes;
+  }
+
+  private async copyActiveMemoriesForAbsorbedNode(
+    sourceNode: TopicNode,
+    copiedNode: TopicNode,
+    targetSessionId: string,
+  ): Promise<void> {
+    await this.sql`
+      INSERT INTO mg_memory_nodes (
+        segment_id,
+        topic_node_id,
+        agent_id,
+        session_id,
+        memory_type,
+        source_type,
+        subject,
+        predicate,
+        value,
+        confidence,
+        embedding,
+        source_url,
+        source_title,
+        superseded_by,
+        decayed,
+        agent_color,
+        fleet_id
+      )
+      SELECT
+        ${copiedNode.segmentId},
+        ${copiedNode.id},
+        ${copiedNode.agentId},
+        ${targetSessionId},
+        memory_type,
+        source_type,
+        subject,
+        predicate,
+        value,
+        confidence,
+        embedding,
+        source_url,
+        source_title,
+        NULL,
+        FALSE,
+        ${copiedNode.agentColor},
+        ${copiedNode.fleetId}
+      FROM mg_memory_nodes
+      WHERE topic_node_id = ${sourceNode.id}
+        AND session_id = ${sourceNode.sessionId}
+        AND decayed = FALSE
+        AND superseded_by IS NULL
+    `;
   }
 
   async rebuildEdgesForSession(sessionId: string, semanticTopK = 5, semanticThreshold = 0.6): Promise<void> {
