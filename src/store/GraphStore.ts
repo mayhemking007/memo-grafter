@@ -2,6 +2,7 @@ import type {
   MemoryNode,
   MemoryNodeInsert,
   Message,
+  SessionIngestState,
   TopicEdge,
   TopicNode,
   TopicSegment,
@@ -19,6 +20,10 @@ export interface GraphStore {
   initialize(): Promise<void>;
   saveMessages(sessionId: string, messages: Message[]): Promise<void>;
   saveMessagesAt(sessionId: string, startIndex: number, messages: Message[]): Promise<void>;
+  getMessagesBySession(sessionId: string, startIndex?: number, endIndex?: number): Promise<Message[]>;
+  getRecentMessagesBefore(sessionId: string, beforeIndex: number, limit: number): Promise<Message[]>;
+  getSessionIngestState(sessionId: string): Promise<SessionIngestState | null>;
+  updateSessionIngestState(sessionId: string, lastIngestedMessageIndex: number): Promise<void>;
   saveSegment(segment: TopicSegment): Promise<TopicSegment>;
   saveNode(node: TopicNode): Promise<void>;
   saveEdge(edge: TopicEdge): Promise<void>;
@@ -31,6 +36,7 @@ export interface GraphStore {
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;
   getSessionNodeCount(sessionId: string): Promise<number>;
   getNodesBySession(sessionId: string): Promise<TopicNode[]>;
+  getLastTopicNode(sessionId: string): Promise<TopicNode | null>;
   getSegmentsBySession(sessionId: string): Promise<TopicSegment[]>;
   insertMemories(nodes: MemoryNodeInsert[]): Promise<void>;
   getMemoriesBySegment(segmentId: string): Promise<MemoryNode[]>;

@@ -7,6 +7,8 @@ MemoGrafter helps chatbot applications remember conversations without stuffing e
 
 It is a memory framework, not an autonomous agent runtime. It does not run tools, schedule work, or decide goals for an agent.
 
+MemoGrafter builds the memory graph incrementally. New chatbot turns append topic and memory nodes to the existing graph instead of clearing and rebuilding the session on every response, so grafted and externally enriched memory can survive later conversation turns. Use `clearSession()` explicitly when you want to reset an agent's local history and stored session memory.
+
 ## Playground
 
 - Try the [MemoGrafter Playground](https://mgplayground-green.vercel.app/).
@@ -29,7 +31,7 @@ chat messages
   -> optional memory grafting
 ```
 
-MemoGrafter stores conversation turns, detects topic changes, summarizes useful context, links related memories, and retrieves or grafts memory when needed.
+MemoGrafter stores conversation turns, tracks which messages have already been ingested, detects topic changes for new turns with recent context, summarizes useful context, links related memories, and retrieves or grafts memory when needed.
 
 ## Install
 
