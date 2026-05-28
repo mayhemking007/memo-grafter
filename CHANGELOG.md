@@ -47,3 +47,14 @@ All notable changes to this project will be documented here.
 ### Added
 
 - Added `getGraphSnapshot()` method for retrieving a snapshot of the current session graph, including memory state and graph structure
+
+## [0.2.3] - 2026-05-28
+
+### Fixed
+
+- Ensured grafted memories reach the LLM in the default `invoke()` path
+- Preserved grafted memory across ingest rebuilds
+
+### Changed
+
+- Made `IngestPipeline` incremental using ingest cursors to avoid full-history rebuilds and improve memory durability
