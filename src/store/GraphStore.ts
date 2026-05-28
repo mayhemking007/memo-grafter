@@ -1,4 +1,5 @@
 import type {
+  GraftRegistryEntry,
   MemoryNode,
   MemoryNodeInsert,
   Message,
@@ -32,6 +33,7 @@ export interface GraphStore {
   getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
   clearSession(sessionId: string): Promise<void>;
   clearSessionGraph(sessionId: string): Promise<void>;
+  deleteNode(nodeId: string, sessionId?: string): Promise<void>;
   getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null>;
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;
   getSessionNodeCount(sessionId: string): Promise<number>;
@@ -77,6 +79,9 @@ export interface GraphStore {
   nodeSimilarity(nodeAId: string, nodeBId: string): Promise<number>;
   getNeighbours(nodeIds: string[], hopDepth: number, sessionId?: string): Promise<TopicNode[]>;
   getBufferMessages(sessionId: string, start: number, end: number, maxChars?: number): Promise<Message[]>;
+  insertGraftRegistry(entry: Omit<GraftRegistryEntry, "id" | "graftedAt">): Promise<GraftRegistryEntry>;
+  getGraftRegistry(sessionId: string): Promise<GraftRegistryEntry[]>;
+  deleteGraftRegistry(nodeId: string): Promise<void>;
   absorbNodes(
     nodes: TopicNode[],
     targetSessionId: string,

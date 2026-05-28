@@ -3,6 +3,7 @@ import { MemoGrafter } from "./MemoGrafter.js";
 import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 import type {
   AbsorbFromAgentOptions,
+  GraftRegistryEntry,
   GraphSnapshot,
   InjectionResult,
   MemoGrafterConfig,
@@ -82,14 +83,48 @@ export class MemoGrafterAgent {
     const { nodes } = await this.core.getTopics(this.sessionId);
     const edges = await this.core.store.getEdgesBySession(this.sessionId);
     const memories = await this.core.store.getMemoriesBySession(this.sessionId);
+    const registry = await this.core.store.getGraftRegistry(this.sessionId);
+    const registryByNodeId = new Map(registry.map((entry) => [entry.nodeId, entry]));
 
     return {
       sessionId: this.sessionId,
       nodes,
+      snapshotNodes: nodes.map((node) => {
+        const graftEntry = registryByNodeId.get(node.id);
+
+        return {
+          node,
+          ...(graftEntry
+            ? {
+              graftOrigin: {
+                sourceSessionId: graftEntry.sourceSessionId,
+                sourceNodeId: graftEntry.sourceNodeId,
+                graftedAt: graftEntry.graftedAt,
+              },
+            }
+            : {}),
+        };
+      }),
       edges,
       memories,
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  async getGraftRegistry(): Promise<GraftRegistryEntry[]> {
+    await this.pendingIngest;
+    return this.core.store.getGraftRegistry(this.sessionId);
+  }
+
+  async removeGraft(nodeId: string): Promise<void> {
+    await this.pendingIngest;
+    const registry = await this.core.store.getGraftRegistry(this.sessionId);
+    const entry = registry.find((candidate) => candidate.nodeId === nodeId);
+    if (!entry) {
+      throw new Error(`No graft registered for node ${nodeId} in this session.`);
+    }
+
+    await this.core.store.deleteNode(nodeId, this.sessionId);
   }
 
   async clearSession(): Promise<void> {
