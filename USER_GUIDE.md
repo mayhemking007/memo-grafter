@@ -140,7 +140,7 @@ export interface Message {
 }
 ```
 
-`MemoGrafterAgent` keeps an in-memory user/assistant history for the current session and stores messages in PostgreSQL during ingestion. System messages can be added to LLM calls internally when memory recall is pinned into an overflowing context window.
+`MemoGrafterAgent` keeps an in-memory user/assistant history for the current session and stores messages in PostgreSQL during ingestion. When a session already has memory graph content, `invoke()` can add a system message with recalled facts before the LLM call.
 
 ### Segments
 
@@ -208,12 +208,14 @@ Edges are stored in `mg_topic_edges`.
 
 ### Grafting
 
-Grafting is the process of selecting memory nodes and turning them into useful context for another prompt or another chatbot.
+Grafting is the process of selecting topic nodes and turning them into useful context for another prompt or another chatbot.
 
 There are two common forms:
 
 - Preview memory with `graft()`.
 - Copy memory into another chatbot with `absorbFromAgent()` or `ingestGraftedNodes()`.
+
+When topic nodes are absorbed into another session, MemoGrafter also copies their active memory nodes so targeted recall can find the transferred facts. Copied memory rows get fresh IDs, keep their existing embeddings, and are copied as active memories only when the source row is not decayed or superseded.
 
 ## Using MemoGrafterAgent
 
@@ -251,14 +253,16 @@ await agent.close();
 
 On every call, `invoke()`:
 
-1. Adds the user message to local history.
-2. Builds the message list for the LLM.
-3. If history is under the configured budget, sends the raw local history.
-4. If history crosses the overflow threshold, calls targeted recall using recent conversation context, prepends the recall result as one pinned system message, and keeps only the recent raw message window.
-5. Adds the assistant response to history.
+1. Checks whether the current session has topic nodes in the memory graph.
+2. If graph content exists, calls targeted recall using the current user message.
+3. Prepends the recalled memory prompt as a system message when recall returns matching facts.
+4. Builds the LLM message list from the optional memory system message, the recent raw history window, and the current user message.
+5. Adds the user message and assistant response to local history after the LLM response.
 6. Queues ingestion of the updated conversation into the memory graph.
 
-The overflow threshold is 80% of `inject.tokenBudget`. Recall failures are logged as warnings and fall back to the recent raw message window, so a retrieval or embedder problem should not crash the foreground chatbot turn.
+Recall is skipped entirely when the session has no topic nodes yet. This avoids an unnecessary embed and vector search on the first turn or while async ingestion has not produced graph content.
+
+Recall failures are logged as warnings and fall back to raw history only, so a retrieval or embedder problem should not crash the foreground chatbot turn.
 
 On the first turn there may be no memory to recall. Later turns can use memory created from earlier turns once ingestion has completed.
 
@@ -298,7 +302,7 @@ Options:
 
 `recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result.
 
-`MemoGrafterAgent.invoke()` also calls `recall()` internally when local history overflows the configured history budget. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window.
+`MemoGrafterAgent.invoke()` also calls `recall()` internally before answering when the session has topic nodes. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window. Automatic recall uses `inject.recallLimit` and `inject.recallMinSimilarity`, defaulting to `6` and `0.55`.
 
 If you call `recall()` immediately after `invoke()`, it only sees memory that has already been ingested into storage. In queue mode, wait for your background worker to finish before expecting newly created memories to appear.
 
@@ -419,6 +423,10 @@ const response = await writingBot.invoke(
 console.log(response);
 ```
 
+Absorbing copies selected topic nodes into the target session and creates `grafted` edges back to their source nodes. It also copies active memory facts attached to those topic nodes into the target session so future `recall()` and `invoke()` calls can surface the transferred context. Decayed or superseded source memories are not copied.
+
+Known limitation: if a source topic node has no associated memory rows in `mg_memory_nodes`, there are no facts to copy. The topic node can still be grafted, but targeted recall will not return facts for that node unless memory extraction produced them.
+
 ### Absorb By Semantic Prompt
 
 ```ts
@@ -480,6 +488,8 @@ const agent = new MemoGrafterAgent({
     bufferSize: 4,
     tokenBudget: 1500,
     recentWindowSize: 20,
+    recallLimit: 6,
+    recallMinSimilarity: 0.55,
   },
   cache: {
     connectionString: process.env.REDIS_URL!,
@@ -630,16 +640,20 @@ inject: {
   bufferSize: 4,
   tokenBudget: 1500,
   recentWindowSize: 20,
+  recallLimit: 6,
+  recallMinSimilarity: 0.55,
 }
 ```
 
-Controls memory prompt sizing and the raw history window kept when chat history overflows.
+Controls memory prompt sizing, invoke-time recall, and the raw history window sent to the LLM.
 
 - `bufferSize`: nearby raw messages to include.
-- `tokenBudget`: approximate token budget used for memory prompts and agent history overflow checks. `MemoGrafterAgent` starts overflow handling at 80% of this value.
-- `recentWindowSize`: number of newest raw chat messages to keep after the pinned recall block during overflow. Defaults to `20`.
+- `tokenBudget`: approximate token budget used for graft prompt assembly.
+- `recentWindowSize`: number of newest raw chat messages to send after the optional invoke-time memory system message. Defaults to `20`.
+- `recallLimit`: max memory facts to fetch for automatic invoke-time recall. Defaults to `6`.
+- `recallMinSimilarity`: similarity floor for automatic invoke-time recall. Defaults to `0.55`.
 
-When `MemoGrafterAgent` detects overflow, it builds a recall query from the last six message contents, calls recall with `{ limit: 5, minSimilarity: 0.65 }`, prepends the returned memory prompt as a system message, and keeps the last `recentWindowSize` raw messages. If recall fails, it uses only that recent raw window.
+When `MemoGrafterAgent.invoke()` sees existing topic nodes for the session, it calls recall with the current user message, prepends the returned memory prompt as a system message when facts are found, and keeps the last `recentWindowSize` raw messages. If recall fails or returns no facts, it uses only that recent raw window plus the current user message.
 
 ### `cache`
 
@@ -991,6 +1005,8 @@ const result = await agent.recall("Japan travel preferences", {
 });
 ```
 
+For grafted sessions, also confirm that the source topic had active memory nodes before it was absorbed. Absorbing copies active memory rows, but it cannot create facts for a topic if extraction produced only a topic summary and no `mg_memory_nodes` rows.
+
 ### Redis Warnings
 
 Redis is only required when you pass `queue` or `cache` config. If you do not need background ingestion or recall caching, remove those sections.
@@ -1009,7 +1025,7 @@ Practical notes:
 - Use PostgreSQL with `pgvector` enabled.
 - Tune `tokenBudget` to control prompt size and cost.
 - Use queue mode if ingestion becomes slow.
-- Use the optional recall cache for long sessions with repeated or automatic overflow recall.
+- Use the optional recall cache for long sessions with repeated direct or invoke-time recall.
 - Store your own user/session mapping outside MemoGrafter.
 - Call `close()` during graceful shutdown.
 - Do not expose database credentials or OpenAI keys to browser code.
@@ -1047,6 +1063,7 @@ Useful `GraphStore` inspection methods:
 - `getEdgesByType(sessionId, type)`
 - `getEdgesBySession(sessionId)`
 - `getMemoriesBySession(sessionId)`
+- `getSessionNodeCount(sessionId)`
 
 Common `MemoGrafterAgent` methods:
 

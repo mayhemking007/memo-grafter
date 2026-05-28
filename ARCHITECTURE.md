@@ -31,15 +31,15 @@ user / assistant messages
 
 The default application flow starts with `MemoGrafterAgent.invoke()`:
 
-1. The user message is appended to the agent's in-memory session history.
-2. The agent builds the message history for the LLM call.
-3. If the current history is near the history token budget, the agent recalls relevant structured memory from the recent conversation and prepends it as one pinned system message.
+1. The agent checks whether the session already has topic nodes in storage.
+2. If graph content exists, the agent recalls relevant structured memory for the current user message.
+3. The agent builds the LLM message list from an optional recalled-memory system message, a recent raw history window, and the current user message.
 4. The configured `LLMAdapter` produces the assistant response.
-5. The assistant response is appended to session history.
+5. The user message and assistant response are appended to session history.
 6. The full history snapshot is queued for background ingestion.
 7. Ingestion persists messages, rebuilds topic state for the session, and updates graph edges.
 
-This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
+The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
 
 ## Ingestion Flow
 
@@ -63,12 +63,13 @@ The current ingestion model rebuilds the session's non-grafted topic graph from 
 
 ### MemoGrafterAgent
 
-`MemoGrafterAgent` is the public session-oriented wrapper around `MemoGrafter`. It owns the current session ID, in-memory chat history, base system prompt, history token budget, and pending background ingestion promise.
+`MemoGrafterAgent` is the public session-oriented wrapper around `MemoGrafter`. It owns the current session ID, in-memory chat history, base system prompt, invoke-time recall settings, recent history window size, and pending background ingestion promise.
 
 Its responsibilities include:
 
 - accepting user messages through `invoke()`;
-- calling the configured LLM with raw history while under budget, or a pinned recall memory block plus recent raw turns on overflow;
+- recalling relevant memory before the LLM call when the session has graph content;
+- calling the configured LLM with an optional pinned recall memory block, recent raw turns, and the current user message;
 - scheduling ingestion after assistant responses;
 - exposing active topic nodes and segments for the current session;
 - exposing a read-only graph snapshot for visualization and inspection;
@@ -126,6 +127,8 @@ It starts from requested topic IDs, expands through graph neighbours up to the c
 
 This pipeline is used by `MemoGrafter.inject()` and `MemoGrafterAgent.graft()`. Copying memory into another session is handled by store-level node absorption, followed by edge rebuilding.
 
+Absorption copies selected topic nodes into the target session and records `grafted` edges back to their source nodes. The PostgreSQL store also copies active memory nodes attached to those topics so targeted recall can search the transferred facts. Copied memory rows get fresh IDs, preserve their embeddings, reset `superseded_by` to `NULL`, reset `decayed` to `FALSE`, and are copied only when the source memory is active.
+
 ### GraphStore
 
 `GraphStore` is the persistence interface used by the core and pipeline layers. It keeps storage-specific concerns out of the orchestration code.
@@ -137,6 +140,7 @@ The interface covers:
 - segment, topic node, and topic edge persistence;
 - memory node insertion, memory lookup, and memory edge construction;
 - session snapshot reads for topic edges and memory nodes;
+- session topic-node counts for invoke-time recall guards;
 - vector similarity queries for topic and memory retrieval;
 - graph neighbourhood traversal;
 - grafted node absorption;
@@ -155,14 +159,14 @@ The recall path embeds the query, searches active memory nodes by vector similar
 
 When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, and a short hash of the embedding: `mg:recall:${sessionId}:${limit}:${minSimilarity}:${embeddingHash}`. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
 
-`MemoGrafterAgent.buildHistory()` also uses this path when the local chat history crosses 80% of the configured history token budget. It builds a query from the last six message contents, calls `recall()` with `{ limit: 5, minSimilarity: 0.65 }`, injects the returned `systemPrompt` as a single pinned system message, and keeps only the last `inject.recentWindowSize` raw messages. If recall fails, the agent logs a warning and falls back to those recent raw messages without failing the foreground `invoke()` call.
+`MemoGrafterAgent.invoke()` also uses this path before each LLM call when the session has at least one topic node. It uses the current user message as the recall query, calls `recall()` with `inject.recallLimit` and `inject.recallMinSimilarity` defaults of `6` and `0.55`, injects the returned `systemPrompt` as a single pinned system message when facts are found, and keeps only the last `inject.recentWindowSize` raw messages. If the session has no topic nodes, recall returns no facts, or recall fails, the agent proceeds with raw history only and does not fail the foreground `invoke()` call.
 
 This read-side path is separate from grafting:
 
 - recall returns atomic memories and parent topics for a query;
 - graph snapshots return raw graph inspection data for a session;
 - grafting assembles broader topic context from selected topic nodes and their neighbours;
-- absorbing copies selected topic nodes into another session.
+- absorbing copies selected topic nodes and their active atomic memories into another session.
 
 ## Data And Graph Lifecycle
 
@@ -183,7 +187,7 @@ The lifecycle for a normal conversation is:
    - `semantic` edges link similar topic nodes;
    - `reentry` edges link a returned topic to an earlier related topic.
 7. Memory edges may link semantically related memories within a topic.
-8. Grafted nodes are copied into a target session and linked to their source with `grafted` edges.
+8. Grafted topic nodes are copied into a target session, linked to their source with `grafted` edges, and accompanied by copies of active memory nodes when those memories exist.
 
 During session rebuilds, non-grafted topic edges for that session are regenerated from current topic nodes. Grafted edges are preserved so memory transfer history is not lost.
 
@@ -194,7 +198,8 @@ During session rebuilds, non-grafted topic edges for that session are regenerate
 - **Storage boundary:** core logic depends on `GraphStore`; PostgreSQL with `pgvector` is the current implementation, not a requirement baked into pipeline code.
 - **Session graph rebuilds:** ingestion rebuilds session topic state from the latest message snapshot to keep segment and edge state coherent.
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
-- **Token-budgeted reads:** overflowed chat history uses targeted recall plus a recent raw window, while graft prompt assembly respects token budgets by trimming context.
+- **Invoke-time recall:** `MemoGrafterAgent.invoke()` recalls relevant active memories before answering whenever the session has graph content, while still falling back to raw history if recall is unavailable.
+- **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
 - **Optional recall cache:** recall can cache raw memory search results in Redis for a short bounded TTL without caching final prompt assembly.
-- **Grafting is explicit:** memory transfer copies selected topic nodes into a target session and records graph edges instead of silently mixing sessions.
+- **Grafting is explicit:** memory transfer copies selected topic nodes and active atomic memories into a target session and records graph edges instead of silently mixing sessions.
