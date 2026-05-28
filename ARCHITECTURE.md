@@ -11,7 +11,7 @@ The main runtime layers are:
 - `MemoGrafterAgent`: the high-level conversational wrapper used by most applications.
 - `MemoGrafter`: the internal coordinator that wires storage, pipelines, adapters, optional queueing, and optional recall caching.
 - Pipeline classes: ingestion, drift detection, segment processing, retrieval, and graft prompt assembly.
-- `GraphStore`: the persistence boundary for messages, segments, topic nodes, memory nodes, edges, and fleet metadata.
+- `GraphStore`: the persistence boundary for messages, segments, topic nodes, memory nodes, edges, graft provenance, ingest state, and fleet metadata.
 - `PostgresGraphStore`: the current built-in `GraphStore` implementation, backed by PostgreSQL and `pgvector`.
 
 At a simplified level:
@@ -37,7 +37,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 4. The configured `LLMAdapter` produces the assistant response.
 5. The user message and assistant response are appended to session history.
 6. The full history snapshot is queued for background ingestion.
-7. Ingestion persists messages, rebuilds topic state for the session, and updates graph edges.
+7. Ingestion persists messages, processes only unprocessed message ranges, appends new graph state, and updates graph edges.
 
 The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
 
@@ -49,15 +49,15 @@ The node-count guard avoids an embed and memory search on the first turn or whil
 messages + sessionId
   -> save message buffer
   -> load existing topic nodes
-  -> clear current session graph
+  -> load session ingest cursor
   -> embed each message
-  -> detect topic segments
-  -> process each segment
-  -> rebuild temporal and semantic edges
+  -> detect topic segments for new message ranges
+  -> process each new segment
+  -> append temporal, semantic, and reentry edges
   -> add reentry edges when detected
 ```
 
-The current ingestion model rebuilds the session's non-grafted topic graph from the latest message snapshot. This favors consistency and straightforward reasoning over incremental patching.
+The current ingestion model is incremental. `mg_session_ingest_state` tracks the last processed message index for each session, so repeated ingestion of the same message snapshot is a no-op for graph creation. Existing topic nodes, grafted nodes, memory nodes, and graph edges are preserved during normal `invoke()` processing. `clearSession()` remains available as an explicit reset API rather than a default ingest step.
 
 ## Main Components
 
@@ -69,7 +69,7 @@ Its responsibilities include:
 
 - accepting user messages through `invoke()`;
 - recalling relevant memory before the LLM call when the session has graph content;
-- calling the configured LLM with an optional pinned recall memory block, recent raw turns, and the current user message;
+- calling the configured LLM with an optional prepended recall memory block, recent raw turns, and the current user message;
 - scheduling ingestion after assistant responses;
 - exposing active topic nodes and segments for the current session;
 - exposing a read-only graph snapshot for visualization and inspection;
@@ -81,11 +81,11 @@ Its responsibilities include:
 
 ### IngestPipeline
 
-`IngestPipeline` coordinates the write-side memory pipeline. It receives a complete message snapshot and a session ID, saves the message buffer, embeds messages, delegates topic boundary detection to `TopicDriftDetector`, delegates node creation to `SegmentProcessor`, and asks the store to rebuild graph edges.
+`IngestPipeline` coordinates the write-side memory pipeline. It receives a complete message snapshot and a session ID, saves the message buffer, reads the session ingest cursor, embeds messages for the unprocessed range plus a small overlap window, delegates topic boundary detection to `TopicDriftDetector`, delegates node creation to `SegmentProcessor`, and appends graph edges.
 
 It also handles reentry linking in two forms:
 
-- matching newly detected topic boundaries back to existing session nodes;
+- matching newly detected topic boundaries back to existing durable session nodes;
 - linking later segments in the current run back to earlier related segments.
 
 ### TopicDriftDetector
@@ -125,9 +125,11 @@ The topic node is the coarse unit of conversation memory. Memory nodes are the f
 
 It starts from requested topic IDs, expands through graph neighbours up to the configured hop depth, orders nodes by conversation position, and formats each topic with a small configurable message buffer around its source range. It then trims from the end until the assembled system prompt fits the configured token budget.
 
-This pipeline is used by `MemoGrafter.inject()` and `MemoGrafterAgent.graft()`. Copying memory into another session is handled by store-level node absorption, followed by edge rebuilding.
+This pipeline is used by `MemoGrafter.inject()` and `MemoGrafterAgent.graft()`. Copying memory into another session is handled by store-level node absorption, followed by edge updates.
 
 Absorption copies selected topic nodes into the target session and records `grafted` edges back to their source nodes. The PostgreSQL store also copies active memory nodes attached to those topics so targeted recall can search the transferred facts. Copied memory rows get fresh IDs, preserve their embeddings, reset `superseded_by` to `NULL`, reset `decayed` to `FALSE`, and are copied only when the source memory is active.
+
+The same store-level absorption path inserts `mg_graft_registry` rows for copied topic nodes. Keeping registry writes in `PostgresGraphStore.absorbNodes()` means `MemoGrafterAgent`, direct graft ingestion, and fleet grafting all get provenance tracking without duplicating logic.
 
 ### GraphStore
 
@@ -141,15 +143,16 @@ The interface covers:
 - memory node insertion, memory lookup, and memory edge construction;
 - session snapshot reads for topic edges and memory nodes;
 - session topic-node counts for invoke-time recall guards;
+- session ingest cursor reads and writes for incremental ingestion;
 - vector similarity queries for topic and memory retrieval;
 - graph neighbourhood traversal;
-- grafted node absorption;
+- grafted node absorption, provenance registry reads, and graft node deletion;
 - fleet and agent metadata;
-- session graph rebuilding.
+- explicit session clearing.
 
-The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_fleets`, and `mg_fleet_agents`.
+The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`.
 
-`MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, active topic nodes, topic edges that touch the session's nodes, all memory nodes for the session, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include decayed and superseded memory rows so callers such as visualizers can decide what to show.
+`MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, active topic nodes, optional snapshot node wrappers with graft provenance, topic edges that touch the session's nodes, all memory nodes for the session, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include decayed and superseded memory rows so callers such as visualizers can decide what to show.
 
 ## Recall Path
 
@@ -159,7 +162,7 @@ The recall path embeds the query, searches active memory nodes by vector similar
 
 When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, and a short hash of the embedding: `mg:recall:${sessionId}:${limit}:${minSimilarity}:${embeddingHash}`. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
 
-`MemoGrafterAgent.invoke()` also uses this path before each LLM call when the session has at least one topic node. It uses the current user message as the recall query, calls `recall()` with `inject.recallLimit` and `inject.recallMinSimilarity` defaults of `6` and `0.55`, injects the returned `systemPrompt` as a single pinned system message when facts are found, and keeps only the last `inject.recentWindowSize` raw messages. If the session has no topic nodes, recall returns no facts, or recall fails, the agent proceeds with raw history only and does not fail the foreground `invoke()` call.
+`MemoGrafterAgent.invoke()` also uses this path before each LLM call when the session has at least one topic node. It uses the current user message as the recall query, calls `recall()` with `inject.recallLimit` and `inject.recallMinSimilarity` defaults of `6` and `0.55`, injects the returned `systemPrompt` as a single prepended system message when facts are found, and keeps only the last `inject.recentWindowSize` raw messages. If the session has no topic nodes, recall returns no facts, or recall fails, the agent proceeds with raw history only and does not fail the foreground `invoke()` call.
 
 This read-side path is separate from grafting:
 
@@ -182,24 +185,24 @@ The lifecycle for a normal conversation is:
 3. Each segment is saved in `mg_segments`.
 4. Each segment produces one topic node in `mg_topic_nodes`.
 5. Segment extraction may produce multiple memory nodes in `mg_memory_nodes`.
-6. Topic edges are rebuilt:
+6. Topic edges are appended:
    - `temporal` edges link adjacent topic nodes;
    - `semantic` edges link similar topic nodes;
    - `reentry` edges link a returned topic to an earlier related topic.
 7. Memory edges may link semantically related memories within a topic.
-8. Grafted topic nodes are copied into a target session, linked to their source with `grafted` edges, and accompanied by copies of active memory nodes when those memories exist.
+8. Grafted topic nodes are copied into a target session, registered in `mg_graft_registry`, linked to their source with `grafted` edges, and accompanied by copies of active memory nodes when those memories exist.
 
-During session rebuilds, non-grafted topic edges for that session are regenerated from current topic nodes. Grafted edges are preserved so memory transfer history is not lost.
+During normal ingestion, existing graph state is not cleared. New topic nodes and memory nodes are appended after the stored ingest cursor, and new edges can connect them to prior native or grafted nodes. `clearSession()` is an explicit destructive reset for callers that intentionally want to remove stored session memory.
 
 ## Current Architecture Decisions
 
 - **Server-only runtime:** `MemoGrafter` checks for browser globals and is designed for Node.js server environments.
 - **Adapter boundary:** model providers are represented by `LLMAdapter` and `EmbedAdapter`, keeping provider-specific code outside the pipelines.
 - **Storage boundary:** core logic depends on `GraphStore`; PostgreSQL with `pgvector` is the current implementation, not a requirement baked into pipeline code.
-- **Session graph rebuilds:** ingestion rebuilds session topic state from the latest message snapshot to keep segment and edge state coherent.
+- **Incremental graph growth:** ingestion processes only new message ranges and preserves existing graph state by default; explicit `clearSession()` is the reset path.
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
 - **Invoke-time recall:** `MemoGrafterAgent.invoke()` recalls relevant active memories before answering whenever the session has graph content, while still falling back to raw history if recall is unavailable.
 - **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
 - **Optional recall cache:** recall can cache raw memory search results in Redis for a short bounded TTL without caching final prompt assembly.
-- **Grafting is explicit:** memory transfer copies selected topic nodes and active atomic memories into a target session and records graph edges instead of silently mixing sessions.
+- **Grafting is explicit and traceable:** memory transfer copies selected topic nodes and active atomic memories into a target session, records graph edges, and stores provenance in `mg_graft_registry` instead of silently mixing sessions.

@@ -88,6 +88,7 @@ Current v1 tables:
 - `mg_fleets`
 - `mg_fleet_agents`
 - `mg_session_ingest_state`
+- `mg_graft_registry`
 
 ## Quick Start
 
@@ -222,6 +223,8 @@ There are two common forms:
 
 When topic nodes are absorbed into another session, MemoGrafter also copies their active memory nodes so targeted recall can find the transferred facts. Copied memory rows get fresh IDs, keep their existing embeddings, and are copied as active memories only when the source row is not decayed or superseded.
 
+Absorbed topic nodes are also registered in `mg_graft_registry`. The registry records the destination session, copied node ID, source session ID, source node ID, and graft timestamp so applications can inspect provenance or remove a graft later.
+
 ## Using MemoGrafterAgent
 
 `MemoGrafterAgent` is the easiest API to start with.
@@ -332,6 +335,7 @@ const snapshot = await agent.getGraphSnapshot();
 
 console.log(snapshot.sessionId);
 console.log(snapshot.nodes);
+console.log(snapshot.snapshotNodes);
 console.log(snapshot.edges);
 console.log(snapshot.memories);
 console.log(snapshot.capturedAt);
@@ -341,9 +345,12 @@ console.log(snapshot.capturedAt);
 
 - `sessionId`: current agent session ID.
 - `nodes`: active topic nodes for the session.
+- `snapshotNodes`: active topic nodes wrapped with provenance metadata when a node came from a graft.
 - `edges`: topic edges where either endpoint belongs to a session topic node.
 - `memories`: all memory nodes for the session, including decayed or superseded rows.
 - `capturedAt`: ISO timestamp for when the snapshot was produced.
+
+Each `snapshotNodes` entry contains the topic `node` and an optional `graftOrigin` with `sourceSessionId`, `sourceNodeId`, and `graftedAt`. The plain `nodes` array remains available for callers that only need the topic nodes.
 
 This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
 
@@ -442,7 +449,35 @@ console.log(response);
 
 Absorbing copies selected topic nodes into the target session and creates `grafted` edges back to their source nodes. It also copies active memory facts attached to those topic nodes into the target session so future `recall()` and `invoke()` calls can surface the transferred context. Decayed or superseded source memories are not copied.
 
+Each copied topic node is recorded in the graft registry. Registry entries let you answer where a graft came from and which copied destination node owns it.
+
 Known limitation: if a source topic node has no associated memory rows in `mg_memory_nodes`, there are no facts to copy. The topic node can still be grafted, but targeted recall will not return facts for that node unless memory extraction produced them.
+
+### Inspect Graft Registry
+
+```ts
+const registry = await writingBot.getGraftRegistry();
+
+for (const entry of registry) {
+  console.log({
+    nodeId: entry.nodeId,
+    sourceSessionId: entry.sourceSessionId,
+    sourceNodeId: entry.sourceNodeId,
+    graftedAt: entry.graftedAt,
+  });
+}
+```
+
+Use this when your app needs to display transferred memory provenance or decide which graft to remove.
+
+### Remove A Graft
+
+```ts
+const registry = await writingBot.getGraftRegistry();
+await writingBot.removeGraft(registry[0]!.nodeId);
+```
+
+`removeGraft()` removes the copied graft node from the current session. The registry row is removed with it. The method is scoped to the current agent session and throws if the node is not a registered graft for that session.
 
 ### Absorb By Semantic Prompt
 
@@ -546,6 +581,7 @@ Useful store inspection methods include:
 - `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
 - `getEdgesBySession(sessionId)`: read all topic edges where either endpoint belongs to the session's topic nodes.
 - `getMemoriesBySession(sessionId)`: read all memory nodes for a session, including decayed and superseded rows.
+- `getGraftRegistry(sessionId)`: read graft provenance entries for a session.
 
 ### `llm`
 
@@ -1103,6 +1139,7 @@ Common `MemoGrafterAgent` methods:
 - `getHistory()`: read local chat history.
 - `getSessionId()`: read the current session ID.
 - `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.
+- `getGraftRegistry()`: inspect provenance for grafted nodes in the current session.
 - `getActiveNodes()`: inspect topic nodes.
 - `getActiveSegments()`: inspect topic segments.
 - `clearSession()`: explicitly clear local history and stored session memory.
@@ -1110,4 +1147,5 @@ Common `MemoGrafterAgent` methods:
 - `graft(topicIds?)`: preview memory injection.
 - `ingestGraftedNodes(nodes)`: copy provided nodes into this agent.
 - `absorbFromAgent(sourceAgent, options)`: select and copy memory from another agent.
+- `removeGraft(nodeId)`: remove a registered graft node from the current session.
 - `close()`: close database and queue resources.
