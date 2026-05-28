@@ -98,9 +98,30 @@ export interface InjectionResult {
   tokenCount: number;
 }
 
+export interface GraftRegistryEntry {
+  id: string;
+  sessionId: string;
+  nodeId: string;
+  sourceSessionId: string;
+  sourceNodeId: string;
+  graftedAt: Date;
+}
+
+export interface GraftOrigin {
+  sourceSessionId: string;
+  sourceNodeId: string;
+  graftedAt: Date;
+}
+
+export interface GraphSnapshotNode {
+  node: TopicNode;
+  graftOrigin?: GraftOrigin;
+}
+
 export interface GraphSnapshot {
   sessionId: string;
   nodes: TopicNode[];
+  snapshotNodes?: GraphSnapshotNode[];
   edges: TopicEdge[];
   memories: MemoryNode[];
   capturedAt: string;

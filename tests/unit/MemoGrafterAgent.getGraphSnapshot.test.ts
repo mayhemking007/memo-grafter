@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoGrafterAgent } from "../../src/MemoGrafterAgent.js";
 import type {
   EmbedAdapter,
+  GraftRegistryEntry,
   LLMAdapter,
   MemoryNode,
   MemoGrafterConfig,
@@ -16,6 +17,8 @@ type SnapshotCore = {
   store: {
     getEdgesBySession(sessionId: string): Promise<TopicEdge[]>;
     getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
+    getGraftRegistry(sessionId: string): Promise<GraftRegistryEntry[]>;
+    deleteNode(nodeId: string, sessionId?: string): Promise<void>;
   };
 };
 
@@ -107,6 +110,18 @@ function makeSegment(overrides: Partial<TopicSegment> = {}): TopicSegment {
   };
 }
 
+function makeGraftRegistryEntry(overrides: Partial<GraftRegistryEntry> = {}): GraftRegistryEntry {
+  return {
+    id: "registry-1",
+    sessionId: "session-1",
+    nodeId: "topic-1",
+    sourceSessionId: "source-session",
+    sourceNodeId: "source-topic",
+    graftedAt: new Date("2026-01-02T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
 describe("MemoGrafterAgent.getGraphSnapshot", () => {
   it("waits for pending ingest and returns nodes, edges, memories, and capture metadata", async () => {
     const agent = createAgent();
@@ -152,6 +167,13 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
       calls.push(`memories:${observedSessionId}`);
       return memories;
     };
+    privateAgent.core.store.getGraftRegistry = async (observedSessionId) => {
+      calls.push(`registry:${observedSessionId}`);
+      return [makeGraftRegistryEntry({
+        sessionId,
+        nodeId: node.id,
+      })];
+    };
 
     const snapshotPromise = agent.getGraphSnapshot();
     await Promise.resolve();
@@ -164,6 +186,7 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
       `topics:${sessionId}`,
       `edges:${sessionId}`,
       `memories:${sessionId}`,
+      `registry:${sessionId}`,
     ]);
     expect(snapshot).toMatchObject({
       sessionId,
@@ -171,8 +194,38 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
       edges: [edge],
       memories,
     });
+    expect(snapshot.snapshotNodes).toEqual([{
+      node,
+      graftOrigin: {
+        sourceSessionId: "source-session",
+        sourceNodeId: "source-topic",
+        graftedAt: new Date("2026-01-02T00:00:00.000Z"),
+      },
+    }]);
     expect(new Date(snapshot.capturedAt).toISOString()).toBe(snapshot.capturedAt);
     expect(snapshot.memories.some((memory) => memory.decayed)).toBe(true);
     expect(snapshot.memories.some((memory) => memory.supersededBy !== null)).toBe(true);
+  });
+
+  it("returns graft registry entries and removes only registered grafts", async () => {
+    const agent = createAgent();
+    const privateAgent = internals(agent);
+    const sessionId = agent.getSessionId();
+    const entry = makeGraftRegistryEntry({ sessionId, nodeId: "grafted-node" });
+    const deletedNodes: Array<{ nodeId: string; sessionId?: string }> = [];
+
+    privateAgent.core.store.getGraftRegistry = async (observedSessionId) => {
+      expect(observedSessionId).toBe(sessionId);
+      return [entry];
+    };
+    privateAgent.core.store.deleteNode = async (nodeId, observedSessionId) => {
+      deletedNodes.push({ nodeId, sessionId: observedSessionId });
+    };
+
+    await expect(agent.getGraftRegistry()).resolves.toEqual([entry]);
+    await agent.removeGraft("grafted-node");
+
+    expect(deletedNodes).toEqual([{ nodeId: "grafted-node", sessionId }]);
+    await expect(agent.removeGraft("native-node")).rejects.toThrow("No graft registered");
   });
 });

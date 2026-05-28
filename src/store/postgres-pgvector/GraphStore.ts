@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
-import type { MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
+import type { GraftRegistryEntry, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
 
@@ -71,6 +71,15 @@ interface EdgeRow {
   dst_id: string;
   weight: number;
   type: string;
+}
+
+interface GraftRegistryRow {
+  id: string;
+  session_id: string;
+  node_id: string;
+  source_session_id: string;
+  source_node_id: string;
+  grafted_at: Date;
 }
 
 interface AbsorbOptions {
@@ -205,6 +214,17 @@ export class PostgresGraphStore implements GraphStore {
         session_id                  TEXT PRIMARY KEY,
         last_ingested_message_index INT NOT NULL DEFAULT -1,
         updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS mg_graft_registry (
+        id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id        TEXT NOT NULL,
+        node_id           TEXT NOT NULL REFERENCES mg_topic_nodes(id) ON DELETE CASCADE,
+        source_session_id TEXT NOT NULL,
+        source_node_id    TEXT NOT NULL,
+        grafted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
 
@@ -437,6 +457,16 @@ export class PostgresGraphStore implements GraphStore {
 
   async clearSessionGraph(sessionId: string): Promise<void> {
     await this.clearSession(sessionId);
+  }
+
+  async deleteNode(nodeId: string, sessionId?: string): Promise<void> {
+    await this.deleteEdgesByNodeIds([nodeId]);
+
+    await this.sql`
+      DELETE FROM mg_topic_nodes
+      WHERE id = ${nodeId}
+        ${sessionId ? this.sql`AND session_id = ${sessionId}` : this.sql``}
+    `;
   }
 
   async getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null> {
@@ -833,6 +863,48 @@ export class PostgresGraphStore implements GraphStore {
     }));
   }
 
+  async insertGraftRegistry(entry: Omit<GraftRegistryEntry, "id" | "graftedAt">): Promise<GraftRegistryEntry> {
+    const rows = await this.sql<GraftRegistryRow[]>`
+      INSERT INTO mg_graft_registry (
+        session_id,
+        node_id,
+        source_session_id,
+        source_node_id
+      )
+      VALUES (
+        ${entry.sessionId},
+        ${entry.nodeId},
+        ${entry.sourceSessionId},
+        ${entry.sourceNodeId}
+      )
+      ON CONFLICT (node_id)
+      DO UPDATE SET
+        session_id = EXCLUDED.session_id,
+        source_session_id = EXCLUDED.source_session_id,
+        source_node_id = EXCLUDED.source_node_id
+      RETURNING *
+    `;
+
+    return this.rowToGraftRegistryEntry(rows[0]);
+  }
+
+  async getGraftRegistry(sessionId: string): Promise<GraftRegistryEntry[]> {
+    const rows = await this.sql<GraftRegistryRow[]>`
+      SELECT * FROM mg_graft_registry
+      WHERE session_id = ${sessionId}
+      ORDER BY grafted_at ASC
+    `;
+
+    return rows.map((row) => this.rowToGraftRegistryEntry(row));
+  }
+
+  async deleteGraftRegistry(nodeId: string): Promise<void> {
+    await this.sql`
+      DELETE FROM mg_graft_registry
+      WHERE node_id = ${nodeId}
+    `;
+  }
+
   async absorbNodes(nodes: TopicNode[], targetSessionId: string, options: AbsorbOptions = {}): Promise<TopicNode[]> {
     const copiedNodes: TopicNode[] = [];
     const nextMessageIndex = await this.getNextMessageIndex(targetSessionId);
@@ -876,6 +948,12 @@ export class PostgresGraphStore implements GraphStore {
         dstId: node.id,
         weight: 1,
         type: "grafted",
+      });
+      await this.insertGraftRegistry({
+        sessionId: targetSessionId,
+        nodeId: copy.id,
+        sourceSessionId: node.sessionId,
+        sourceNodeId: node.id,
       });
       copiedNodes.push(copy);
     }
@@ -931,6 +1009,16 @@ export class PostgresGraphStore implements GraphStore {
         AND session_id = ${sourceNode.sessionId}
         AND decayed = FALSE
         AND superseded_by IS NULL
+    `;
+  }
+
+  private async deleteEdgesByNodeIds(nodeIds: string[]): Promise<void> {
+    if (nodeIds.length === 0) return;
+
+    await this.sql`
+      DELETE FROM mg_topic_edges
+      WHERE src_id = ANY(${this.sql.array(nodeIds)})
+         OR dst_id = ANY(${this.sql.array(nodeIds)})
     `;
   }
 
@@ -1046,6 +1134,16 @@ export class PostgresGraphStore implements GraphStore {
     await this.sql`
       CREATE INDEX IF NOT EXISTS mg_session_ingest_state_updated_idx
       ON mg_session_ingest_state(updated_at)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_graft_registry_session
+      ON mg_graft_registry(session_id)
+    `;
+
+    await this.sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_graft_registry_node_unique
+      ON mg_graft_registry(node_id)
     `;
 
     await this.sql`
@@ -1182,6 +1280,21 @@ export class PostgresGraphStore implements GraphStore {
       sessionId: row.session_id,
       lastIngestedMessageIndex: row.last_ingested_message_index,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private rowToGraftRegistryEntry(row: GraftRegistryRow | undefined): GraftRegistryEntry {
+    if (!row) {
+      throw new Error("Expected graft registry row.");
+    }
+
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      nodeId: row.node_id,
+      sourceSessionId: row.source_session_id,
+      sourceNodeId: row.source_node_id,
+      graftedAt: row.grafted_at,
     };
   }
 
