@@ -218,8 +218,9 @@ describe("TopicDriftDetector — multi-signal scoring", () => {
 
     const store = {
       saveMessages: vi.fn(async () => undefined),
+      getSessionIngestState: vi.fn(async () => null),
+      updateSessionIngestState: vi.fn(async () => undefined),
       getNodesBySession: vi.fn(async () => []),
-      clearSession: vi.fn(async () => undefined),
       saveSegment: vi.fn(async (segment: TopicSegment) => segment),
       saveNode: vi.fn(async (node: TopicNode) => {
         savedNodes.push(node);
@@ -227,7 +228,11 @@ describe("TopicDriftDetector — multi-signal scoring", () => {
       saveEdge: vi.fn(async (edge: TopicEdge) => {
         savedEdges.push(edge);
       }),
-      rebuildEdgesForSession: vi.fn(async () => undefined),
+      insertMemories: vi.fn(async () => undefined),
+      buildMemoryEdges: vi.fn(async () => undefined),
+      getSimilarNodes: vi.fn(async (_embedding: number[], _sessionId: string, options: { excludeNodeId?: string } = {}) =>
+        savedNodes.filter((node) => node.id !== options.excludeNodeId)
+      ),
     } as unknown as GraphStore;
 
     const llm: LLMAdapter = {

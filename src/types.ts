@@ -106,6 +106,12 @@ export interface GraphSnapshot {
   capturedAt: string;
 }
 
+export interface SessionIngestState {
+  sessionId: string;
+  lastIngestedMessageIndex: number;
+  updatedAt: Date;
+}
+
 export interface RetrieverConfig {
   limit?: number;
   minSimilarity?: number;

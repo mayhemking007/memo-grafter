@@ -92,6 +92,12 @@ export class MemoGrafterAgent {
     };
   }
 
+  async clearSession(): Promise<void> {
+    await this.pendingIngest;
+    await this.core.store.clearSession(this.sessionId);
+    this.history.splice(0, this.history.length);
+  }
+
   async graft(topicIds?: string[]): Promise<InjectionResult> {
     await this.pendingIngest;
     const { nodes } = await this.core.getTopics(this.sessionId);

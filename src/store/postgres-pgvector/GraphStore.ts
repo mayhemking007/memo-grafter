@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
-import type { MemoryNode, MemoryNodeInsert, Message, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
+import type { MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
 
@@ -58,6 +58,12 @@ interface MessageRow {
   message_index: number;
   role: "user" | "assistant";
   content: string;
+}
+
+interface SessionIngestStateRow {
+  session_id: string;
+  last_ingested_message_index: number;
+  updated_at: Date;
 }
 
 interface EdgeRow {
@@ -194,6 +200,14 @@ export class PostgresGraphStore implements GraphStore {
       )
     `;
 
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS mg_session_ingest_state (
+        session_id                  TEXT PRIMARY KEY,
+        last_ingested_message_index INT NOT NULL DEFAULT -1,
+        updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
     await this.migrateExistingNodeTable();
     await this.createIndexes();
   }
@@ -211,6 +225,61 @@ export class PostgresGraphStore implements GraphStore {
         DO UPDATE SET role = EXCLUDED.role, content = EXCLUDED.content
       `;
     }
+  }
+
+  async getMessagesBySession(sessionId: string, startIndex?: number, endIndex?: number): Promise<Message[]> {
+    const rows = await this.sql<MessageRow[]>`
+      SELECT * FROM mg_message_buffer
+      WHERE session_id = ${sessionId}
+        ${startIndex === undefined ? this.sql`` : this.sql`AND message_index >= ${startIndex}`}
+        ${endIndex === undefined ? this.sql`` : this.sql`AND message_index <= ${endIndex}`}
+      ORDER BY message_index ASC
+    `;
+
+    return rows.map((row) => ({
+      role: row.role,
+      content: row.content,
+    }));
+  }
+
+  async getRecentMessagesBefore(sessionId: string, beforeIndex: number, limit: number): Promise<Message[]> {
+    if (limit <= 0) return [];
+
+    const rows = await this.sql<MessageRow[]>`
+      SELECT * FROM mg_message_buffer
+      WHERE session_id = ${sessionId}
+        AND message_index < ${beforeIndex}
+      ORDER BY message_index DESC
+      LIMIT ${limit}
+    `;
+
+    return rows
+      .reverse()
+      .map((row) => ({
+        role: row.role,
+        content: row.content,
+      }));
+  }
+
+  async getSessionIngestState(sessionId: string): Promise<SessionIngestState | null> {
+    const rows = await this.sql<SessionIngestStateRow[]>`
+      SELECT * FROM mg_session_ingest_state
+      WHERE session_id = ${sessionId}
+      LIMIT 1
+    `;
+
+    return rows[0] ? this.rowToSessionIngestState(rows[0]) : null;
+  }
+
+  async updateSessionIngestState(sessionId: string, lastIngestedMessageIndex: number): Promise<void> {
+    await this.sql`
+      INSERT INTO mg_session_ingest_state (session_id, last_ingested_message_index, updated_at)
+      VALUES (${sessionId}, ${lastIngestedMessageIndex}, NOW())
+      ON CONFLICT (session_id)
+      DO UPDATE SET
+        last_ingested_message_index = EXCLUDED.last_ingested_message_index,
+        updated_at = EXCLUDED.updated_at
+    `;
   }
 
   async saveSegment(segment: TopicSegment): Promise<TopicSegment> {
@@ -354,6 +423,16 @@ export class PostgresGraphStore implements GraphStore {
       DELETE FROM mg_segments
       WHERE session_id = ${sessionId}
     `;
+
+    await this.sql`
+      DELETE FROM mg_message_buffer
+      WHERE session_id = ${sessionId}
+    `;
+
+    await this.sql`
+      DELETE FROM mg_session_ingest_state
+      WHERE session_id = ${sessionId}
+    `;
   }
 
   async clearSessionGraph(sessionId: string): Promise<void> {
@@ -399,6 +478,17 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     return rows.map((row) => this.rowToNode(row));
+  }
+
+  async getLastTopicNode(sessionId: string): Promise<TopicNode | null> {
+    const rows = await this.sql<TopicNodeRow[]>`
+      SELECT * FROM mg_topic_nodes
+      WHERE session_id = ${sessionId}
+      ORDER BY topic_order DESC, created_at DESC
+      LIMIT 1
+    `;
+
+    return rows[0] ? this.rowToNode(rows[0]) : null;
   }
 
   async getSegmentsBySession(sessionId: string): Promise<TopicSegment[]> {
@@ -954,6 +1044,11 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE INDEX IF NOT EXISTS mg_session_ingest_state_updated_idx
+      ON mg_session_ingest_state(updated_at)
+    `;
+
+    await this.sql`
       CREATE INDEX IF NOT EXISTS mg_nodes_embedding_idx
       ON mg_topic_nodes
       USING ivfflat (embedding vector_cosine_ops)
@@ -1079,6 +1174,14 @@ export class PostgresGraphStore implements GraphStore {
       agentColor: row.agent_color,
       fleetId: row.fleet_id,
       createdAt: row.created_at,
+    };
+  }
+
+  private rowToSessionIngestState(row: SessionIngestStateRow): SessionIngestState {
+    return {
+      sessionId: row.session_id,
+      lastIngestedMessageIndex: row.last_ingested_message_index,
+      updatedAt: row.updated_at,
     };
   }
 

@@ -8,6 +8,8 @@ The project is intentionally focused. MemoGrafter is a chatbot memory framework,
 
 The most important idea is memory grafting. A chatbot can build useful memory during one conversation, and another chatbot can absorb only the relevant parts.
 
+MemoGrafter ingests conversation memory incrementally. New turns append topic nodes, memory nodes, and graph edges to the existing session graph instead of clearing and rebuilding the graph on every response. This keeps grafted memory and future external graph enrichment durable across normal chatbot turns.
+
 ## Requirements
 
 - Node.js 18 or newer.
@@ -85,6 +87,7 @@ Current v1 tables:
 - `mg_memory_edges`
 - `mg_fleets`
 - `mg_fleet_agents`
+- `mg_session_ingest_state`
 
 ## Quick Start
 
@@ -141,6 +144,8 @@ export interface Message {
 ```
 
 `MemoGrafterAgent` keeps an in-memory user/assistant history for the current session and stores messages in PostgreSQL during ingestion. When a session already has memory graph content, `invoke()` can add a system message with recalled facts before the LLM call.
+
+Ingestion tracks the last message index that has been processed for each session. Re-running ingestion with the same history is a no-op for graph creation, while later turns append new graph state.
 
 ### Segments
 
@@ -258,13 +263,25 @@ On every call, `invoke()`:
 3. Prepends the recalled memory prompt as a system message when recall returns matching facts.
 4. Builds the LLM message list from the optional memory system message, the recent raw history window, and the current user message.
 5. Adds the user message and assistant response to local history after the LLM response.
-6. Queues ingestion of the updated conversation into the memory graph.
+6. Queues ingestion of only the newly added conversation turns into the memory graph.
 
 Recall is skipped entirely when the session has no topic nodes yet. This avoids an unnecessary embed and vector search on the first turn or while async ingestion has not produced graph content.
 
 Recall failures are logged as warnings and fall back to raw history only, so a retrieval or embedder problem should not crash the foreground chatbot turn.
 
 On the first turn there may be no memory to recall. Later turns can use memory created from earlier turns once ingestion has completed.
+
+Normal ingestion does not call `clearSession()`. Existing topic nodes, grafted nodes, memory rows, and graph edges are preserved unless you explicitly clear the session.
+
+### Clearing A Session
+
+Use `clearSession()` when you intentionally want to reset an agent:
+
+```ts
+await agent.clearSession();
+```
+
+This waits for pending ingestion, clears the agent's local in-memory history, removes stored messages, topic nodes, memory nodes, graph edges, segments, and resets the session ingest cursor. It is a destructive operation and is not part of normal `invoke()` processing.
 
 ### Targeted Recall
 
@@ -617,7 +634,7 @@ Without reentry detection, the later database discussion is just another topic n
 
 This helps graph traversal and memory injection recover earlier related context. A later question about connection pooling can still be connected to the original PostgreSQL/ACID discussion.
 
-Reentry edges are written between the current rebuilt topic nodes. They do not point at deleted nodes from previous ingestion passes.
+Reentry edges are written between newly ingested topic nodes, and can also point from a new node back to an existing durable topic node when the detector recognizes a return to earlier context.
 
 ### `graph`
 
@@ -693,6 +710,8 @@ const agent = new MemoGrafterAgent({
 ```
 
 Queue mode is useful when ingestion becomes too slow to run inline. Redis connection problems are logged as warnings and should not throw from normal chatbot invocation.
+
+Whether ingestion runs inline or through the queue, MemoGrafter uses the stored ingest cursor to skip message ranges that have already been processed. Queue retries should therefore avoid creating duplicate topic nodes for the same message range.
 
 ## Custom Adapters
 
@@ -779,7 +798,7 @@ Breaking changes to pipeline internals may occur in minor versions.
 
 Available pipeline exports:
 
-- `IngestPipeline`: segments messages, builds topic nodes, extracts memory nodes, and writes graph edges.
+- `IngestPipeline`: incrementally segments new messages, builds topic nodes, extracts memory nodes, and writes graph edges.
 - `RetrieverPipeline`: embeds a query, searches memory nodes, and returns a structured `RetrievalResult`.
 - `GrafterPipeline`: traverses the topic graph and assembles a token-budget-fitted system prompt.
 
@@ -1007,6 +1026,16 @@ const result = await agent.recall("Japan travel preferences", {
 
 For grafted sessions, also confirm that the source topic had active memory nodes before it was absorbed. Absorbing copies active memory rows, but it cannot create facts for a topic if extraction produced only a topic summary and no `mg_memory_nodes` rows.
 
+### Duplicate Or Unexpected Topic Nodes
+
+MemoGrafter processes only messages after the stored ingest cursor. If you see duplicate topic ranges:
+
+- Confirm your database has the `mg_session_ingest_state` table.
+- Confirm the same session ID is being reused for the same agent.
+- Check whether `clearSession()` was called, which resets the cursor and removes stored session data.
+
+Incremental ingest can still create semantically similar topic nodes over time. That is expected; node merge and graph compaction are separate maintenance features.
+
 ### Redis Warnings
 
 Redis is only required when you pass `queue` or `cache` config. If you do not need background ingestion or recall caching, remove those sections.
@@ -1025,6 +1054,7 @@ Practical notes:
 - Use PostgreSQL with `pgvector` enabled.
 - Tune `tokenBudget` to control prompt size and cost.
 - Use queue mode if ingestion becomes slow.
+- Use `clearSession()` only for intentional resets; normal ingestion preserves the graph incrementally.
 - Use the optional recall cache for long sessions with repeated direct or invoke-time recall.
 - Store your own user/session mapping outside MemoGrafter.
 - Call `close()` during graceful shutdown.
@@ -1064,6 +1094,7 @@ Useful `GraphStore` inspection methods:
 - `getEdgesBySession(sessionId)`
 - `getMemoriesBySession(sessionId)`
 - `getSessionNodeCount(sessionId)`
+- `getSessionIngestState(sessionId)`
 
 Common `MemoGrafterAgent` methods:
 
@@ -1074,6 +1105,7 @@ Common `MemoGrafterAgent` methods:
 - `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.
 - `getActiveNodes()`: inspect topic nodes.
 - `getActiveSegments()`: inspect topic segments.
+- `clearSession()`: explicitly clear local history and stored session memory.
 - `recall(query, options?)`: retrieve structured memory by semantic query.
 - `graft(topicIds?)`: preview memory injection.
 - `ingestGraftedNodes(nodes)`: copy provided nodes into this agent.
