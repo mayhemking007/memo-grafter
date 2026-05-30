@@ -39,7 +39,6 @@ export interface CrawlerMaintenanceStore {
     weight?: number;
   }): Promise<boolean>;
 }
-
 export interface CrawlerPassReport {
   name: string;
   ok: boolean;
