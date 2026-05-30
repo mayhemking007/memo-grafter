@@ -3,6 +3,7 @@ import { MemoGrafterAgent } from "../../src/MemoGrafterAgent.js";
 import type {
   EmbedAdapter,
   GraftRegistryEntry,
+  MemoryEdge,
   LLMAdapter,
   MemoryNode,
   MemoGrafterConfig,
@@ -17,6 +18,7 @@ type SnapshotCore = {
   store: {
     getEdgesBySession(sessionId: string): Promise<TopicEdge[]>;
     getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
+    getMemoryEdgesBySession(sessionId: string): Promise<MemoryEdge[]>;
     getGraftRegistry(sessionId: string): Promise<GraftRegistryEntry[]>;
     deleteNode(nodeId: string, sessionId?: string): Promise<void>;
   };
@@ -147,8 +149,17 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
         sessionId,
         topicNodeId: node.id,
         supersededBy: "memory-1",
+        hasConflict: true,
       }),
     ];
+    const memoryEdge: MemoryEdge = {
+      id: "memory-edge-1",
+      sourceId: "memory-1",
+      targetId: "memory-superseded",
+      edgeType: "updates",
+      weight: 1,
+      createdAt: new Date("2026-01-03T00:00:00.000Z"),
+    };
     const calls: string[] = [];
     let releaseIngest: (() => void) | undefined;
 
@@ -166,6 +177,10 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
     privateAgent.core.store.getMemoriesBySession = async (observedSessionId) => {
       calls.push(`memories:${observedSessionId}`);
       return memories;
+    };
+    privateAgent.core.store.getMemoryEdgesBySession = async (observedSessionId) => {
+      calls.push(`memoryEdges:${observedSessionId}`);
+      return [memoryEdge];
     };
     privateAgent.core.store.getGraftRegistry = async (observedSessionId) => {
       calls.push(`registry:${observedSessionId}`);
@@ -186,6 +201,7 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
       `topics:${sessionId}`,
       `edges:${sessionId}`,
       `memories:${sessionId}`,
+      `memoryEdges:${sessionId}`,
       `registry:${sessionId}`,
     ]);
     expect(snapshot).toMatchObject({
@@ -193,6 +209,7 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
       nodes: [node],
       edges: [edge],
       memories,
+      memoryEdges: [memoryEdge],
     });
     expect(snapshot.snapshotNodes).toEqual([{
       node,
@@ -205,6 +222,8 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
     expect(new Date(snapshot.capturedAt).toISOString()).toBe(snapshot.capturedAt);
     expect(snapshot.memories.some((memory) => memory.decayed)).toBe(true);
     expect(snapshot.memories.some((memory) => memory.supersededBy !== null)).toBe(true);
+    expect(snapshot.memories.some((memory) => memory.hasConflict)).toBe(true);
+    expect(snapshot.memoryEdges).toEqual([memoryEdge]);
   });
 
   it("returns graft registry entries and removes only registered grafts", async () => {

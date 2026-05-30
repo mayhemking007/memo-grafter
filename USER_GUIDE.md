@@ -197,9 +197,12 @@ Important fields:
 - `confidence`: confidence score from `0` to `1`.
 - `topicNodeId`: parent topic node ID.
 - `decayed`: whether the memory is stale.
+- `hasConflict`: whether crawler maintenance found a conflicting active fact.
 - `supersededBy`: newer memory ID when this memory has been replaced.
 
 Memory nodes are stored in `mg_memory_nodes`.
+
+`decayed`, `hasConflict`, and `supersededBy` are maintenance fields. Normal ingestion creates active memories. Optional crawler passes can later annotate existing memory rows, but they do not delete rows or rewrite topic summaries.
 
 ### Graph Edges
 
@@ -211,6 +214,19 @@ Edges connect related topic nodes. They can represent temporal, semantic, grafte
 - `reentry`: the conversation returned to an earlier topic after discussing something else.
 
 Edges are stored in `mg_topic_edges`.
+
+Memory edges are stored separately in `mg_memory_edges`. They can represent:
+
+- `semantic`: two memory facts are similar.
+- `conflicts`: two active memory facts disagree.
+- `updates`: a newer memory supersedes an older memory.
+- `related`: reserved for broader memory relationships.
+
+For version edges, MemoGrafter uses this direction:
+
+```text
+newer_memory --updates--> older_memory
+```
 
 ### Grafting
 
@@ -338,6 +354,7 @@ console.log(snapshot.nodes);
 console.log(snapshot.snapshotNodes);
 console.log(snapshot.edges);
 console.log(snapshot.memories);
+console.log(snapshot.memoryEdges);
 console.log(snapshot.capturedAt);
 ```
 
@@ -348,11 +365,14 @@ console.log(snapshot.capturedAt);
 - `snapshotNodes`: active topic nodes wrapped with provenance metadata when a node came from a graft.
 - `edges`: topic edges where either endpoint belongs to a session topic node.
 - `memories`: all memory nodes for the session, including decayed or superseded rows.
+- `memoryEdges`: memory-level edges such as `semantic`, `conflicts`, `updates`, and `related`.
 - `capturedAt`: ISO timestamp for when the snapshot was produced.
 
 Each `snapshotNodes` entry contains the topic `node` and an optional `graftOrigin` with `sourceSessionId`, `sourceNodeId`, and `graftedAt`. The plain `nodes` array remains available for callers that only need the topic nodes.
 
 This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
+
+Graph snapshots intentionally include stale and maintenance metadata so visualizers can show memory lifecycle state. For example, a UI can fade `decayed` memories, show `hasConflict` badges, draw `conflicts` edges between contradictory facts, and draw `updates` edges from the current fact to the older fact it replaced.
 
 Read active topic nodes:
 
@@ -416,6 +436,88 @@ const graft = await agent.graft([nodes[0]!.id]);
 - `systemPrompt`: memory context suitable for an LLM system prompt.
 - `nodes`: selected topic nodes.
 - `tokenCount`: estimated token count.
+
+Graft prompts include topic summaries because they preserve useful conversation context. Topic summaries are historical: if an older topic summary says "the user lives in Delhi" and a later memory says "the user lives in Bangalore", MemoGrafter does not rewrite the old summary. Instead, when crawler maintenance has marked a contradiction or supersession, graft prompt assembly adds deterministic maintenance notes and active memory facts:
+
+```text
+Memory maintenance notes:
+- The fact "user location: Delhi" was superseded by "Bangalore".
+- Prefer active memory facts over contradictory historical summary details.
+Active memory facts:
+- user location: Bangalore
+```
+
+This keeps history intact while telling the downstream model which fact is current.
+
+## Maintaining Memory With The Crawler
+
+`MemoGrafterCrawler` is an optional graph maintenance worker. It can run once on demand or on a simple in-process interval. It does not use Redis, BullMQ, OpenAI, embeddings, or LLMs for the built-in conflict/versioning passes.
+
+Typical usage with the real store:
+
+```ts
+import {
+  ConflictDetectionPass,
+  MemoGrafter,
+  MemoGrafterCrawler,
+  VersioningPass,
+} from "memo-grafter";
+
+const memo = new MemoGrafter(config);
+await memo.initialize();
+
+const crawler = new MemoGrafterCrawler({
+  store: memo.store,
+  intervalMs: 60_000,
+  passes: [
+    new ConflictDetectionPass(),
+    new VersioningPass(),
+  ],
+});
+
+const report = await crawler.runOnce();
+console.log(report);
+```
+
+`runOnce()` executes the configured passes exactly one time and returns a `CrawlerReport`. `intervalMs` does not affect `runOnce()`.
+
+To run the crawler in-process on a schedule:
+
+```ts
+crawler.start();
+
+// Later, during shutdown:
+crawler.stop();
+await memo.close();
+```
+
+`start()` is safe to call more than once; it does not create duplicate intervals. If a scheduled tick fires while the previous run is still executing, that tick is skipped.
+
+The built-in conflict/versioning passes use deterministic matching:
+
+- they group active memories by session, normalized `subject`, and normalized `predicate`;
+- a group conflicts when it has different normalized `value` strings;
+- decayed memories are skipped;
+- already superseded memories are skipped;
+- the newest conflicting fact wins by `createdAt`;
+- if timestamps tie, deterministic ID ordering is used.
+
+When conflicts are found:
+
+- both active facts get `hasConflict: true`;
+- a `conflicts` memory edge is created;
+- the older fact gets `supersededBy` pointing to the newer fact;
+- an `updates` edge is created as `newer_memory --updates--> older_memory`.
+
+Crawler maintenance is non-destructive. It annotates existing memory rows and creates memory edges. It does not delete nodes, does not rebuild topics, and does not rewrite topic summaries.
+
+Do not put crawler behavior inside `clearSession()`. `clearSession()` is a destructive reset. The crawler is a non-destructive maintenance worker. If you intentionally rebuild a session graph, use this order:
+
+```ts
+await agent.clearSession();
+await memo.ingestNow(messages, sessionId);
+await crawler.runOnce();
+```
 
 ## Absorbing Memory Into Another Chatbot
 
@@ -581,6 +683,7 @@ Useful store inspection methods include:
 - `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
 - `getEdgesBySession(sessionId)`: read all topic edges where either endpoint belongs to the session's topic nodes.
 - `getMemoriesBySession(sessionId)`: read all memory nodes for a session, including decayed and superseded rows.
+- `getMemoryEdgesBySession(sessionId)`: read memory-level edges such as `conflicts` and `updates`.
 - `getGraftRegistry(sessionId)`: read graft provenance entries for a session.
 
 ### `llm`
@@ -1112,6 +1215,9 @@ Main exports:
 - `OpenAILLMAdapter`
 - `OpenAIEmbedAdapter`
 - `PostgresGraphStore`
+- `MemoGrafterCrawler`
+- `ConflictDetectionPass`
+- `VersioningPass`
 - `GrafterPipeline`
 - `IngestPipeline`
 - `RetrieverPipeline`
@@ -1129,6 +1235,7 @@ Useful `GraphStore` inspection methods:
 - `getEdgesByType(sessionId, type)`
 - `getEdgesBySession(sessionId)`
 - `getMemoriesBySession(sessionId)`
+- `getMemoryEdgesBySession(sessionId)`
 - `getSessionNodeCount(sessionId)`
 - `getSessionIngestState(sessionId)`
 

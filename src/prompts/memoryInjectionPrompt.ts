@@ -1,4 +1,4 @@
-import type { Message, TopicNode } from "../types.js";
+import type { MemoryNode, Message, TopicNode } from "../types.js";
 
 export function buildMemoryInjectionPrompt(blocks: string[]): string {
   return [
@@ -10,10 +10,48 @@ export function buildMemoryInjectionPrompt(blocks: string[]): string {
   ].join("\n");
 }
 
-export function formatMemoryNode(node: TopicNode, messages: Message[]): string {
+export interface MemoryMaintenancePromptContext {
+  notes?: string[];
+  activeMemories?: MemoryNode[];
+}
+
+export function formatMemoryNode(
+  node: TopicNode,
+  messages: Message[],
+  maintenance: MemoryMaintenancePromptContext = {},
+): string {
   const context = messages
     .map((message) => `${message.role}: ${message.content}`)
     .join("\n");
+  const maintenanceBlock = formatMaintenanceBlock(maintenance);
 
-  return `[Topic: ${node.label}]\nSummary: ${node.summary}\nContext:\n${context}`;
+  return [
+    `[Topic: ${node.label}]`,
+    `Summary: ${node.summary}`,
+    maintenanceBlock,
+    `Context:\n${context}`,
+  ].filter(Boolean).join("\n");
+}
+
+function formatMaintenanceBlock(maintenance: MemoryMaintenancePromptContext): string {
+  const lines: string[] = [];
+
+  if (maintenance.notes && maintenance.notes.length > 0) {
+    lines.push("Memory maintenance notes:");
+    for (const note of maintenance.notes) {
+      lines.push(`- ${note}`);
+    }
+  }
+
+  const activeMemories = maintenance.activeMemories?.filter((memory) =>
+    !memory.decayed && memory.supersededBy == null
+  ) ?? [];
+  if (activeMemories.length > 0) {
+    lines.push("Active memory facts:");
+    for (const memory of activeMemories) {
+      lines.push(`- ${memory.subject} ${memory.predicate}: ${memory.value}`);
+    }
+  }
+
+  return lines.join("\n");
 }

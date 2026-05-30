@@ -1,0 +1,258 @@
+import { describe, expect, it } from "vitest";
+import {
+  ConflictDetectionPass,
+  MemoGrafterCrawler,
+  VersioningPass,
+  type CrawlerMaintenanceStore,
+} from "../../src/index.js";
+import type { MemoryEdge, MemoryNode } from "../../src/types.js";
+
+class InMemoryMaintenanceStore implements CrawlerMaintenanceStore {
+  readonly memories: MemoryNode[];
+  readonly edges: MemoryEdge[] = [];
+
+  constructor(memories: MemoryNode[]) {
+    this.memories = memories;
+  }
+
+  async listMemoryNodesForMaintenance(): Promise<MemoryNode[]> {
+    return this.memories.map((memory) => ({ ...memory }));
+  }
+
+  async markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number> {
+    let updated = 0;
+    const ids = new Set(memoryNodeIds);
+
+    for (const memory of this.memories) {
+      if (ids.has(memory.id) && memory.hasConflict !== true) {
+        memory.hasConflict = true;
+        updated += 1;
+      }
+    }
+
+    return updated;
+  }
+
+  async markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean> {
+    const memory = this.memories.find((candidate) => candidate.id === memoryNodeId);
+    if (!memory || memory.supersededBy != null) return false;
+
+    memory.supersededBy = supersededBy;
+    return true;
+  }
+
+  async upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
+    weight?: number;
+  }): Promise<boolean> {
+    const exists = this.edges.some((candidate) => {
+      if (candidate.edgeType !== edge.edgeType) return false;
+      if (edge.edgeType === "updates") {
+        return candidate.sourceId === edge.sourceId && candidate.targetId === edge.targetId;
+      }
+
+      return (candidate.sourceId === edge.sourceId && candidate.targetId === edge.targetId)
+        || (candidate.sourceId === edge.targetId && candidate.targetId === edge.sourceId);
+    });
+
+    if (exists) return false;
+
+    this.edges.push({
+      id: `edge-${this.edges.length + 1}`,
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      edgeType: edge.edgeType,
+      weight: edge.weight ?? 1,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    return true;
+  }
+}
+
+function makeMemory(overrides: Partial<MemoryNode> = {}): MemoryNode {
+  return {
+    id: "memory-a",
+    segmentId: "segment-1",
+    topicNodeId: "topic-1",
+    agentId: null,
+    sessionId: "session-1",
+    memoryType: "fact",
+    sourceType: "conversation",
+    subject: "user",
+    predicate: "location",
+    value: "Delhi",
+    confidence: 1,
+    embedding: [0.1, 0.2],
+    sourceUrl: null,
+    sourceTitle: null,
+    supersededBy: null,
+    decayed: false,
+    hasConflict: false,
+    agentColor: null,
+    fleetId: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+describe("crawler memory maintenance passes", () => {
+  it("detects conflicts for same subject and predicate with different values", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "memory-a", value: "Delhi" }),
+      makeMemory({ id: "memory-b", value: "Bangalore" }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      inspected: 2,
+      conflictsDetected: 1,
+      nodesMarkedConflicting: 2,
+      conflictEdgesCreated: 1,
+    });
+    expect(store.memories.every((memory) => memory.hasConflict)).toBe(true);
+    expect(store.edges).toMatchObject([
+      {
+        sourceId: "memory-a",
+        targetId: "memory-b",
+        edgeType: "conflicts",
+      },
+    ]);
+  });
+
+  it("does not detect conflicts when normalized values are equal", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "memory-a", value: " Delhi " }),
+      makeMemory({ id: "memory-b", value: "delhi" }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 0,
+      nodesMarkedConflicting: 0,
+      conflictEdgesCreated: 0,
+    });
+    expect(store.edges).toHaveLength(0);
+  });
+
+  it("supersedes older conflicting memories and creates update edges", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "older",
+        value: "Delhi",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+      makeMemory({
+        id: "newer",
+        value: "Bangalore",
+        createdAt: new Date("2026-01-02T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new VersioningPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 1,
+      nodesSuperseded: 1,
+      updateEdgesCreated: 1,
+    });
+    expect(store.memories.find((memory) => memory.id === "older")?.supersededBy).toBe("newer");
+    expect(store.memories.find((memory) => memory.id === "newer")?.supersededBy).toBeNull();
+    expect(store.edges).toMatchObject([
+      {
+        sourceId: "newer",
+        targetId: "older",
+        edgeType: "updates",
+      },
+    ]);
+  });
+
+  it("uses deterministic id fallback when timestamps match", async () => {
+    const createdAt = new Date("2026-01-01T00:00:00.000Z");
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "aaa", value: "Delhi", createdAt }),
+      makeMemory({ id: "zzz", value: "Bangalore", createdAt }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new VersioningPass()],
+    });
+
+    await crawler.runOnce();
+
+    expect(store.memories.find((memory) => memory.id === "aaa")?.supersededBy).toBe("zzz");
+    expect(store.memories.find((memory) => memory.id === "zzz")?.supersededBy).toBeNull();
+  });
+
+  it("is idempotent across repeated crawler runs", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "older", value: "Delhi" }),
+      makeMemory({
+        id: "newer",
+        value: "Bangalore",
+        createdAt: new Date("2026-01-02T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
+    });
+
+    await crawler.runOnce();
+    const secondReport = await crawler.runOnce();
+
+    expect(store.edges).toHaveLength(2);
+    expect(store.memories.filter((memory) => memory.hasConflict)).toHaveLength(2);
+    expect(secondReport.passes[0]?.result).toMatchObject({
+      conflictsDetected: 0,
+      nodesMarkedConflicting: 0,
+      conflictEdgesCreated: 0,
+      skippedSuperseded: 1,
+    });
+    expect(secondReport.passes[1]?.result).toMatchObject({
+      conflictsDetected: 0,
+      nodesSuperseded: 0,
+      updateEdgesCreated: 0,
+      skippedSuperseded: 1,
+    });
+  });
+
+  it("ignores decayed and already superseded memories without deleting anything", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "active", value: "Delhi" }),
+      makeMemory({ id: "decayed", value: "Bangalore", decayed: true }),
+      makeMemory({ id: "superseded", value: "Mumbai", supersededBy: "active" }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(store.memories).toHaveLength(3);
+    expect(store.edges).toHaveLength(0);
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 0,
+      skippedDecayed: 1,
+      skippedSuperseded: 1,
+    });
+    expect(report.passes[1]?.result).toMatchObject({
+      conflictsDetected: 0,
+      skippedDecayed: 1,
+      skippedSuperseded: 1,
+    });
+  });
+});

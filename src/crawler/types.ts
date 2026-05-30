@@ -1,7 +1,10 @@
+import type { MemoryEdge, MemoryNode } from "../types.js";
+
 export interface CrawlerConfig {
   intervalMs?: number;
   passes?: CrawlerPass[];
   stopOnPassError?: boolean;
+  store?: CrawlerMaintenanceStore;
 }
 
 export interface CrawlerPass {
@@ -11,13 +14,30 @@ export interface CrawlerPass {
 
 export interface CrawlerPassContext {
   signal?: AbortSignal;
+  store?: CrawlerMaintenanceStore;
 }
 
 export interface CrawlerPassResult {
   inspected?: number;
   annotated?: number;
   skipped?: number;
+  conflictsDetected?: number;
+  nodesMarkedConflicting?: number;
+  conflictEdgesCreated?: number;
+  nodesSuperseded?: number;
+  updateEdgesCreated?: number;
+  skippedSuperseded?: number;
+  skippedDecayed?: number;
   notes?: string[];
+}
+
+export interface CrawlerMaintenanceStore {
+  listMemoryNodesForMaintenance(): Promise<MemoryNode[]>;
+  markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number>;
+  markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean>;
+  upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
+    weight?: number;
+  }): Promise<boolean>;
 }
 
 export interface CrawlerPassReport {

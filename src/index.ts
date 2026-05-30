@@ -1,6 +1,6 @@
 export { MemoGrafterAgent } from "./MemoGrafterAgent.js";
 export { MemoGrafter } from "./MemoGrafter.js";
-export { MemoGrafterCrawler } from "./crawler/index.js";
+export { ConflictDetectionPass, MemoGrafterCrawler, VersioningPass } from "./crawler/index.js";
 export { ConductorAgent } from "./fleet/ConductorAgent.js";
 export { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
 export { WorkerAgent } from "./fleet/WorkerAgent.js";
@@ -52,6 +52,7 @@ export type {
 } from "./fleet/types.js";
 export type {
   CrawlerConfig,
+  CrawlerMaintenanceStore,
   CrawlerPass,
   CrawlerPassContext,
   CrawlerPassReport,
