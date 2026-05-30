@@ -58,3 +58,14 @@ All notable changes to this project will be documented here.
 ### Changed
 
 - Made `IngestPipeline` incremental using ingest cursors to avoid full-history rebuilds and improve memory durability
+
+## [0.2.4] - 2026-05-30
+
+### Added
+
+- Added `MemoGrafterCrawler` maintenance passes for deterministic conflict detection, memory versioning, and decay scoring.
+- Added memory lifecycle annotations including `hasConflict`, `supersededBy`, and `decayed`, plus `conflicts` and `updates` memory edges.
+
+### Changed
+
+- Updated graph snapshots and graft prompts so conflicted, superseded, and decayed memory state is visible and active facts are preferred over stale summaries.
