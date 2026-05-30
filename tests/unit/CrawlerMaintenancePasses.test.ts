@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConflictDetectionPass,
+  DecayScoringPass,
   MemoGrafterCrawler,
   VersioningPass,
   type CrawlerMaintenanceStore,
@@ -38,6 +39,22 @@ class InMemoryMaintenanceStore implements CrawlerMaintenanceStore {
     if (!memory || memory.supersededBy != null) return false;
 
     memory.supersededBy = supersededBy;
+    return true;
+  }
+
+  async markMemoryNodeDecayed(memoryNodeId: string): Promise<boolean> {
+    const memory = this.memories.find((candidate) => candidate.id === memoryNodeId);
+    if (!memory || memory.decayed || memory.supersededBy != null) return false;
+
+    memory.decayed = true;
+    return true;
+  }
+
+  async updateMemoryNodeConfidence(memoryNodeId: string, confidence: number): Promise<boolean> {
+    const memory = this.memories.find((candidate) => candidate.id === memoryNodeId);
+    if (!memory) return false;
+
+    memory.confidence = confidence;
     return true;
   }
 
@@ -254,5 +271,164 @@ describe("crawler memory maintenance passes", () => {
       skippedDecayed: 1,
       skippedSuperseded: 1,
     });
+  });
+
+  it("keeps recent high-scoring memories active during decay scoring", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "recent",
+        confidence: 0.9,
+        createdAt: new Date("2026-01-09T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new DecayScoringPass({
+          halfLifeDays: 30,
+          minScore: 0.25,
+          now: () => new Date("2026-01-10T00:00:00.000Z"),
+        }),
+      ],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(store.memories[0]?.decayed).toBe(false);
+    expect(report.passes[0]?.result).toMatchObject({
+      inspected: 1,
+      decayScored: 1,
+      nodesDecayed: 0,
+      skippedAlreadyDecayed: 0,
+      skippedSuperseded: 0,
+    });
+    expect(report.passes[0]?.result?.minDecayScore).toBeGreaterThan(0.25);
+  });
+
+  it("marks old low-scoring memories as decayed", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "stale",
+        confidence: 0.4,
+        createdAt: new Date("2025-01-10T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new DecayScoringPass({
+          halfLifeDays: 30,
+          minScore: 0.25,
+          now: () => new Date("2026-01-10T00:00:00.000Z"),
+        }),
+      ],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(store.memories[0]?.decayed).toBe(true);
+    expect(report.passes[0]?.result).toMatchObject({
+      inspected: 1,
+      decayScored: 1,
+      nodesDecayed: 1,
+    });
+    expect(report.passes[0]?.result?.maxDecayScore).toBeLessThan(0.25);
+  });
+
+  it("skips superseded and already decayed memories during decay scoring", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "active",
+        confidence: 0.9,
+        createdAt: new Date("2026-01-09T00:00:00.000Z"),
+      }),
+      makeMemory({
+        id: "already-decayed",
+        decayed: true,
+        createdAt: new Date("2025-01-10T00:00:00.000Z"),
+      }),
+      makeMemory({
+        id: "superseded",
+        supersededBy: "active",
+        createdAt: new Date("2025-01-10T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new DecayScoringPass({
+          halfLifeDays: 30,
+          minScore: 0.25,
+          now: () => new Date("2026-01-10T00:00:00.000Z"),
+        }),
+      ],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(store.memories).toHaveLength(3);
+    expect(store.memories.find((memory) => memory.id === "already-decayed")?.decayed).toBe(true);
+    expect(store.memories.find((memory) => memory.id === "superseded")?.decayed).toBe(false);
+    expect(report.passes[0]?.result).toMatchObject({
+      decayScored: 1,
+      nodesDecayed: 0,
+      skippedAlreadyDecayed: 1,
+      skippedSuperseded: 1,
+    });
+  });
+
+  it("does not decay the same memory twice across repeated decay runs", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "stale",
+        confidence: 0.4,
+        createdAt: new Date("2025-01-10T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new DecayScoringPass({
+          halfLifeDays: 30,
+          minScore: 0.25,
+          now: () => new Date("2026-01-10T00:00:00.000Z"),
+        }),
+      ],
+    });
+
+    await crawler.runOnce();
+    const secondReport = await crawler.runOnce();
+
+    expect(store.memories[0]?.decayed).toBe(true);
+    expect(secondReport.passes[0]?.result).toMatchObject({
+      decayScored: 0,
+      nodesDecayed: 0,
+      skippedAlreadyDecayed: 1,
+    });
+  });
+
+  it("updates confidence only when decay pass is configured to do so", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "old-confidence",
+        confidence: 0.8,
+        createdAt: new Date("2025-12-11T00:00:00.000Z"),
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new DecayScoringPass({
+          halfLifeDays: 30,
+          minScore: 0,
+          updateConfidence: true,
+          now: () => new Date("2026-01-10T00:00:00.000Z"),
+        }),
+      ],
+    });
+
+    await crawler.runOnce();
+
+    expect(store.memories[0]?.confidence).toBeCloseTo(0.4);
   });
 });

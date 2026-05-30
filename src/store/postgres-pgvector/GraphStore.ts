@@ -679,6 +679,30 @@ export class PostgresGraphStore implements GraphStore {
     return rows.length > 0;
   }
 
+  async markMemoryNodeDecayed(memoryNodeId: string): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_memory_nodes
+      SET decayed = TRUE
+      WHERE id = ${memoryNodeId}::uuid
+        AND decayed = FALSE
+        AND superseded_by IS NULL
+      RETURNING id
+    `;
+
+    return rows.length > 0;
+  }
+
+  async updateMemoryNodeConfidence(memoryNodeId: string, confidence: number): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_memory_nodes
+      SET confidence = ${confidence}
+      WHERE id = ${memoryNodeId}::uuid
+      RETURNING id
+    `;
+
+    return rows.length > 0;
+  }
+
   async upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
     weight?: number;
   }): Promise<boolean> {
