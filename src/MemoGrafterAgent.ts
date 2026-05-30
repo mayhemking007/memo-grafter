@@ -83,6 +83,7 @@ export class MemoGrafterAgent {
     const { nodes } = await this.core.getTopics(this.sessionId);
     const edges = await this.core.store.getEdgesBySession(this.sessionId);
     const memories = await this.core.store.getMemoriesBySession(this.sessionId);
+    const memoryEdges = await this.core.store.getMemoryEdgesBySession(this.sessionId);
     const registry = await this.core.store.getGraftRegistry(this.sessionId);
     const registryByNodeId = new Map(registry.map((entry) => [entry.nodeId, entry]));
 
@@ -107,6 +108,7 @@ export class MemoGrafterAgent {
       }),
       edges,
       memories,
+      memoryEdges,
       capturedAt: new Date().toISOString(),
     };
   }

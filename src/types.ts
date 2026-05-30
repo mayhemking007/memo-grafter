@@ -59,6 +59,7 @@ export interface MemoryNode {
   sourceTitle: string | null;
   supersededBy: string | null;
   decayed: boolean;
+  hasConflict?: boolean;
   agentColor: string | null;
   fleetId: string | null;
   createdAt: Date;
@@ -124,6 +125,7 @@ export interface GraphSnapshot {
   snapshotNodes?: GraphSnapshotNode[];
   edges: TopicEdge[];
   memories: MemoryNode[];
+  memoryEdges?: MemoryEdge[];
   capturedAt: string;
 }
 

@@ -1,5 +1,6 @@
 import type {
   GraftRegistryEntry,
+  MemoryEdge,
   MemoryNode,
   MemoryNodeInsert,
   Message,
@@ -31,6 +32,13 @@ export interface GraphStore {
   getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]>;
   getEdgesBySession(sessionId: string): Promise<TopicEdge[]>;
   getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
+  getMemoryEdgesBySession(sessionId: string): Promise<MemoryEdge[]>;
+  listMemoryNodesForMaintenance(): Promise<MemoryNode[]>;
+  markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number>;
+  markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean>;
+  upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
+    weight?: number;
+  }): Promise<boolean>;
   clearSession(sessionId: string): Promise<void>;
   clearSessionGraph(sessionId: string): Promise<void>;
   deleteNode(nodeId: string, sessionId?: string): Promise<void>;

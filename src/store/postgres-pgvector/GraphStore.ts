@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
-import type { GraftRegistryEntry, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
+import type { GraftRegistryEntry, MemoryEdge, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
 
@@ -48,6 +48,7 @@ interface MemoryNodeRow {
   source_title: string | null;
   superseded_by: string | null;
   decayed: boolean;
+  has_conflict: boolean | null;
   agent_color: string | null;
   fleet_id: string | null;
   created_at: Date;
@@ -71,6 +72,15 @@ interface EdgeRow {
   dst_id: string;
   weight: number;
   type: string;
+}
+
+interface MemoryEdgeRow {
+  id: string;
+  source_id: string;
+  target_id: string;
+  edge_type: MemoryEdge["edgeType"];
+  weight: number | null;
+  created_at: Date;
 }
 
 interface GraftRegistryRow {
@@ -173,10 +183,16 @@ export class PostgresGraphStore implements GraphStore {
         source_title  TEXT,
         superseded_by UUID REFERENCES mg_memory_nodes(id),
         decayed       BOOLEAN NOT NULL DEFAULT FALSE,
+        has_conflict  BOOLEAN NOT NULL DEFAULT FALSE,
         agent_color   TEXT,
         fleet_id      TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_memory_nodes
+      ADD COLUMN IF NOT EXISTS has_conflict BOOLEAN NOT NULL DEFAULT FALSE
     `;
 
     await this.sql`
@@ -551,6 +567,7 @@ export class PostgresGraphStore implements GraphStore {
       source_title: node.sourceTitle,
       superseded_by: node.supersededBy,
       decayed: node.decayed,
+      has_conflict: node.hasConflict ?? false,
       agent_color: node.agentColor,
       fleet_id: node.fleetId,
     }));
@@ -574,6 +591,7 @@ export class PostgresGraphStore implements GraphStore {
         "source_title",
         "superseded_by",
         "decayed",
+        "has_conflict",
         "agent_color",
         "fleet_id",
       )}
@@ -610,6 +628,86 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async getMemoryEdgesBySession(sessionId: string): Promise<MemoryEdge[]> {
+    const rows = await this.sql<MemoryEdgeRow[]>`
+      SELECT DISTINCT edge.*
+      FROM mg_memory_edges edge
+      JOIN mg_memory_nodes source ON source.id = edge.source_id
+      JOIN mg_memory_nodes target ON target.id = edge.target_id
+      WHERE source.session_id = ${sessionId}
+         OR target.session_id = ${sessionId}
+      ORDER BY edge.created_at ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryEdge(row));
+  }
+
+  async listMemoryNodesForMaintenance(): Promise<MemoryNode[]> {
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT * FROM mg_memory_nodes
+      ORDER BY session_id ASC, created_at ASC, id ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number> {
+    if (memoryNodeIds.length === 0) return 0;
+
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_memory_nodes
+      SET has_conflict = TRUE
+      WHERE id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+        AND has_conflict = FALSE
+      RETURNING id
+    `;
+
+    return rows.length;
+  }
+
+  async markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_memory_nodes
+      SET superseded_by = ${supersededBy}::uuid
+      WHERE id = ${memoryNodeId}::uuid
+        AND superseded_by IS NULL
+      RETURNING id
+    `;
+
+    return rows.length > 0;
+  }
+
+  async upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
+    weight?: number;
+  }): Promise<boolean> {
+    const existing = edge.edgeType === "updates"
+      ? await this.sql<{ id: string }[]>`
+        SELECT id FROM mg_memory_edges
+        WHERE source_id = ${edge.sourceId}::uuid
+          AND target_id = ${edge.targetId}::uuid
+          AND edge_type = ${edge.edgeType}
+        LIMIT 1
+      `
+      : await this.sql<{ id: string }[]>`
+        SELECT id FROM mg_memory_edges
+        WHERE edge_type = ${edge.edgeType}
+          AND (
+            (source_id = ${edge.sourceId}::uuid AND target_id = ${edge.targetId}::uuid)
+            OR (source_id = ${edge.targetId}::uuid AND target_id = ${edge.sourceId}::uuid)
+          )
+        LIMIT 1
+      `;
+
+    if (existing.length > 0) return false;
+
+    await this.sql`
+      INSERT INTO mg_memory_edges (source_id, target_id, edge_type, weight)
+      VALUES (${edge.sourceId}::uuid, ${edge.targetId}::uuid, ${edge.edgeType}, ${edge.weight ?? 1})
+    `;
+
+    return true;
   }
 
   async searchMemories(
@@ -1269,8 +1367,20 @@ export class PostgresGraphStore implements GraphStore {
       sourceTitle: row.source_title,
       supersededBy: row.superseded_by,
       decayed: row.decayed,
+      hasConflict: row.has_conflict ?? false,
       agentColor: row.agent_color,
       fleetId: row.fleet_id,
+      createdAt: row.created_at,
+    };
+  }
+
+  private rowToMemoryEdge(row: MemoryEdgeRow): MemoryEdge {
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      targetId: row.target_id,
+      edgeType: row.edge_type,
+      weight: row.weight ?? 1,
       createdAt: row.created_at,
     };
   }
