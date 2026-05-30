@@ -167,6 +167,15 @@ The built-in maintenance passes are deterministic:
 
 - `ConflictDetectionPass` groups active memories by session, normalized `subject`, and normalized `predicate`. A group conflicts when it contains different normalized `value` strings. Decayed memories and already superseded memories are skipped.
 - `VersioningPass` runs over the same conflict groups, picks the newest memory by `createdAt`, falls back to deterministic ID ordering on ties, marks older memories with `superseded_by`, and creates version edges.
+- `DecayScoringPass` scores non-superseded active memories with confidence-weighted exponential recency decay. Memories whose score falls below the configured threshold are marked `decayed = TRUE`.
+
+Decay scoring uses:
+
+```text
+age_days = now - created_at
+recency_factor = exp(-(ln(2) / half_life_days) * age_days)
+decay_score = confidence * recency_factor
+```
 
 The crawler annotates existing memory rows and creates memory edges. It never deletes graph nodes. Conflict detection marks both sides with `has_conflict = TRUE` and creates an idempotent `conflicts` edge. Versioning creates an idempotent `updates` edge using this direction:
 
@@ -174,7 +183,7 @@ The crawler annotates existing memory rows and creates memory edges. It never de
 newer_memory --updates--> older_memory
 ```
 
-The original topic summaries are not rewritten. Topic summaries remain historical descriptions of the segment that produced them, while memory-node lifecycle fields and memory edges represent current fact status.
+The original topic summaries are not rewritten. Topic summaries remain historical descriptions of the segment that produced them, while memory-node lifecycle fields and memory edges represent current fact status. The decay pass does not create edges by default; it only marks stale active memory rows as decayed. Stored extraction confidence remains unchanged unless a caller explicitly enables confidence updates on the pass.
 
 ## Recall Path
 
@@ -193,7 +202,7 @@ This read-side path is separate from grafting:
 - grafting assembles broader topic context from selected topic nodes and their neighbours;
 - absorbing copies selected topic nodes and their active atomic memories into another session.
 
-Crawler versioning feeds this path through existing lifecycle fields. Once an older memory has `superseded_by` set, targeted recall and absorption treat it as inactive without needing a separate conflict-resolution step.
+Crawler versioning and decay feed this path through existing lifecycle fields. Once an older memory has `superseded_by` set, or a stale memory has `decayed = TRUE`, targeted recall and absorption treat it as inactive without needing a separate conflict-resolution step.
 
 ## Data And Graph Lifecycle
 
@@ -215,7 +224,7 @@ The lifecycle for a normal conversation is:
    - `reentry` edges link a returned topic to an earlier related topic.
 7. Memory edges may link semantically related memories within a topic.
 8. Grafted topic nodes are copied into a target session, registered in `mg_graft_registry`, linked to their source with `grafted` edges, and accompanied by copies of active memory nodes when those memories exist.
-9. Optional crawler passes can annotate active memory nodes with `has_conflict`, set `superseded_by` on older conflicting facts, and add `conflicts` or `updates` edges in `mg_memory_edges`.
+9. Optional crawler passes can annotate active memory nodes with `has_conflict`, set `superseded_by` on older conflicting facts, mark stale active facts as `decayed`, and add `conflicts` or `updates` edges in `mg_memory_edges`.
 
 During normal ingestion, existing graph state is not cleared. New topic nodes and memory nodes are appended after the stored ingest cursor, and new edges can connect them to prior native or grafted nodes. `clearSession()` is an explicit destructive reset for callers that intentionally want to remove stored session memory.
 

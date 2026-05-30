@@ -1,0 +1,94 @@
+import type { MemoryNode } from "../types.js";
+import { computeMemoryDecayScore } from "./decayScoring.js";
+import type { CrawlerPass, CrawlerPassContext, CrawlerPassResult } from "./types.js";
+
+export interface DecayScoringPassOptions {
+  halfLifeDays?: number;
+  minScore?: number;
+  now?: () => Date;
+  updateConfidence?: boolean;
+}
+
+const DEFAULT_HALF_LIFE_DAYS = 90;
+const DEFAULT_MIN_SCORE = 0.25;
+
+export class DecayScoringPass implements CrawlerPass {
+  readonly name = "decay-scoring";
+  private readonly halfLifeDays: number;
+  private readonly minScore: number;
+  private readonly now: () => Date;
+  private readonly updateConfidence: boolean;
+
+  constructor(options: DecayScoringPassOptions = {}) {
+    this.halfLifeDays = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
+    this.minScore = options.minScore ?? DEFAULT_MIN_SCORE;
+    this.now = options.now ?? (() => new Date());
+    this.updateConfidence = options.updateConfidence ?? false;
+
+    if (!Number.isFinite(this.halfLifeDays) || this.halfLifeDays <= 0) {
+      throw new Error("DecayScoringPass halfLifeDays must be greater than 0.");
+    }
+
+    if (!Number.isFinite(this.minScore) || this.minScore < 0) {
+      throw new Error("DecayScoringPass minScore must be greater than or equal to 0.");
+    }
+  }
+
+  async run(context: CrawlerPassContext): Promise<CrawlerPassResult> {
+    if (!context.store) {
+      throw new Error("DecayScoringPass requires a crawler maintenance store.");
+    }
+
+    const memories = await context.store.listMemoryNodesForMaintenance();
+    const now = this.now();
+    let decayScored = 0;
+    let nodesDecayed = 0;
+    let skippedAlreadyDecayed = 0;
+    let skippedSuperseded = 0;
+    let minDecayScore: number | undefined;
+    let maxDecayScore: number | undefined;
+
+    for (const memory of memories) {
+      if (memory.supersededBy != null) {
+        skippedSuperseded += 1;
+        continue;
+      }
+
+      if (memory.decayed) {
+        skippedAlreadyDecayed += 1;
+        continue;
+      }
+
+      const score = computeMemoryDecayScore(memory, {
+        now,
+        halfLifeDays: this.halfLifeDays,
+      });
+      decayScored += 1;
+      minDecayScore = minDecayScore === undefined ? score : Math.min(minDecayScore, score);
+      maxDecayScore = maxDecayScore === undefined ? score : Math.max(maxDecayScore, score);
+
+      if (this.updateConfidence && context.store.updateMemoryNodeConfidence) {
+        await context.store.updateMemoryNodeConfidence(memory.id, clampConfidence(score));
+      }
+
+      if (score < this.minScore) {
+        const decayed = await context.store.markMemoryNodeDecayed(memory.id);
+        if (decayed) nodesDecayed += 1;
+      }
+    }
+
+    return {
+      inspected: memories.length,
+      decayScored,
+      nodesDecayed,
+      skippedAlreadyDecayed,
+      skippedSuperseded,
+      ...(minDecayScore !== undefined ? { minDecayScore } : {}),
+      ...(maxDecayScore !== undefined ? { maxDecayScore } : {}),
+    };
+  }
+}
+
+function clampConfidence(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}

@@ -36,6 +36,8 @@ export interface GraphStore {
   listMemoryNodesForMaintenance(): Promise<MemoryNode[]>;
   markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number>;
   markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean>;
+  markMemoryNodeDecayed(memoryNodeId: string): Promise<boolean>;
+  updateMemoryNodeConfidence(memoryNodeId: string, confidence: number): Promise<boolean>;
   upsertMemoryEdge(edge: Pick<MemoryEdge, "sourceId" | "targetId" | "edgeType"> & {
     weight?: number;
   }): Promise<boolean>;

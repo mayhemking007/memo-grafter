@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConflictDetectionPass,
+  DecayScoringPass,
   GrafterPipeline,
   IngestPipeline,
   MemoGrafterCrawler,
@@ -8,6 +9,7 @@ import {
   VersioningPass,
 } from "../../src/index.js";
 import { ConflictDetectionPass as DirectConflictDetectionPass } from "../../src/crawler/ConflictDetectionPass.js";
+import { DecayScoringPass as DirectDecayScoringPass } from "../../src/crawler/DecayScoringPass.js";
 import { MemoGrafterCrawler as DirectMemoGrafterCrawler } from "../../src/crawler/MemoGrafterCrawler.js";
 import { VersioningPass as DirectVersioningPass } from "../../src/crawler/VersioningPass.js";
 import { GrafterPipeline as DirectGrafterPipeline } from "../../src/pipeline/GrafterPipeline.js";
@@ -21,6 +23,7 @@ describe("public pipeline exports", () => {
     expect(RetrieverPipeline).toBe(DirectRetrieverPipeline);
     expect(MemoGrafterCrawler).toBe(DirectMemoGrafterCrawler);
     expect(ConflictDetectionPass).toBe(DirectConflictDetectionPass);
+    expect(DecayScoringPass).toBe(DirectDecayScoringPass);
     expect(VersioningPass).toBe(DirectVersioningPass);
   });
 });

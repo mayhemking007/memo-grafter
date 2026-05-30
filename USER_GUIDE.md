@@ -451,13 +451,14 @@ This keeps history intact while telling the downstream model which fact is curre
 
 ## Maintaining Memory With The Crawler
 
-`MemoGrafterCrawler` is an optional graph maintenance worker. It can run once on demand or on a simple in-process interval. It does not use Redis, BullMQ, OpenAI, embeddings, or LLMs for the built-in conflict/versioning passes.
+`MemoGrafterCrawler` is an optional graph maintenance worker. It can run once on demand or on a simple in-process interval. It does not use Redis, BullMQ, OpenAI, embeddings, or LLMs for the built-in conflict/versioning/decay passes.
 
 Typical usage with the real store:
 
 ```ts
 import {
   ConflictDetectionPass,
+  DecayScoringPass,
   MemoGrafter,
   MemoGrafterCrawler,
   VersioningPass,
@@ -472,6 +473,10 @@ const crawler = new MemoGrafterCrawler({
   passes: [
     new ConflictDetectionPass(),
     new VersioningPass(),
+    new DecayScoringPass({
+      halfLifeDays: 90,
+      minScore: 0.25,
+    }),
   ],
 });
 
@@ -502,12 +507,31 @@ The built-in conflict/versioning passes use deterministic matching:
 - the newest conflicting fact wins by `createdAt`;
 - if timestamps tie, deterministic ID ordering is used.
 
+`DecayScoringPass` uses confidence-weighted exponential recency decay:
+
+```text
+recency_factor = exp(-(ln(2) / half_life_days) * age_days)
+decay_score = confidence * recency_factor
+```
+
+If `decay_score < minScore`, the memory is marked `decayed: true`. Superseded memories and already decayed memories are skipped. Conservative defaults are used when options are omitted:
+
+```ts
+new DecayScoringPass({
+  halfLifeDays: 90,
+  minScore: 0.25,
+});
+```
+
+By default the pass does not change stored `confidence`; confidence is treated as extraction confidence, while decay score is temporal freshness. If you explicitly want the score written back as confidence, pass `updateConfidence: true`.
+
 When conflicts are found:
 
 - both active facts get `hasConflict: true`;
 - a `conflicts` memory edge is created;
 - the older fact gets `supersededBy` pointing to the newer fact;
 - an `updates` edge is created as `newer_memory --updates--> older_memory`.
+- stale active memories can be marked `decayed: true` by the decay pass.
 
 Crawler maintenance is non-destructive. It annotates existing memory rows and creates memory edges. It does not delete nodes, does not rebuild topics, and does not rewrite topic summaries.
 
@@ -1217,6 +1241,7 @@ Main exports:
 - `PostgresGraphStore`
 - `MemoGrafterCrawler`
 - `ConflictDetectionPass`
+- `DecayScoringPass`
 - `VersioningPass`
 - `GrafterPipeline`
 - `IngestPipeline`
