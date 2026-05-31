@@ -241,7 +241,7 @@ describe("RetrieverPipeline", () => {
     });
   });
 
-  it("ranks blocks by highest similarity", async () => {
+  it("ranks blocks by highest confidence-weighted score", async () => {
     const topicA = makeTopicNode({
       id: "topic-a",
       label: "Topic A",
@@ -262,7 +262,7 @@ describe("RetrieverPipeline", () => {
         subject: "a",
         predicate: "has",
         value: "high",
-        confidence: 0.9,
+        confidence: 0.1,
         similarity: 0.95,
       }),
       makeScoredMemoryNode({
@@ -272,7 +272,7 @@ describe("RetrieverPipeline", () => {
         subject: "b",
         predicate: "has",
         value: "only",
-        confidence: 0.9,
+        confidence: 1,
         similarity: 0.88,
       }),
       makeScoredMemoryNode({
@@ -293,6 +293,106 @@ describe("RetrieverPipeline", () => {
       }),
       makeEmbedder(),
       {},
+    );
+
+    const result = await pipeline.run("query", "session-1");
+
+    expect(result.nodes[0]?.id).toBe("topic-b");
+  });
+
+  it("uses confidence as a tie breaker for equal similarities", async () => {
+    const topicA = makeTopicNode({
+      id: "topic-a",
+      label: "Topic A",
+      summary: "Topic A summary.",
+      topicOrder: 1,
+    });
+    const topicB = makeTopicNode({
+      id: "topic-b",
+      label: "Topic B",
+      summary: "Topic B summary.",
+      topicOrder: 2,
+    });
+    const lowConfidence = makeScoredMemoryNode({
+      id: "low-confidence",
+      topicNodeId: "topic-a",
+      memoryType: "fact",
+      subject: "a",
+      predicate: "has",
+      value: "same similarity",
+      confidence: 0.2,
+      similarity: 0.9,
+    });
+    const highConfidence = makeScoredMemoryNode({
+      id: "high-confidence",
+      topicNodeId: "topic-b",
+      memoryType: "fact",
+      subject: "b",
+      predicate: "has",
+      value: "same similarity",
+      confidence: 0.9,
+      similarity: 0.9,
+    });
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async () => [lowConfidence, highConfidence],
+        getTopicNode: async (topicNodeId) => topicNodeId === "topic-a" ? topicA : topicB,
+      }),
+      makeEmbedder(),
+      {},
+    );
+
+    const result = await pipeline.run("query", "session-1");
+
+    expect(result.facts.map((fact) => fact.id)).toEqual(["high-confidence", "low-confidence"]);
+    expect(result.facts[0]).not.toHaveProperty("retrievalScore");
+  });
+
+  it("allows scoring weights to be tuned", async () => {
+    const topicA = makeTopicNode({
+      id: "topic-a",
+      label: "Topic A",
+      summary: "Topic A summary.",
+      topicOrder: 1,
+    });
+    const topicB = makeTopicNode({
+      id: "topic-b",
+      label: "Topic B",
+      summary: "Topic B summary.",
+      topicOrder: 2,
+    });
+    const highSimilarity = makeScoredMemoryNode({
+      id: "high-similarity",
+      topicNodeId: "topic-a",
+      memoryType: "fact",
+      subject: "a",
+      predicate: "has",
+      value: "high similarity",
+      confidence: 0.1,
+      similarity: 0.95,
+    });
+    const highConfidence = makeScoredMemoryNode({
+      id: "high-confidence",
+      topicNodeId: "topic-b",
+      memoryType: "fact",
+      subject: "b",
+      predicate: "has",
+      value: "high confidence",
+      confidence: 1,
+      similarity: 0.88,
+    });
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async () => [highConfidence, highSimilarity],
+        getTopicNode: async (topicNodeId) => topicNodeId === "topic-a" ? topicA : topicB,
+      }),
+      makeEmbedder(),
+      {
+        scoring: {
+          similarityWeight: 1,
+          confidenceWeight: 0,
+        },
+      },
     );
 
     const result = await pipeline.run("query", "session-1");

@@ -139,6 +139,12 @@ export interface RetrieverConfig {
   limit?: number;
   minSimilarity?: number;
   tokenBudget?: number;
+  scoring?: {
+    /** Default 0.7. Weight applied to semantic similarity when ranking retrieved facts. */
+    similarityWeight?: number;
+    /** Default 0.3. Weight applied to memory confidence when ranking retrieved facts. */
+    confidenceWeight?: number;
+  };
   cache?: {
     ttlSeconds?: number;
   };

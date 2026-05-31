@@ -189,7 +189,7 @@ The original topic summaries are not rewritten. Topic summaries remain historica
 
 Targeted recall is handled by `RetrieverPipeline`, which is used by `MemoGrafterAgent.recall()`.
 
-The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, groups facts by parent topic node, ranks those topic blocks by best fact similarity, and formats a token-budgeted system prompt.
+The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, combines each fact's similarity and confidence into a confidence-weighted retrieval score, groups facts by parent topic node, ranks those topic blocks by best fact retrieval score, and formats a token-budgeted system prompt.
 
 When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, and a short hash of the embedding: `mg:recall:${sessionId}:${limit}:${minSimilarity}:${embeddingHash}`. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
 

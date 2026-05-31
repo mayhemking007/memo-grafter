@@ -311,6 +311,10 @@ const result = await agent.recall("deployment config", {
   limit: 8,
   minSimilarity: 0.55,
   tokenBudget: 1000,
+  scoring: {
+    similarityWeight: 0.7,
+    confidenceWeight: 0.3,
+  },
   cache: {
     ttlSeconds: 90,
   },
@@ -334,9 +338,11 @@ Options:
 - `limit`: max memory nodes to fetch before filtering. Defaults to `10`.
 - `minSimilarity`: cosine similarity floor. Defaults to `0.6`.
 - `tokenBudget`: max approximate tokens for included fact blocks. Defaults to `1200`.
+- `scoring.similarityWeight`: weight applied to semantic similarity when ranking retrieved facts. Defaults to `0.7`.
+- `scoring.confidenceWeight`: weight applied to memory confidence when ranking retrieved facts. Defaults to `0.3`.
 - `cache.ttlSeconds`: per-call recall cache TTL override when `MemoGrafterConfig.cache` is enabled. Values are clamped to 60-120 seconds.
 
-`recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result.
+`recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result. Retrieval still uses `minSimilarity` for the vector search floor, then ranks returned active facts with `similarity * similarityWeight + confidence * confidenceWeight`.
 
 `MemoGrafterAgent.invoke()` also calls `recall()` internally before answering when the session has topic nodes. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window. Automatic recall uses `inject.recallLimit` and `inject.recallMinSimilarity`, defaulting to `6` and `0.55`.
 
@@ -983,6 +989,10 @@ const retriever = new RetrieverPipeline(store, embedder, {
   limit: 8,
   minSimilarity: 0.55,
   tokenBudget: 1000,
+  scoring: {
+    similarityWeight: 0.7,
+    confidenceWeight: 0.3,
+  },
 });
 
 const result = await retriever.run(
