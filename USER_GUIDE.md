@@ -659,6 +659,9 @@ const agent = new MemoGrafterAgent({
     mode: "intent",
     windowSize: 5,
     driftSensitivity: "medium",
+    adaptiveSensitivity: {
+      enabled: false,
+    },
     minSegmentMessages: 3,
     llmAmbiguityDetection: false,
     reentryDetection: true,
@@ -761,6 +764,9 @@ drift: {
   mode: "intent",
   windowSize: 5,
   driftSensitivity: "medium",
+  adaptiveSensitivity: {
+    enabled: false,
+  },
   minSegmentMessages: 3,
   llmAmbiguityDetection: false,
   reentryDetection: true,
@@ -773,6 +779,7 @@ Controls topic boundary detection.
 - `mode`: `"intent"` or `"window"`.
 - `windowSize`: message window size for window mode.
 - `driftSensitivity`: preferred sensitivity preset, one of `"low"`, `"medium"`, or `"high"`.
+- `adaptiveSensitivity`: optional session-history based threshold tuning. Disabled by default.
 - `threshold`: deprecated numeric threshold. It still works when `driftSensitivity` is not set, but MemoGrafter logs a one-time warning.
 - `minSegmentMessages`: minimum messages before a boundary.
 - `llmAmbiguityDetection`: optional LLM check for borderline topic shifts. Defaults to `false`.
@@ -790,6 +797,30 @@ Sensitivity presets resolve internally to numeric thresholds:
 Use `"medium"` first. Boundaries are cut when a drift score exceeds the resolved threshold, so lower numeric thresholds split more readily and higher numeric thresholds require stronger evidence.
 
 If both `driftSensitivity` and `threshold` are provided, `driftSensitivity` wins.
+
+#### Adaptive Sensitivity
+
+Adaptive sensitivity is opt-in and keeps the configured `driftSensitivity` as its baseline. When enabled, MemoGrafter looks at recent saved segments for the session and nudges the resolved threshold by a small bounded step:
+
+```ts
+drift: {
+  mode: "intent",
+  driftSensitivity: "medium",
+  adaptiveSensitivity: {
+    enabled: true,
+    minSegments: 4,
+    lookbackSegments: 8,
+    targetSegmentMessages: {
+      min: 3,
+      max: 8,
+    },
+    adjustmentStep: 0.05,
+    maxAdjustment: 0.1,
+  },
+}
+```
+
+If recent segments are consistently short, MemoGrafter raises the threshold slightly to reduce fragmentation. If recent segments are consistently long, it lowers the threshold slightly to split more readily. It does not adapt until enough segment history exists, and it skips adjustment when recent segment lengths are too erratic.
 
 #### Reentry Detection
 

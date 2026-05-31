@@ -37,6 +37,7 @@ export type {
   RetrievalResult,
   RetrieverConfig,
   SegmentExtractionResult,
+  SessionIngestState,
   TopicEdge,
   TopicNode,
   TopicSegment,

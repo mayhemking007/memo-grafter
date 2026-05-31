@@ -1,5 +1,13 @@
 import type { GraphStore } from "../store/index.js";
-import type { DriftSensitivity, EmbedAdapter, LLMAdapter, Message, TopicNode } from "../types.js";
+import type {
+  DriftSensitivity,
+  EmbedAdapter,
+  LLMAdapter,
+  MemoGrafterDriftConfig,
+  Message,
+  TopicNode,
+} from "../types.js";
+import { resolveAdaptiveDriftThreshold } from "../utils/drift/adaptiveDriftSensitivity.js";
 import { cosineSimilarity } from "../utils/drift/cosineSimilarity.js";
 import { resolveDriftThreshold } from "../utils/drift/driftThreshold.js";
 import { normalizeText } from "../utils/text/normalizeText.js";
@@ -11,14 +19,14 @@ const INGEST_OVERLAP_MESSAGES = 6;
 const INCREMENTAL_SEMANTIC_THRESHOLD = 0.6;
 
 export class IngestPipeline {
-  private readonly driftDetector: TopicDriftDetector;
   private readonly segmentProcessor: SegmentProcessor;
+  private readonly baseDriftThreshold: number;
 
   constructor(
     /** @internal */
     private readonly store: GraphStore,
     /** @internal */
-    llm: LLMAdapter,
+    private readonly llm: LLMAdapter,
     /** @internal */
     private readonly embedder: EmbedAdapter,
     /** @internal */
@@ -32,20 +40,10 @@ export class IngestPipeline {
       llmAmbiguityDetection?: boolean;
       reentryDetection?: boolean;
       reentryThreshold?: number;
+      adaptiveSensitivity?: MemoGrafterDriftConfig["adaptiveSensitivity"];
     },
   ) {
-    this.driftDetector = new TopicDriftDetector(
-      {
-        windowSize: config.windowSize,
-        threshold: resolveDriftThreshold(config),
-        mode: config.mode,
-        minSegmentMessages: config.minSegmentMessages,
-        llmAmbiguityDetection: config.llmAmbiguityDetection ?? false,
-        reentryDetection: config.reentryDetection ?? true,
-        reentryThreshold: config.reentryThreshold ?? 0.85,
-      },
-      llm,
-    );
+    this.baseDriftThreshold = resolveDriftThreshold(config);
     this.segmentProcessor = new SegmentProcessor(store, llm, embedder, {
       topK: config.topK,
       semanticThreshold: 0.6,
@@ -64,7 +62,8 @@ export class IngestPipeline {
     const contextStartIndex = Math.max(0, firstNewMessageIndex - INGEST_OVERLAP_MESSAGES);
     const contextMessages = messages.slice(contextStartIndex);
     const contextEmbeddings = await Promise.all(contextMessages.map((message) => this.embedMessage(message)));
-    const { segments, reentryMap } = await this.driftDetector.detectSegments(
+    const driftDetector = await this.createDriftDetector(sessionId);
+    const { segments, reentryMap } = await driftDetector.detectSegments(
       contextMessages,
       contextEmbeddings,
       existingNodes,
@@ -201,5 +200,29 @@ export class IngestPipeline {
   private async embedMessage(message: Message): Promise<number[]> {
     const content = normalizeText(message.content) ?? message.content;
     return this.embedder.embed(content);
+  }
+
+  private async createDriftDetector(sessionId: string): Promise<TopicDriftDetector> {
+    const adaptiveConfig = this.config.adaptiveSensitivity;
+    const threshold = adaptiveConfig?.enabled
+      ? resolveAdaptiveDriftThreshold(
+        this.baseDriftThreshold,
+        await this.store.getSegmentsBySession(sessionId),
+        adaptiveConfig,
+      ).threshold
+      : this.baseDriftThreshold;
+
+    return new TopicDriftDetector(
+      {
+        windowSize: this.config.windowSize,
+        threshold,
+        mode: this.config.mode,
+        minSegmentMessages: this.config.minSegmentMessages,
+        llmAmbiguityDetection: this.config.llmAmbiguityDetection ?? false,
+        reentryDetection: this.config.reentryDetection ?? true,
+        reentryThreshold: this.config.reentryThreshold ?? 0.85,
+      },
+      this.llm,
+    );
   }
 }
