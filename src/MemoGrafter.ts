@@ -37,6 +37,7 @@ export class MemoGrafter {
     const llmAmbiguityDetection = config.drift?.llmAmbiguityDetection;
     const reentryDetection = config.drift?.reentryDetection;
     const reentryThreshold = config.drift?.reentryThreshold;
+    const adaptiveSensitivity = config.drift?.adaptiveSensitivity;
     const topK = config.graph?.topK ?? 5;
     const hopDepth = config.graph?.hopDepth ?? 1;
     const bufferSize = config.inject?.bufferSize ?? 1;
@@ -68,6 +69,7 @@ export class MemoGrafter {
       ...(llmAmbiguityDetection !== undefined ? { llmAmbiguityDetection } : {}),
       ...(reentryDetection !== undefined ? { reentryDetection } : {}),
       ...(reentryThreshold !== undefined ? { reentryThreshold } : {}),
+      ...(adaptiveSensitivity !== undefined ? { adaptiveSensitivity } : {}),
     });
     this.grafterPipeline = new GrafterPipeline(this.store, {
       hopDepth,

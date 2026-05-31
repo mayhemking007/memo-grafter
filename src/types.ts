@@ -176,6 +176,18 @@ export interface MemoGrafterDriftConfig {
   mode?: DriftMode;
   windowSize?: number;
   driftSensitivity?: DriftSensitivity;
+  adaptiveSensitivity?: {
+    enabled?: boolean;
+    minSegments?: number;
+    lookbackSegments?: number;
+    targetSegmentMessages?: {
+      min?: number;
+      max?: number;
+    };
+    adjustmentStep?: number;
+    maxAdjustment?: number;
+    maxVarianceRatio?: number;
+  };
   /** @deprecated Use driftSensitivity instead. */
   threshold?: number;
   minSegmentMessages?: number;

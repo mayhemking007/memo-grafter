@@ -85,6 +85,8 @@ Its responsibilities include:
 
 `IngestPipeline` coordinates the write-side memory pipeline. It receives a complete message snapshot and a session ID, saves the message buffer, reads the session ingest cursor, embeds messages for the unprocessed range plus a small overlap window, delegates topic boundary detection to `TopicDriftDetector`, delegates node creation to `SegmentProcessor`, and appends graph edges.
 
+When adaptive drift sensitivity is enabled, ingestion reads recent saved segments for the session before detection and derives a conservative per-run threshold from the configured static sensitivity. Short, consistently fragmented recent segments raise the threshold slightly; consistently long recent segments lower it slightly. The adjustment is bounded, skipped for short or unstable histories, and does not require schema changes.
+
 It also handles reentry linking in two forms:
 
 - matching newly detected topic boundaries back to existing durable session nodes;
