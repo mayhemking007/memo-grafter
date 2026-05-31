@@ -15,12 +15,16 @@ import type {
 import { countApproxTokens } from "../utils/text/tokenCount.js";
 
 type ScoredMemoryNode = MemoryNode & { similarity: number };
+type RankedMemoryNode = ScoredMemoryNode & { retrievalScore: number };
 
 interface RetrievedBlock {
-  facts: ScoredMemoryNode[];
+  facts: RankedMemoryNode[];
   parentNode: TopicNode;
   score: number;
 }
+
+const DEFAULT_SIMILARITY_WEIGHT = 0.7;
+const DEFAULT_CONFIDENCE_WEIGHT = 0.3;
 
 export class RetrieverPipeline {
   constructor(
@@ -40,9 +44,10 @@ export class RetrieverPipeline {
 
     const embedding = await this.embedder.embed(query);
     const searchedFacts = await this.searchMemories(embedding, sessionId, limit, minSimilarity);
-    const activeFacts = searchedFacts.filter((fact) =>
-      fact.decayed === false && fact.supersededBy == null
-    );
+    const activeFacts = searchedFacts
+      .filter((fact) => fact.decayed === false && fact.supersededBy == null)
+      .map((fact) => this.rankFact(fact))
+      .sort((a, b) => b.retrievalScore - a.retrievalScore);
 
     if (activeFacts.length === 0) {
       return {
@@ -69,7 +74,7 @@ export class RetrieverPipeline {
       }
 
       includedBlocks.push(formattedBlock);
-      facts.push(...block.facts);
+      facts.push(...block.facts.map(({ retrievalScore: _retrievalScore, ...fact }) => fact));
       nodes.push(block.parentNode);
       tokenCount += blockTokenCount;
     }
@@ -133,10 +138,10 @@ export class RetrieverPipeline {
   }
 
   private async buildBlocks(
-    facts: ScoredMemoryNode[],
+    facts: RankedMemoryNode[],
     sessionId: string,
   ): Promise<RetrievedBlock[]> {
-    const factsByTopic = new Map<string, ScoredMemoryNode[]>();
+    const factsByTopic = new Map<string, RankedMemoryNode[]>();
 
     for (const fact of facts) {
       const topicFacts = factsByTopic.get(fact.topicNodeId) ?? [];
@@ -154,12 +159,33 @@ export class RetrieverPipeline {
       }
 
       blocks.push({
-        facts: topicFacts,
+        facts: topicFacts.sort((a, b) => b.retrievalScore - a.retrievalScore),
         parentNode,
-        score: Math.max(...topicFacts.map((fact) => fact.similarity)),
+        score: Math.max(...topicFacts.map((fact) => fact.retrievalScore)),
       });
     }
 
     return blocks;
+  }
+
+  private rankFact(fact: ScoredMemoryNode): RankedMemoryNode {
+    return {
+      ...fact,
+      retrievalScore: this.scoreFact(fact),
+    };
+  }
+
+  private scoreFact(fact: ScoredMemoryNode): number {
+    const similarityWeight = this.config.scoring?.similarityWeight ?? DEFAULT_SIMILARITY_WEIGHT;
+    const confidenceWeight = this.config.scoring?.confidenceWeight ?? DEFAULT_CONFIDENCE_WEIGHT;
+    const similarity = this.clampScore(fact.similarity);
+    const confidence = this.clampScore(fact.confidence);
+
+    return similarity * similarityWeight + confidence * confidenceWeight;
+  }
+
+  private clampScore(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(Math.max(value, 0), 1);
   }
 }
