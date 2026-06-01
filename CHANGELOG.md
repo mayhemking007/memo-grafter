@@ -69,3 +69,15 @@ All notable changes to this project will be documented here.
 ### Changed
 
 - Updated graph snapshots and graft prompts so conflicted, superseded, and decayed memory state is visible and active facts are preferred over stale summaries.
+
+## [0.2.5] - 2026-06-01
+
+### Added
+
+- Added session tagging and filtered memory retrieval for scoped memory organization and targeted recall.
+- Added confidence-weighted ranking to semantic retrieval for improved memory selection quality.
+- Added adaptive drift sensitivity tuning for dynamic topic boundary detection.
+
+### Fixed
+
+- Prevented false-positive conflict detection caused by broad topic memories.
