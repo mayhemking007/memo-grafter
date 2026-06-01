@@ -171,6 +171,8 @@ The built-in maintenance passes are deterministic:
 - `VersioningPass` runs over the same conflict groups, picks the newest memory by `createdAt`, falls back to deterministic ID ordering on ties, marks older memories with `superseded_by`, and creates version edges.
 - `DecayScoringPass` scores non-superseded active memories with confidence-weighted exponential recency decay. Memories whose score falls below the configured threshold are marked `decayed = TRUE`.
 
+Conflict grouping treats broad topic memories carefully when both the subject and predicate are generic, such as `user asked_about ...` or `conversation discussed ...`. Most broad topic rows are skipped because they describe what was discussed rather than mutually exclusive fact slots. Recognized travel destination plan rows are partitioned into a deterministic `travel-trip-plan` bucket and compared by destination, so `Goa trip plan` can conflict with `Vietnam trip plan`, while unrelated topics like `how to cook rajma chawal` or non-exclusive Vietnam subtopics do not join that conflict group.
+
 Decay scoring uses:
 
 ```text
@@ -186,6 +188,8 @@ newer_memory --updates--> older_memory
 ```
 
 The original topic summaries are not rewritten. Topic summaries remain historical descriptions of the segment that produced them, while memory-node lifecycle fields and memory edges represent current fact status. The decay pass does not create edges by default; it only marks stale active memory rows as decayed. Stored extraction confidence remains unchanged unless a caller explicitly enables confidence updates on the pass.
+
+The crawler does not delete or prune existing conflict edges. If an older version of the crawler created a false-positive edge, that edge remains historical graph data until a future explicit cleanup pass or display-side active-edge filter handles it.
 
 ## Recall Path
 

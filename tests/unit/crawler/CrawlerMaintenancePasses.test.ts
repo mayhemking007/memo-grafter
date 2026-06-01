@@ -160,6 +160,94 @@ describe("crawler memory maintenance passes", () => {
     expect(store.edges).toHaveLength(0);
   });
 
+  it("groups broad travel plan memories without conflicting unrelated topics", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "rajma",
+        subject: "user",
+        predicate: "asked_about",
+        value: "how to cook rajma chawal",
+      }),
+      makeMemory({
+        id: "goa",
+        subject: "user",
+        predicate: "asked_about",
+        value: "Goa trip plan",
+      }),
+      makeMemory({
+        id: "vietnam",
+        subject: "user",
+        predicate: "asked_about",
+        value: "Vietnam trip plan",
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 1,
+      nodesMarkedConflicting: 2,
+      conflictEdgesCreated: 1,
+    });
+    expect(report.passes[1]?.result).toMatchObject({
+      conflictsDetected: 1,
+      nodesSuperseded: 1,
+      updateEdgesCreated: 1,
+    });
+    expect(store.edges.filter((edge) => edge.edgeType === "conflicts")).toMatchObject([
+      {
+        sourceId: "goa",
+        targetId: "vietnam",
+        edgeType: "conflicts",
+      },
+    ]);
+    expect(store.memories.find((memory) => memory.id === "rajma")?.hasConflict).toBe(false);
+    expect(store.memories.find((memory) => memory.id === "rajma")?.supersededBy).toBeNull();
+    expect(store.memories.find((memory) => memory.id === "goa")?.hasConflict).toBe(true);
+    expect(store.memories.find((memory) => memory.id === "vietnam")?.hasConflict).toBe(true);
+  });
+
+  it("does not conflict broad travel subtopics for the same destination", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({
+        id: "vietnam-food",
+        subject: "user",
+        predicate: "asked_about",
+        value: "food in Vietnam",
+      }),
+      makeMemory({
+        id: "vietnam-places",
+        subject: "user",
+        predicate: "asked_about",
+        value: "places to visit Vietnam",
+      }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 0,
+      nodesMarkedConflicting: 0,
+      conflictEdgesCreated: 0,
+    });
+    expect(report.passes[1]?.result).toMatchObject({
+      conflictsDetected: 0,
+      nodesSuperseded: 0,
+      updateEdgesCreated: 0,
+    });
+    expect(store.edges).toHaveLength(0);
+    expect(store.memories.every((memory) => memory.hasConflict === false)).toBe(true);
+    expect(store.memories.every((memory) => memory.supersededBy === null)).toBe(true);
+  });
+
   it("supersedes older conflicting memories and creates update edges", async () => {
     const store = new InMemoryMaintenanceStore([
       makeMemory({
