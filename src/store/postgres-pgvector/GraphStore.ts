@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
-import type { GraftRegistryEntry, MemoryEdge, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
+import type { GraftRegistryEntry, MemoryEdge, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
+import { normalizeTags } from "../../utils/tags.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
 
 interface TopicNodeRow {
@@ -12,6 +13,7 @@ interface TopicNodeRow {
   label: string | null;
   summary: string | null;
   embedding: string | number[] | null;
+  tags: string[] | null;
   message_range: number[] | null;
   topic_order: number | null;
   drift_score: number | null;
@@ -44,6 +46,7 @@ interface MemoryNodeRow {
   value: string;
   confidence: number;
   embedding: string | number[] | null;
+  tags: string[] | null;
   source_url: string | null;
   source_title: string | null;
   superseded_by: string | null;
@@ -144,6 +147,7 @@ export class PostgresGraphStore implements GraphStore {
         label         TEXT,
         summary       TEXT,
         embedding     vector(1536),
+        tags          TEXT[] NOT NULL DEFAULT '{}',
         message_range INT[],
         topic_order   INT NOT NULL DEFAULT 0,
         drift_score   FLOAT NOT NULL DEFAULT 0,
@@ -179,6 +183,7 @@ export class PostgresGraphStore implements GraphStore {
         value         TEXT NOT NULL,
         confidence    FLOAT NOT NULL DEFAULT 1.0,
         embedding     vector(1536),
+        tags          TEXT[] NOT NULL DEFAULT '{}',
         source_url    TEXT,
         source_title  TEXT,
         superseded_by UUID REFERENCES mg_memory_nodes(id),
@@ -188,6 +193,16 @@ export class PostgresGraphStore implements GraphStore {
         fleet_id      TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_topic_nodes
+      ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_memory_nodes
+      ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'
     `;
 
     await this.sql`
@@ -349,6 +364,7 @@ export class PostgresGraphStore implements GraphStore {
         label,
         summary,
         embedding,
+        tags,
         message_range,
         topic_order,
         drift_score,
@@ -364,6 +380,7 @@ export class PostgresGraphStore implements GraphStore {
         ${node.label},
         ${node.summary},
         ${toVectorLiteral(node.embedding)}::vector,
+        ${this.sql.array(normalizeTags(node.tags))}::text[],
         ${node.messageRange},
         ${node.topicOrder},
         ${node.driftScore},
@@ -379,6 +396,7 @@ export class PostgresGraphStore implements GraphStore {
         label = EXCLUDED.label,
         summary = EXCLUDED.summary,
         embedding = EXCLUDED.embedding,
+        tags = EXCLUDED.tags,
         message_range = EXCLUDED.message_range,
         topic_order = EXCLUDED.topic_order,
         drift_score = EXCLUDED.drift_score,
@@ -516,11 +534,14 @@ export class PostgresGraphStore implements GraphStore {
     return rows[0]?.count ?? 0;
   }
 
-  async getNodesBySession(sessionId: string): Promise<TopicNode[]> {
+  async getNodesBySession(sessionId: string, options: TagFilterOptions = {}): Promise<TopicNode[]> {
+    const tags = normalizeTags(options.tags);
+    const searchTaggedSessions = options.scope === "tagged" && tags.length > 0;
     const rows = await this.sql<TopicNodeRow[]>`
       SELECT * FROM mg_topic_nodes
-      WHERE session_id = ${sessionId}
-      ORDER BY topic_order ASC, created_at ASC
+      WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`session_id = ${sessionId}`}
+        ${this.topicTagsFilterSql(tags, options.tagMode)}
+      ORDER BY session_id ASC, topic_order ASC, created_at ASC
     `;
 
     return rows.map((row) => this.rowToNode(row));
@@ -563,6 +584,7 @@ export class PostgresGraphStore implements GraphStore {
       value: node.value,
       confidence: node.confidence,
       embedding: toVectorLiteral(node.embedding),
+      tags: normalizeTags(node.tags),
       source_url: node.sourceUrl,
       source_title: node.sourceTitle,
       superseded_by: node.supersededBy,
@@ -587,6 +609,7 @@ export class PostgresGraphStore implements GraphStore {
         "value",
         "confidence",
         "embedding",
+        "tags",
         "source_url",
         "source_title",
         "superseded_by",
@@ -739,13 +762,17 @@ export class PostgresGraphStore implements GraphStore {
     sessionId: string,
     limit: number,
     minSimilarity: number,
+    options: TagFilterOptions = {},
   ): Promise<(MemoryNode & { similarity: number })[]> {
+    const tags = normalizeTags(options.tags);
+    const searchTaggedSessions = options.scope === "tagged" && tags.length > 0;
     const rows = await this.sql<Array<MemoryNodeRow & { similarity: number }>>`
       SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
       FROM mg_memory_nodes
-      WHERE session_id = ${sessionId}
+      WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`session_id = ${sessionId}`}
         AND decayed = false
         AND superseded_by IS NULL
+        ${this.memoryTagsFilterSql(tags, options.tagMode)}
         AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${minSimilarity}
       ORDER BY similarity DESC
       LIMIT ${limit}
@@ -903,6 +930,22 @@ export class PostgresGraphStore implements GraphStore {
         fleet_id = ${metadata.fleetId},
         agent_id = ${metadata.agentId},
         agent_color = ${metadata.agentColor}
+      WHERE session_id = ${sessionId}
+    `;
+  }
+
+  async setSessionTags(sessionId: string, tags: string[]): Promise<void> {
+    const normalized = normalizeTags(tags);
+
+    await this.sql`
+      UPDATE mg_topic_nodes
+      SET tags = ${this.sql.array(normalized)}::text[]
+      WHERE session_id = ${sessionId}
+    `;
+
+    await this.sql`
+      UPDATE mg_memory_nodes
+      SET tags = ${this.sql.array(normalized)}::text[]
       WHERE session_id = ${sessionId}
     `;
   }
@@ -1101,6 +1144,7 @@ export class PostgresGraphStore implements GraphStore {
         value,
         confidence,
         embedding,
+        tags,
         source_url,
         source_title,
         superseded_by,
@@ -1120,6 +1164,7 @@ export class PostgresGraphStore implements GraphStore {
         value,
         confidence,
         embedding,
+        tags,
         source_url,
         source_title,
         NULL,
@@ -1244,6 +1289,11 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE INDEX IF NOT EXISTS mg_topic_nodes_tags_idx
+      ON mg_topic_nodes USING GIN(tags)
+    `;
+
+    await this.sql`
       CREATE INDEX IF NOT EXISTS mg_nodes_fleet_idx
       ON mg_topic_nodes(fleet_id, agent_color)
     `;
@@ -1291,6 +1341,11 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_tags
+      ON mg_memory_nodes USING GIN(tags)
+    `;
+
+    await this.sql`
       CREATE INDEX IF NOT EXISTS idx_memory_nodes_embedding
       ON mg_memory_nodes
       USING ivfflat (embedding vector_cosine_ops)
@@ -1324,6 +1379,22 @@ export class PostgresGraphStore implements GraphStore {
     }
 
     return `${truncated.trimEnd()} [truncated]`;
+  }
+
+  private topicTagsFilterSql(tags: string[], tagMode: TagFilterOptions["tagMode"] = "all") {
+    if (tags.length === 0) return this.sql``;
+
+    return tagMode === "any"
+      ? this.sql`AND tags && ${this.sql.array(tags)}::text[]`
+      : this.sql`AND tags @> ${this.sql.array(tags)}::text[]`;
+  }
+
+  private memoryTagsFilterSql(tags: string[], tagMode: TagFilterOptions["tagMode"] = "all") {
+    if (tags.length === 0) return this.sql``;
+
+    return tagMode === "any"
+      ? this.sql`AND tags && ${this.sql.array(tags)}::text[]`
+      : this.sql`AND tags @> ${this.sql.array(tags)}::text[]`;
   }
 
   private async getNextMessageIndex(sessionId: string): Promise<number> {
@@ -1363,6 +1434,7 @@ export class PostgresGraphStore implements GraphStore {
       label: row.label ?? "Untitled topic",
       summary: row.summary ?? "",
       embedding: parseVector(row.embedding),
+      tags: normalizeTags(row.tags ?? []),
       messageRange: [start, end],
       topicOrder: row.topic_order ?? 0,
       driftScore: row.drift_score ?? 0,
@@ -1387,6 +1459,7 @@ export class PostgresGraphStore implements GraphStore {
       value: row.value,
       confidence: row.confidence,
       embedding: parseVector(row.embedding),
+      tags: normalizeTags(row.tags ?? []),
       sourceUrl: row.source_url,
       sourceTitle: row.source_title,
       supersededBy: row.superseded_by,

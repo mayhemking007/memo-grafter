@@ -3,6 +3,7 @@ import type {
   DriftSensitivity,
   EmbedAdapter,
   LLMAdapter,
+  IngestOptions,
   MemoGrafterDriftConfig,
   Message,
   TopicNode,
@@ -50,7 +51,7 @@ export class IngestPipeline {
     });
   }
 
-  async run(messages: Message[], sessionId: string): Promise<TopicNode[]> {
+  async run(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<TopicNode[]> {
     if (messages.length === 0) return [];
 
     await this.store.saveMessages(sessionId, messages);
@@ -80,7 +81,7 @@ export class IngestPipeline {
     const savedReentryPairs = new Set<string>();
 
     for (const { segment, detectorTopicOrder } of absoluteSegments) {
-      const node = await this.segmentProcessor.process(segment, messages, sessionId);
+      const node = await this.segmentProcessor.process(segment, messages, sessionId, options);
       nodes.push(node);
       nodeByDetectorTopicOrder.set(detectorTopicOrder, node);
 

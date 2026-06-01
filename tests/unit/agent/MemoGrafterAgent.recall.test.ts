@@ -19,6 +19,7 @@ type SearchMemoriesCall = {
   sessionId: string;
   limit: number;
   minSimilarity: number;
+  options?: RetrieverConfig;
 };
 type PipelineThis = {
   config: RetrieverConfig;
@@ -114,6 +115,9 @@ function patchStore(
   store: Partial<{
     searchMemories: GraphStore["searchMemories"];
     getTopicNode: GraphStore["getTopicNode"];
+    getNodesBySession: GraphStore["getNodesBySession"];
+    getSegmentsBySession: GraphStore["getSegmentsBySession"];
+    setSessionTags: GraphStore["setSessionTags"];
   }>,
 ): void {
   const core = (agent as unknown as { core: { store: GraphStore } }).core;
@@ -163,8 +167,8 @@ describe("MemoGrafterAgent.recall", () => {
     const agent = createAgent();
     const calls: SearchMemoriesCall[] = [];
     patchStore(agent, {
-      searchMemories: async (embedding, sessionId, limit, minSimilarity) => {
-        calls.push({ embedding, sessionId, limit, minSimilarity });
+      searchMemories: async (embedding, sessionId, limit, minSimilarity, options) => {
+        calls.push({ embedding, sessionId, limit, minSimilarity, options });
         return [];
       },
     });
@@ -181,6 +185,34 @@ describe("MemoGrafterAgent.recall", () => {
       sessionId: agent.getSessionId(),
       limit: 5,
       minSimilarity: 0.7,
+      options: {
+        scope: "session",
+        tagMode: "all",
+        tags: [],
+      },
+    });
+  });
+
+  it("forwards tag filters through recall", async () => {
+    const agent = createAgent();
+    const calls: SearchMemoriesCall[] = [];
+    patchStore(agent, {
+      searchMemories: async (embedding, sessionId, limit, minSimilarity, options) => {
+        calls.push({ embedding, sessionId, limit, minSimilarity, options });
+        return [];
+      },
+    });
+
+    await agent.recall("deployment", {
+      tags: [" Project:Memo-Grafter ", "planning"],
+      tagMode: "any",
+      scope: "tagged",
+    });
+
+    expect(calls[0]?.options).toEqual({
+      tags: ["planning", "project:memo-grafter"],
+      tagMode: "any",
+      scope: "tagged",
     });
   });
 
@@ -244,8 +276,8 @@ describe("MemoGrafterAgent.recall", () => {
     const agent = createAgent();
     const calls: SearchMemoriesCall[] = [];
     patchStore(agent, {
-      searchMemories: async (embedding, sessionId, limit, minSimilarity) => {
-        calls.push({ embedding, sessionId, limit, minSimilarity });
+      searchMemories: async (embedding, sessionId, limit, minSimilarity, options) => {
+        calls.push({ embedding, sessionId, limit, minSimilarity, options });
         return [];
       },
     });
@@ -257,6 +289,35 @@ describe("MemoGrafterAgent.recall", () => {
       limit: 10,
       minSimilarity: 0.6,
     });
+  });
+
+  it("stores normalized session tags and applies them to active node reads", async () => {
+    const agent = createAgent();
+    const setCalls: Array<{ sessionId: string; tags: string[] }> = [];
+    const nodeCalls: Array<{ sessionId: string; options: unknown }> = [];
+    patchStore(agent, {
+      setSessionTags: async (sessionId, tags) => {
+        setCalls.push({ sessionId, tags });
+      },
+      getNodesBySession: async (sessionId, options) => {
+        nodeCalls.push({ sessionId, options });
+        return [];
+      },
+      getSegmentsBySession: async () => [],
+    });
+
+    await agent.setSessionTags([" Project:Memo-Grafter ", "planning", "PLANNING"]);
+    await agent.getActiveNodes({ tags: ["planning"], tagMode: "all" });
+
+    expect(agent.getSessionTags()).toEqual(["planning", "project:memo-grafter"]);
+    expect(setCalls).toEqual([{
+      sessionId: agent.getSessionId(),
+      tags: ["planning", "project:memo-grafter"],
+    }]);
+    expect(nodeCalls).toEqual([{
+      sessionId: agent.getSessionId(),
+      options: { tags: ["planning"], tagMode: "all" },
+    }]);
   });
 
   it("returns an empty result when the pipeline returns no facts", async () => {

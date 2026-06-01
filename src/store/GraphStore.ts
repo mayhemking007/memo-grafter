@@ -5,6 +5,7 @@ import type {
   MemoryNodeInsert,
   Message,
   SessionIngestState,
+  TagFilterOptions,
   TopicEdge,
   TopicNode,
   TopicSegment,
@@ -47,7 +48,7 @@ export interface GraphStore {
   getTopicNode(topicNodeId: string, sessionId?: string): Promise<TopicNode | null>;
   getNodeBySegment(segmentId: string): Promise<TopicNode | null>;
   getSessionNodeCount(sessionId: string): Promise<number>;
-  getNodesBySession(sessionId: string): Promise<TopicNode[]>;
+  getNodesBySession(sessionId: string, options?: TagFilterOptions): Promise<TopicNode[]>;
   getLastTopicNode(sessionId: string): Promise<TopicNode | null>;
   getSegmentsBySession(sessionId: string): Promise<TopicSegment[]>;
   insertMemories(nodes: MemoryNodeInsert[]): Promise<void>;
@@ -58,6 +59,7 @@ export interface GraphStore {
     sessionId: string,
     limit: number,
     minSimilarity: number,
+    options?: TagFilterOptions,
   ): Promise<(MemoryNode & { similarity: number })[]>;
   buildMemoryEdges(topicNodeId: string, sessionId: string, threshold: number): Promise<void>;
   getTopKSimilar(nodeId: string, embedding: number[], sessionId: string, k: number): Promise<TopicNode[]>;
@@ -85,6 +87,7 @@ export interface GraphStore {
     agentId: string | null;
     agentColor: string | null;
   }): Promise<void>;
+  setSessionTags(sessionId: string, tags: string[]): Promise<void>;
   getPreviousNode(sessionId: string, topicOrder: number): Promise<TopicNode | null>;
   nodeSimilarity(nodeAId: string, nodeBId: string): Promise<number>;
   getNeighbours(nodeIds: string[], hopDepth: number, sessionId?: string): Promise<TopicNode[]>;

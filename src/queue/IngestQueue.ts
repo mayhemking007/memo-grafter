@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { Queue, Worker, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
 import type { IngestPipeline } from "../pipeline/IngestPipeline.js";
-import type { MemoGrafterQueueConfig, Message } from "../types.js";
+import type { IngestOptions, MemoGrafterQueueConfig, Message } from "../types.js";
 
 interface IngestJobData {
   messages: Message[];
   sessionId: string;
+  options?: IngestOptions;
 }
 
 export class IngestQueue {
@@ -50,7 +51,7 @@ export class IngestQueue {
     });
   }
 
-  async enqueue(messages: Message[], sessionId: string): Promise<void> {
+  async enqueue(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<void> {
     try {
       await this.withTimeout(
         this.queue.add(
@@ -58,6 +59,7 @@ export class IngestQueue {
           {
             messages: [...messages],
             sessionId,
+            options,
           },
           this.defaultJobOptions,
         ),
@@ -97,7 +99,7 @@ export class IngestQueue {
       this.queueName,
       async (job) => {
         try {
-          await this.pipeline.run(job.data.messages, job.data.sessionId);
+          await this.pipeline.run(job.data.messages, job.data.sessionId, job.data.options ?? {});
         } catch (error) {
           console.warn("MemoGrafter background ingest failed:", error);
           throw error;

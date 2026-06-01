@@ -13,6 +13,7 @@ import type {
   TopicNode,
 } from "../types.js";
 import { countApproxTokens } from "../utils/text/tokenCount.js";
+import { normalizeTags } from "../utils/tags.js";
 
 type ScoredMemoryNode = MemoryNode & { similarity: number };
 type RankedMemoryNode = ScoredMemoryNode & { retrievalScore: number };
@@ -41,9 +42,18 @@ export class RetrieverPipeline {
     const limit = this.config.limit ?? 10;
     const minSimilarity = this.config.minSimilarity ?? 0.6;
     const tokenBudget = this.config.tokenBudget ?? 1200;
+    const tags = normalizeTags(this.config.tags);
+    const tagMode = this.config.tagMode ?? "all";
+    const scope = this.config.scope === "tagged" && tags.length > 0
+      ? "tagged"
+      : this.config.scope ?? (tags.length > 0 ? "session-and-tags" : "session");
 
     const embedding = await this.embedder.embed(query);
-    const searchedFacts = await this.searchMemories(embedding, sessionId, limit, minSimilarity);
+    const searchedFacts = await this.searchMemories(embedding, sessionId, limit, minSimilarity, {
+      tags,
+      tagMode,
+      scope,
+    });
     const activeFacts = searchedFacts
       .filter((fact) => fact.decayed === false && fact.supersededBy == null)
       .map((fact) => this.rankFact(fact))
@@ -58,7 +68,7 @@ export class RetrieverPipeline {
       };
     }
 
-    const rankedBlocks = (await this.buildBlocks(activeFacts, sessionId))
+    const rankedBlocks = (await this.buildBlocks(activeFacts, sessionId, scope))
       .sort((a, b) => b.score - a.score);
     const includedBlocks: string[] = [];
     const facts: ScoredMemoryNode[] = [];
@@ -92,6 +102,7 @@ export class RetrieverPipeline {
     sessionId: string,
     limit: number,
     minSimilarity: number,
+    options: { tags?: string[]; tagMode?: "all" | "any"; scope?: "session" | "session-and-tags" | "tagged" },
   ): Promise<ScoredMemoryNode[]> {
     if (!this.config.cache || !this.cacheRedis) {
       return this.store.searchMemories(
@@ -99,11 +110,21 @@ export class RetrieverPipeline {
         sessionId,
         limit,
         minSimilarity,
+        options,
       );
     }
 
     const ttl = Math.min(Math.max(this.config.cache.ttlSeconds ?? 90, 60), 120);
-    const cacheKey = `mg:recall:${sessionId}:${limit}:${minSimilarity}:${this.hashEmbedding(embedding)}`;
+    const cacheKey = [
+      "mg:recall",
+      sessionId,
+      limit,
+      minSimilarity,
+      options.scope ?? "session",
+      options.tagMode ?? "all",
+      (options.tags ?? []).join(","),
+      this.hashEmbedding(embedding),
+    ].join(":");
 
     try {
       const hit = await this.cacheRedis.get(cacheKey);
@@ -117,6 +138,7 @@ export class RetrieverPipeline {
         sessionId,
         limit,
         minSimilarity,
+        options,
       );
       await this.cacheRedis.setex(cacheKey, ttl, JSON.stringify(searchedFacts));
 
@@ -128,6 +150,7 @@ export class RetrieverPipeline {
         sessionId,
         limit,
         minSimilarity,
+        options,
       );
     }
   }
@@ -140,6 +163,7 @@ export class RetrieverPipeline {
   private async buildBlocks(
     facts: RankedMemoryNode[],
     sessionId: string,
+    scope: "session" | "session-and-tags" | "tagged",
   ): Promise<RetrievedBlock[]> {
     const factsByTopic = new Map<string, RankedMemoryNode[]>();
 
@@ -152,7 +176,8 @@ export class RetrieverPipeline {
     const blocks: RetrievedBlock[] = [];
 
     for (const [topicNodeId, topicFacts] of factsByTopic) {
-      const parentNode = await this.store.getTopicNode(topicNodeId, sessionId);
+      const parentSessionId = scope === "tagged" ? topicFacts[0]?.sessionId : sessionId;
+      const parentNode = await this.store.getTopicNode(topicNodeId, parentSessionId);
 
       if (!parentNode) {
         continue;
