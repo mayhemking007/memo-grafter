@@ -9,6 +9,7 @@ import type { GraphStore } from "./store/index.js";
 import type {
   AbsorbFromAgentOptions,
   EmbedAdapter,
+  IngestOptions,
   InjectionResult,
   LLMAdapter,
   MemoGrafterConfig,
@@ -83,29 +84,29 @@ export class MemoGrafter {
     return this.store.initialize();
   }
 
-  ingest(messages: Message[], sessionId: string): Promise<TopicNode[]> {
+  ingest(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<TopicNode[]> {
     if (this.ingestQueue) {
-      return this.enqueueIngest(messages, sessionId).then(() => []);
+      return this.enqueueIngest(messages, sessionId, options).then(() => []);
     }
 
-    return this.ingestPipeline.run(messages, sessionId);
+    return this.ingestPipeline.run(messages, sessionId, options);
   }
 
-  ingestNow(messages: Message[], sessionId: string): Promise<TopicNode[]> {
-    return this.ingestPipeline.run(messages, sessionId);
+  ingestNow(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<TopicNode[]> {
+    return this.ingestPipeline.run(messages, sessionId, options);
   }
 
-  async enqueueIngest(messages: Message[], sessionId: string): Promise<void> {
+  async enqueueIngest(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<void> {
     if (this.ingestQueue) {
-      await this.ingestQueue.enqueue(messages, sessionId);
+      await this.ingestQueue.enqueue(messages, sessionId, options);
       return;
     }
 
-    await this.ingestPipeline.run(messages, sessionId);
+    await this.ingestPipeline.run(messages, sessionId, options);
   }
 
-  async getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }> {
-    const nodes = await this.store.getNodesBySession(sessionId);
+  async getTopics(sessionId: string, options: { tags?: string[]; tagMode?: "all" | "any" } = {}): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }> {
+    const nodes = await this.store.getNodesBySession(sessionId, options);
     const segments = await this.store.getSegmentsBySession(sessionId);
     return { nodes, segments };
   }

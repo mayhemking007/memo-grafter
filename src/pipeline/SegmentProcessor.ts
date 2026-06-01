@@ -11,6 +11,7 @@ import type {
   TopicNode,
   TopicSegment,
 } from "../types.js";
+import { normalizeTags } from "../utils/tags.js";
 import {
   buildSegmentSummary,
   formatMemoryEmbeddingText,
@@ -37,9 +38,15 @@ export class SegmentProcessor {
     },
   ) {}
 
-  async process(segment: DriftSegment, messages: Message[], sessionId: string): Promise<TopicNode> {
+  async process(
+    segment: DriftSegment,
+    messages: Message[],
+    sessionId: string,
+    options: { tags?: string[] } = {},
+  ): Promise<TopicNode> {
     const savedSegment = await this.createSegment(segment, sessionId);
-    const topicNode = await this.nodeRunner(savedSegment, messages);
+    const tags = normalizeTags(options.tags);
+    const topicNode = await this.nodeRunner(savedSegment, messages, tags);
     await this.processMemories(this.lastExtraction.memories, savedSegment, topicNode);
     return topicNode;
   }
@@ -56,13 +63,13 @@ export class SegmentProcessor {
     });
   }
 
-  private async nodeRunner(segment: TopicSegment, messages: Message[]): Promise<TopicNode> {
-    const node = await this.nodeProcessor(messages, segment);
+  private async nodeRunner(segment: TopicSegment, messages: Message[], tags: string[]): Promise<TopicNode> {
+    const node = await this.nodeProcessor(messages, segment, tags);
     await this.store.saveNode(node);
     return node;
   }
 
-  private async nodeProcessor(messages: Message[], segment: TopicSegment): Promise<TopicNode> {
+  private async nodeProcessor(messages: Message[], segment: TopicSegment, tags: string[]): Promise<TopicNode> {
     const segmentMessages = messages.slice(segment.startIndex, segment.endIndex + 1);
     const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages);
     const raw = await this.llm.complete([{ role: "user", content: extractionPrompt }]);
@@ -78,6 +85,7 @@ export class SegmentProcessor {
       label: extracted.label,
       summary,
       embedding,
+      tags,
       messageRange: [segment.startIndex, segment.endIndex],
       topicOrder: segment.topicOrder,
       driftScore: segment.driftScore,
@@ -115,6 +123,7 @@ export class SegmentProcessor {
           value: memory.value,
           confidence: memory.confidence,
           embedding,
+          tags: topicNode.tags ?? [],
           sourceUrl: null,
           sourceTitle: null,
           supersededBy: null,

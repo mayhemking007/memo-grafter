@@ -10,9 +10,11 @@ import type {
   Message,
   RetrievalResult,
   RetrieverConfig,
+  TagFilterOptions,
   TopicNode,
   TopicSegment,
 } from "./types.js";
+import { normalizeTags } from "./utils/tags.js";
 
 export class MemoGrafterAgent {
   private readonly core: MemoGrafter;
@@ -23,6 +25,7 @@ export class MemoGrafterAgent {
   private readonly recallLimit: number;
   private readonly recallMinSimilarity: number;
   private readonly cacheConfig: MemoGrafterConfig["cache"];
+  private sessionTags: string[] = [];
   private pendingIngest: Promise<void> = Promise.resolve();
 
   constructor(config: MemoGrafterConfig) {
@@ -66,9 +69,9 @@ export class MemoGrafterAgent {
     return this.sessionId;
   }
 
-  async getActiveNodes(): Promise<TopicNode[]> {
+  async getActiveNodes(options: TagFilterOptions = {}): Promise<TopicNode[]> {
     await this.pendingIngest;
-    const { nodes } = await this.core.getTopics(this.sessionId);
+    const { nodes } = await this.core.getTopics(this.sessionId, options);
     return nodes;
   }
 
@@ -111,6 +114,16 @@ export class MemoGrafterAgent {
       memoryEdges,
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  async setSessionTags(tags: string[]): Promise<void> {
+    await this.pendingIngest;
+    this.sessionTags = normalizeTags(tags);
+    await this.core.store.setSessionTags(this.sessionId, this.sessionTags);
+  }
+
+  getSessionTags(): string[] {
+    return [...this.sessionTags];
   }
 
   async getGraftRegistry(): Promise<GraftRegistryEntry[]> {
@@ -173,7 +186,7 @@ export class MemoGrafterAgent {
     const historySnapshot = [...this.history];
 
     this.pendingIngest = this.pendingIngest
-      .then(() => this.core.enqueueIngest(historySnapshot, this.sessionId))
+      .then(() => this.core.enqueueIngest(historySnapshot, this.sessionId, { tags: this.sessionTags }))
       .catch((error: unknown) => {
         console.warn("MemoGrafter background ingest warning:", error);
       });

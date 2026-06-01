@@ -90,6 +90,8 @@ Current v1 tables:
 - `mg_session_ingest_state`
 - `mg_graft_registry`
 
+`mg_topic_nodes` and `mg_memory_nodes` include optional `tags TEXT[]` columns. Tags default to an empty array, so existing untagged sessions continue to work normally.
+
 ## Quick Start
 
 Create `src/index.ts`:
@@ -179,6 +181,7 @@ Important fields:
 - `label`: short label.
 - `summary`: structured summary of the segment.
 - `embedding`: vector used for semantic search.
+- `tags`: optional normalized tags such as `"project:memo-grafter"` or `"planning"`.
 - `messageRange`: source message range.
 - `topicOrder`: chronological order.
 - `driftScore`: topic-change score.
@@ -196,6 +199,7 @@ Important fields:
 - `subject`, `predicate`, `value`: the structured memory triple.
 - `confidence`: confidence score from `0` to `1`.
 - `topicNodeId`: parent topic node ID.
+- `tags`: optional normalized tags copied from the session or ingest call.
 - `decayed`: whether the memory is stale.
 - `hasConflict`: whether crawler maintenance found a conflicting active fact.
 - `supersededBy`: newer memory ID when this memory has been replaced.
@@ -302,6 +306,32 @@ await agent.clearSession();
 
 This waits for pending ingestion, clears the agent's local in-memory history, removes stored messages, topic nodes, memory nodes, graph edges, segments, and resets the session ingest cursor. It is a destructive operation and is not part of normal `invoke()` processing.
 
+### Session Tags
+
+Use session tags when you want to organize memory by project, planning area, week, domain, or worker route.
+
+```ts
+await agent.setSessionTags([
+  "project:memo-grafter",
+  "planning",
+  "week:2026-05-25",
+]);
+
+console.log(agent.getSessionTags());
+```
+
+Tags are optional. They are normalized by trimming whitespace, lowercasing, deduplicating, and sorting. Calling `setSessionTags()` waits for pending ingestion, updates existing topic and memory rows for the current session, and applies the same tags to future memories created by `invoke()`.
+
+You can also tag direct ingestion:
+
+```ts
+await memo.ingest(messages, sessionId, {
+  tags: ["project:memo-grafter", "planning"],
+});
+```
+
+Tags do not replace `sessionId`. By default, MemoGrafter still reads from the current session. Tag filters are opt-in.
+
 ### Targeted Recall
 
 Use `recall()` when you want to retrieve structured memory by meaning without asking the LLM to produce an answer.
@@ -311,6 +341,9 @@ const result = await agent.recall("deployment config", {
   limit: 8,
   minSimilarity: 0.55,
   tokenBudget: 1000,
+  tags: ["project:memo-grafter"],
+  tagMode: "all",
+  scope: "session-and-tags",
   scoring: {
     similarityWeight: 0.7,
     confidenceWeight: 0.3,
@@ -338,11 +371,26 @@ Options:
 - `limit`: max memory nodes to fetch before filtering. Defaults to `10`.
 - `minSimilarity`: cosine similarity floor. Defaults to `0.6`.
 - `tokenBudget`: max approximate tokens for included fact blocks. Defaults to `1200`.
+- `tags`: optional normalized tag filter.
+- `tagMode`: `"all"` requires every requested tag, `"any"` accepts at least one requested tag. Defaults to `"all"`.
+- `scope`: `"session"` keeps normal current-session recall, `"session-and-tags"` filters current-session recall by tags, and `"tagged"` searches across sessions matching the tags.
 - `scoring.similarityWeight`: weight applied to semantic similarity when ranking retrieved facts. Defaults to `0.7`.
 - `scoring.confidenceWeight`: weight applied to memory confidence when ranking retrieved facts. Defaults to `0.3`.
 - `cache.ttlSeconds`: per-call recall cache TTL override when `MemoGrafterConfig.cache` is enabled. Values are clamped to 60-120 seconds.
 
 `recall()` is side-effect free. It does not call `invoke()`, does not trigger a new LLM completion, and does not mutate local history. Your application can call it directly to display memories, add `result.systemPrompt` to a model call, or ignore the result. Retrieval still uses `minSimilarity` for the vector search floor, then ranks returned active facts with `similarity * similarityWeight + confidence * confidenceWeight`.
+
+Cross-session tagged recall is explicit:
+
+```ts
+const projectMemory = await agent.recall("deployment decisions", {
+  tags: ["project:memo-grafter"],
+  scope: "tagged",
+  minSimilarity: 0.3,
+});
+```
+
+This can return matching active memories from older or different sessions with the same tag. If your development database contains repeated smoke-test runs, you may see more than one matching fact because the older tagged rows are still present.
 
 `MemoGrafterAgent.invoke()` also calls `recall()` internally before answering when the session has topic nodes. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window. Automatic recall uses `inject.recallLimit` and `inject.recallMinSimilarity`, defaulting to `6` and `0.55`.
 
@@ -395,6 +443,15 @@ for (const node of nodes) {
     driftScore: node.driftScore,
   });
 }
+```
+
+Filter active topic nodes by tag:
+
+```ts
+const planningNodes = await agent.getActiveNodes({
+  tags: ["planning"],
+  tagMode: "all",
+});
 ```
 
 Read active segments:
@@ -715,7 +772,7 @@ const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
 
 Useful store inspection methods include:
 
-- `getNodesBySession(sessionId)`: read topic nodes for a session.
+- `getNodesBySession(sessionId, options?)`: read topic nodes for a session, optionally filtered by tags.
 - `getTopicNode(topicNodeId, sessionId?)`: read one topic node by ID.
 - `getSegmentsBySession(sessionId)`: read topic segments for a session.
 - `getEdgesByType(sessionId, type)`: inspect graph edges such as `"reentry"`, `"semantic"`, `"temporal"`, or `"grafted"`.
@@ -723,6 +780,7 @@ Useful store inspection methods include:
 - `getMemoriesBySession(sessionId)`: read all memory nodes for a session, including decayed and superseded rows.
 - `getMemoryEdgesBySession(sessionId)`: read memory-level edges such as `conflicts` and `updates`.
 - `getGraftRegistry(sessionId)`: read graft provenance entries for a session.
+- `setSessionTags(sessionId, tags)`: replace the normalized tag set on existing topic and memory rows for a session.
 
 ### `llm`
 
@@ -892,6 +950,20 @@ Enables an opt-in Redis cache for targeted recall. MemoGrafter creates one share
 - `ttlSeconds`: cache TTL in seconds. Defaults to `90` and is clamped between `60` and `120`.
 
 Recall cache keys include the session ID, `limit`, `minSimilarity`, and a deterministic hash of the query embedding. Redis failures are logged as warnings and recall falls back to PostgreSQL search. The cache is disabled unless this section is present.
+
+When tag-aware recall is used, cache keys also include recall `scope`, `tagMode`, and the normalized tag list. This prevents untagged, session-filtered, and cross-session tagged recall from sharing cached search results.
+
+## Manual Smoke Tests
+
+From this repository, run the session-tagging smoke with a real PostgreSQL database:
+
+```powershell
+npx tsx --env-file=.env ./tests/manual/graft/session-tags-smoke.ts
+```
+
+Use the forward-slash path in PowerShell. An unquoted backslash path can be collapsed before `tsx` receives it.
+
+The smoke creates two tagged sessions, writes one memory into each, verifies current-session tag filtering with `getActiveNodes()`, and verifies cross-session project recall with `recall(..., { scope: "tagged" })`. If you run it repeatedly against the same database, tagged recall can return rows from previous smoke runs because those historical sessions are still present.
 
 ## Queue Mode
 
@@ -1296,12 +1368,14 @@ Main exports:
 - `FleetAgentRecord`
 - `RetrievalResult`
 - `RetrieverConfig`
+- `TagFilterOptions`
+- `IngestOptions`
 - public shared and fleet types
 
 Useful `GraphStore` inspection methods:
 
 - `getTopicNode(topicNodeId, sessionId?)`
-- `getNodesBySession(sessionId)`
+- `getNodesBySession(sessionId, options?)`
 - `getSegmentsBySession(sessionId)`
 - `getEdgesByType(sessionId, type)`
 - `getEdgesBySession(sessionId)`
@@ -1318,10 +1392,12 @@ Common `MemoGrafterAgent` methods:
 - `getSessionId()`: read the current session ID.
 - `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.
 - `getGraftRegistry()`: inspect provenance for grafted nodes in the current session.
-- `getActiveNodes()`: inspect topic nodes.
+- `getActiveNodes(options?)`: inspect topic nodes, optionally filtered by tags.
 - `getActiveSegments()`: inspect topic segments.
+- `setSessionTags(tags)`: replace tags on the current session and apply them to future ingested memories.
+- `getSessionTags()`: read the current agent's normalized session tags.
 - `clearSession()`: explicitly clear local history and stored session memory.
-- `recall(query, options?)`: retrieve structured memory by semantic query.
+- `recall(query, options?)`: retrieve structured memory by semantic query, optionally filtered by tags.
 - `graft(topicIds?)`: preview memory injection.
 - `ingestGraftedNodes(nodes)`: copy provided nodes into this agent.
 - `absorbFromAgent(sourceAgent, options)`: select and copy memory from another agent.

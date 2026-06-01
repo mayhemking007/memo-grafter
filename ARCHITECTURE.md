@@ -4,7 +4,7 @@ This document describes the high-level architecture and core design of memo-graf
 
 ## System Overview
 
-MemoGrafter is a server-side TypeScript memory framework for chatbot applications. It records conversation turns, groups them into topic segments, extracts structured memory, stores topic and memory graphs, and later retrieves or grafts relevant memory into another prompt or session.
+MemoGrafter is a server-side TypeScript memory framework for chatbot applications. It records conversation turns, groups them into topic segments, extracts structured memory, stores topic and memory graphs, and later retrieves or grafts relevant memory into another prompt or session. Sessions and memory rows can also carry optional normalized tags for project, planning, week, domain, or worker-routing filters.
 
 The main runtime layers are:
 
@@ -77,6 +77,7 @@ Its responsibilities include:
 - exposing a read-only graph snapshot for visualization and inspection;
 - providing high-level grafting and absorbing helpers;
 - providing targeted recall through `RetrieverPipeline`;
+- storing optional session tags and applying them to future ingested topic and memory rows;
 - waiting for pending ingestion before reads that depend on memory state.
 
 `MemoGrafterAgent` is intentionally a memory-aware chatbot wrapper, not an autonomous agent runtime.
@@ -121,7 +122,7 @@ For each segment it:
 6. embeds and inserts atomic `MemoryNode` records;
 7. builds semantic memory edges inside the topic when appropriate.
 
-The topic node is the coarse unit of conversation memory. Memory nodes are the finer-grained facts, insights, questions, tasks, or references used by targeted recall.
+The topic node is the coarse unit of conversation memory. Memory nodes are the finer-grained facts, insights, questions, tasks, or references used by targeted recall. When ingestion receives tags, the same normalized tag set is written to the topic node and every memory node produced for that segment.
 
 ### GrafterPipeline
 
@@ -147,6 +148,7 @@ The interface covers:
 - message buffer persistence;
 - segment, topic node, and topic edge persistence;
 - memory node insertion, memory lookup, and memory edge construction;
+- optional session and memory tag updates and tag-aware read filters;
 - session snapshot reads for topic edges, memory nodes, and memory edges;
 - memory maintenance reads and annotations for crawler passes;
 - session topic-node counts for invoke-time recall guards;
@@ -157,7 +159,7 @@ The interface covers:
 - fleet and agent metadata;
 - explicit session clearing.
 
-The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`.
+The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`. `mg_topic_nodes` and `mg_memory_nodes` both include `tags TEXT[] NOT NULL DEFAULT '{}'` plus GIN indexes for tag filters.
 
 `MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, active topic nodes, optional snapshot node wrappers with graft provenance, topic edges that touch the session's nodes, all memory nodes for the session, memory edges that touch those memories, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include decayed, conflicted, and superseded memory rows so callers such as visualizers can decide what to show.
 
@@ -197,7 +199,9 @@ Targeted recall is handled by `RetrieverPipeline`, which is used by `MemoGrafter
 
 The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, combines each fact's similarity and confidence into a confidence-weighted retrieval score, groups facts by parent topic node, ranks those topic blocks by best fact retrieval score, and formats a token-budgeted system prompt.
 
-When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, and a short hash of the embedding: `mg:recall:${sessionId}:${limit}:${minSimilarity}:${embeddingHash}`. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
+Recall can be tag-aware. With no tag options, recall stays scoped to the current session. With `tags`, the default scope is `session-and-tags`, which filters current-session memories by tag. With `scope: "tagged"`, recall can search active memories across sessions that match the supplied tags. Tag matching supports `tagMode: "all"` with PostgreSQL `@>` semantics and `tagMode: "any"` with `&&` semantics. Tags are normalized by trimming, lowercasing, deduplicating, and sorting before storage or retrieval.
+
+When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, recall scope, tag mode, normalized tag list, and a short hash of the embedding. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
 
 `MemoGrafterAgent.invoke()` also uses this path before each LLM call when the session has at least one topic node. It uses the current user message as the recall query, calls `recall()` with `inject.recallLimit` and `inject.recallMinSimilarity` defaults of `6` and `0.55`, injects the returned `systemPrompt` as a single prepended system message when facts are found, and keeps only the last `inject.recentWindowSize` raw messages. If the session has no topic nodes, recall returns no facts, or recall fails, the agent proceeds with raw history only and does not fail the foreground `invoke()` call.
 
@@ -224,6 +228,7 @@ The lifecycle for a normal conversation is:
 3. Each segment is saved in `mg_segments`.
 4. Each segment produces one topic node in `mg_topic_nodes`.
 5. Segment extraction may produce multiple memory nodes in `mg_memory_nodes`.
+   When session tags are supplied, topic and memory nodes receive the normalized tag array.
 6. Topic edges are appended:
    - `temporal` edges link adjacent topic nodes;
    - `semantic` edges link similar topic nodes;
@@ -241,6 +246,7 @@ During normal ingestion, existing graph state is not cleared. New topic nodes an
 - **Storage boundary:** core logic depends on `GraphStore`; PostgreSQL with `pgvector` is the current implementation, not a requirement baked into pipeline code.
 - **Incremental graph growth:** ingestion processes only new message ranges and preserves existing graph state by default; explicit `clearSession()` is the reset path.
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
+- **Optional tag filters:** tags are additive metadata on topic and memory rows. Untagged sessions keep existing behavior, while tagged recall can support project-scoped, planning-scoped, or future worker-routed retrieval.
 - **Non-destructive maintenance:** crawler passes annotate memory lifecycle state and memory edges without deleting graph data or rewriting historical topic summaries.
 - **Invoke-time recall:** `MemoGrafterAgent.invoke()` recalls relevant active memories before answering whenever the session has graph content, while still falling back to raw history if recall is unavailable.
 - **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context and includes maintenance notes when active memory facts supersede contradictory summary details.

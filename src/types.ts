@@ -13,6 +13,7 @@ export interface TopicNode {
   label: string;
   summary: string;
   embedding: number[];
+  tags?: string[];
   messageRange: [number, number];
   topicOrder: number;
   driftScore: number;
@@ -55,6 +56,7 @@ export interface MemoryNode {
   value: string;
   confidence: number;
   embedding: number[];
+  tags?: string[];
   sourceUrl: string | null;
   sourceTitle: string | null;
   supersededBy: string | null;
@@ -139,6 +141,9 @@ export interface RetrieverConfig {
   limit?: number;
   minSimilarity?: number;
   tokenBudget?: number;
+  tags?: string[];
+  tagMode?: "all" | "any";
+  scope?: "session" | "session-and-tags" | "tagged";
   scoring?: {
     /** Default 0.7. Weight applied to semantic similarity when ranking retrieved facts. */
     similarityWeight?: number;
@@ -148,6 +153,16 @@ export interface RetrieverConfig {
   cache?: {
     ttlSeconds?: number;
   };
+}
+
+export interface TagFilterOptions {
+  tags?: string[];
+  tagMode?: "all" | "any";
+  scope?: "session" | "session-and-tags" | "tagged";
+}
+
+export interface IngestOptions {
+  tags?: string[];
 }
 
 export interface RetrievalResult {

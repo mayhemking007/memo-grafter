@@ -98,6 +98,80 @@ describe("RetrieverPipeline", () => {
     expect(result.systemPrompt).toBe(buildFactRetrievalPrompt([]));
   });
 
+  it("forwards normalized tag filters to memory search", async () => {
+    const calls: unknown[] = [];
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async (_embedding, _sessionId, _limit, _minSimilarity, options) => {
+          calls.push(options);
+          return [];
+        },
+      }),
+      makeEmbedder(),
+      {
+        tags: [" Project:Memo-Grafter ", "planning", "PLANNING"],
+        tagMode: "all",
+      },
+    );
+
+    await pipeline.run("query", "session-1");
+
+    expect(calls).toEqual([{
+      tags: ["planning", "project:memo-grafter"],
+      tagMode: "all",
+      scope: "session-and-tags",
+    }]);
+  });
+
+  it("supports tagged recall across sessions", async () => {
+    const fact = makeScoredMemoryNode({
+      id: "cross-session-fact",
+      sessionId: "session-2",
+      topicNodeId: "topic-2",
+      memoryType: "fact",
+      subject: "project",
+      predicate: "uses",
+      value: "tagged memory",
+      confidence: 0.9,
+    });
+    const topic = makeTopicNode({
+      id: "topic-2",
+      sessionId: "session-2",
+      label: "Tagged Topic",
+      summary: "Tagged topic summary.",
+      topicOrder: 1,
+    });
+    const topicCalls: Array<[string, string | undefined]> = [];
+    const searchOptions: unknown[] = [];
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async (_embedding, _sessionId, _limit, _minSimilarity, options) => {
+          searchOptions.push(options);
+          return [fact];
+        },
+        getTopicNode: async (topicNodeId, sessionId) => {
+          topicCalls.push([topicNodeId, sessionId]);
+          return topic;
+        },
+      }),
+      makeEmbedder(),
+      {
+        tags: ["project:memo-grafter"],
+        scope: "tagged",
+      },
+    );
+
+    const result = await pipeline.run("query", "session-1");
+
+    expect(searchOptions).toEqual([{
+      tags: ["project:memo-grafter"],
+      tagMode: "all",
+      scope: "tagged",
+    }]);
+    expect(topicCalls).toEqual([["topic-2", "session-2"]]);
+    expect(result.facts.map((candidate) => candidate.id)).toEqual(["cross-session-fact"]);
+  });
+
   it("filters decayed stale nodes", async () => {
     const stale = makeScoredMemoryNode({
       id: "decayed",
