@@ -510,8 +510,11 @@ The built-in conflict/versioning passes use deterministic matching:
 - a group conflicts when it has different normalized `value` strings;
 - decayed memories are skipped;
 - already superseded memories are skipped;
+- broad topic memories with generic subject/predicate pairs are skipped unless they match a recognized competing trip-plan pattern;
 - the newest conflicting fact wins by `createdAt`;
 - if timestamps tie, deterministic ID ordering is used.
+
+Conflict detection is meant for mutually exclusive fact slots such as `user location Delhi` versus `user location Bangalore`. For generic "things discussed" memories, MemoGrafter only recognizes a narrow travel destination plan pattern by default. That means `Goa trip plan` and `Vietnam trip plan` can conflict, while `how to cook rajma chawal`, `food in Vietnam`, and `places to visit Vietnam` do not all conflict just because extraction used a generic subject and predicate.
 
 `DecayScoringPass` uses confidence-weighted exponential recency decay:
 
@@ -540,6 +543,8 @@ When conflicts are found:
 - stale active memories can be marked `decayed: true` by the decay pass.
 
 Crawler maintenance is non-destructive. It annotates existing memory rows and creates memory edges. It does not delete nodes, does not rebuild topics, and does not rewrite topic summaries.
+
+Existing incorrect conflict edges are not automatically deleted. If an older crawler run created a false-positive edge, handle cleanup with a future explicit pruning pass or filter displayed memory edges to active memories in your app.
 
 Do not put crawler behavior inside `clearSession()`. `clearSession()` is a destructive reset. The crawler is a non-destructive maintenance worker. If you intentionally rebuild a session graph, use this order:
 
