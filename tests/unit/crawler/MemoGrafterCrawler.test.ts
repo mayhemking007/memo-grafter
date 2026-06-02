@@ -66,6 +66,53 @@ describe("MemoGrafterCrawler", () => {
     expect(report.durationMs).toEqual(expect.any(Number));
   });
 
+  it("passes the configured store through crawler context", async () => {
+    const store = { listMemoryNodesForMaintenance: async () => [] };
+    const observedStores: unknown[] = [];
+    const crawler = new MemoGrafterCrawler({
+      store: store as never,
+      passes: [
+        {
+          name: "first",
+          run: (context) => {
+            observedStores.push(context.store);
+            return {};
+          },
+        },
+        {
+          name: "second",
+          run: (context) => {
+            observedStores.push(context.store);
+            return {};
+          },
+        },
+      ],
+    });
+
+    await crawler.runOnce();
+
+    expect(observedStores).toEqual([store, store]);
+  });
+
+  it("omits store from context when no store is configured", async () => {
+    let sawStore = true;
+    const crawler = new MemoGrafterCrawler({
+      passes: [
+        {
+          name: "inspect-context",
+          run: (context) => {
+            sawStore = "store" in context;
+            return {};
+          },
+        },
+      ],
+    });
+
+    await crawler.runOnce();
+
+    expect(sawStore).toBe(false);
+  });
+
   it("captures a failing pass in the report and continues by default", async () => {
     const crawler = new MemoGrafterCrawler({
       passes: [
@@ -133,6 +180,34 @@ describe("MemoGrafterCrawler", () => {
       name: "fails",
       ok: false,
     });
+  });
+
+  it("does not pass context to later passes after a stop-on-error failure", async () => {
+    const contexts: unknown[] = [];
+    const crawler = new MemoGrafterCrawler({
+      store: { listMemoryNodesForMaintenance: async () => [] } as never,
+      stopOnPassError: true,
+      passes: [
+        {
+          name: "fails",
+          run: (context) => {
+            contexts.push(context);
+            throw new Error("stop here");
+          },
+        },
+        {
+          name: "should-not-run",
+          run: (context) => {
+            contexts.push(context);
+            return {};
+          },
+        },
+      ],
+    });
+
+    await crawler.runOnce();
+
+    expect(contexts).toHaveLength(1);
   });
 
   it("does not create duplicate loops when started twice", async () => {

@@ -48,6 +48,29 @@ function makeMemory(overrides: Partial<MemoryNode> = {}): MemoryNode {
 }
 
 describe("GrafterPipeline maintenance-aware prompts", () => {
+  async function runWithMemories(
+    topic: TopicNode,
+    memories: MemoryNode[],
+    memoryEdges: MemoryEdge[],
+  ): Promise<string> {
+    const store = {
+      getNeighbours: async () => [topic],
+      getBufferMessages: async (): Promise<Message[]> => [
+        { role: "user", content: "I live in Delhi." },
+      ],
+      getMemoriesBySession: async () => memories,
+      getMemoryEdgesBySession: async () => memoryEdges,
+    };
+    const pipeline = new GrafterPipeline(store as never, {
+      hopDepth: 1,
+      bufferSize: 0,
+      tokenBudget: 4000,
+    });
+
+    const result = await pipeline.run("session-1", [topic.id]);
+    return result.systemPrompt;
+  }
+
   it("adds contradiction notes and active facts without rewriting the historical summary", async () => {
     const topic = makeTopicNode();
     const oldMemory = makeMemory({
@@ -94,5 +117,84 @@ describe("GrafterPipeline maintenance-aware prompts", () => {
     expect(result.systemPrompt).toContain("Prefer active memory facts over contradictory historical summary details.");
     expect(result.systemPrompt).toContain("Active memory facts:");
     expect(result.systemPrompt).toContain("- user location: Bangalore");
+  });
+
+  it("notes a superseded memory even when the replacement is not available", async () => {
+    const topic = makeTopicNode();
+    const oldMemory = makeMemory({
+      id: "old-location",
+      value: "Delhi",
+      supersededBy: "missing-location",
+    });
+
+    const systemPrompt = await runWithMemories(topic, [oldMemory], []);
+
+    expect(systemPrompt).toContain(
+      'The fact "user location: Delhi" was superseded by a newer memory.',
+    );
+    expect(systemPrompt).toContain("Prefer active memory facts over contradictory historical summary details.");
+    expect(systemPrompt).not.toContain("Active memory facts:");
+  });
+
+  it("does not include a decayed replacement as an active memory fact", async () => {
+    const topic = makeTopicNode();
+    const oldMemory = makeMemory({
+      id: "old-location",
+      value: "Delhi",
+      supersededBy: "new-location",
+    });
+    const decayedReplacement = makeMemory({
+      id: "new-location",
+      topicNodeId: "topic-2",
+      value: "Bangalore",
+      decayed: true,
+    });
+
+    const systemPrompt = await runWithMemories(topic, [oldMemory, decayedReplacement], []);
+
+    expect(systemPrompt).toContain(
+      'The fact "user location: Delhi" was superseded by "Bangalore".',
+    );
+    expect(systemPrompt).not.toContain("Active memory facts:");
+    expect(systemPrompt).not.toContain("- user location: Bangalore");
+  });
+
+  it("adds a maintenance note when an edge touches topic memory even without memory flags", async () => {
+    const topic = makeTopicNode();
+    const topicMemory = makeMemory({ id: "topic-memory" });
+    const otherMemory = makeMemory({ id: "other-memory", topicNodeId: "topic-2", value: "Bangalore" });
+    const memoryEdge: MemoryEdge = {
+      id: "edge-1",
+      sourceId: "topic-memory",
+      targetId: "other-memory",
+      edgeType: "conflicts",
+      weight: 1,
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    };
+
+    const systemPrompt = await runWithMemories(topic, [topicMemory, otherMemory], [memoryEdge]);
+
+    expect(systemPrompt).toContain("Memory maintenance notes:");
+    expect(systemPrompt).toContain("Prefer active memory facts over contradictory historical summary details.");
+    expect(systemPrompt).toContain("Active memory facts:");
+    expect(systemPrompt).toContain("- user location: Delhi");
+  });
+
+  it("ignores maintenance edges unrelated to the selected topic memory", async () => {
+    const topic = makeTopicNode();
+    const topicMemory = makeMemory({ id: "topic-memory" });
+    const memoryEdge: MemoryEdge = {
+      id: "edge-1",
+      sourceId: "other-memory-a",
+      targetId: "other-memory-b",
+      edgeType: "conflicts",
+      weight: 1,
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    };
+
+    const systemPrompt = await runWithMemories(topic, [topicMemory], [memoryEdge]);
+
+    expect(systemPrompt).not.toContain("Memory maintenance notes:");
+    expect(systemPrompt).not.toContain("Active memory facts:");
   });
 });

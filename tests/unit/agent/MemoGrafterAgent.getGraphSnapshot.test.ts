@@ -247,4 +247,72 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
     expect(deletedNodes).toEqual([{ nodeId: "grafted-node", sessionId }]);
     await expect(agent.removeGraft("native-node")).rejects.toThrow("No graft registered");
   });
+
+  it("preserves maintenance memory edges in graph snapshots", async () => {
+    const agent = createAgent();
+    const privateAgent = internals(agent);
+    const sessionId = agent.getSessionId();
+    const node = makeTopicNode({ sessionId });
+    const activeMemory = makeMemoryNode({ id: "active-memory", sessionId, topicNodeId: node.id });
+    const decayedMemory = makeMemoryNode({
+      id: "decayed-memory",
+      sessionId,
+      topicNodeId: node.id,
+      decayed: true,
+    });
+    const supersededMemory = makeMemoryNode({
+      id: "superseded-memory",
+      sessionId,
+      topicNodeId: node.id,
+      supersededBy: "active-memory",
+    });
+    const memoryEdges: MemoryEdge[] = [
+      {
+        id: "conflict-edge",
+        sourceId: activeMemory.id,
+        targetId: decayedMemory.id,
+        edgeType: "conflicts",
+        weight: 1,
+        createdAt: new Date("2026-01-03T00:00:00.000Z"),
+      },
+      {
+        id: "update-edge",
+        sourceId: activeMemory.id,
+        targetId: supersededMemory.id,
+        edgeType: "updates",
+        weight: 1,
+        createdAt: new Date("2026-01-04T00:00:00.000Z"),
+      },
+      {
+        id: "semantic-edge",
+        sourceId: activeMemory.id,
+        targetId: decayedMemory.id,
+        edgeType: "semantic",
+        weight: 0.82,
+        createdAt: new Date("2026-01-05T00:00:00.000Z"),
+      },
+    ];
+    const memoryEdgeCalls: string[] = [];
+
+    privateAgent.core.getTopics = async () => ({ nodes: [node], segments: [makeSegment({ sessionId })] });
+    privateAgent.core.store.getEdgesBySession = async () => [];
+    privateAgent.core.store.getMemoriesBySession = async () => [activeMemory, decayedMemory, supersededMemory];
+    privateAgent.core.store.getMemoryEdgesBySession = async (observedSessionId) => {
+      memoryEdgeCalls.push(observedSessionId);
+      return memoryEdges;
+    };
+    privateAgent.core.store.getGraftRegistry = async () => [];
+
+    const snapshot = await agent.getGraphSnapshot();
+
+    expect(memoryEdgeCalls).toEqual([sessionId]);
+    expect(snapshot.memoryEdges).toEqual(memoryEdges);
+    expect(snapshot.memoryEdges.map((edge) => edge.edgeType)).toEqual([
+      "conflicts",
+      "updates",
+      "semantic",
+    ]);
+    expect(snapshot.memories.some((memory) => memory.decayed)).toBe(true);
+    expect(snapshot.memories.some((memory) => memory.supersededBy !== null)).toBe(true);
+  });
 });
