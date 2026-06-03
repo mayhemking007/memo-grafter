@@ -5,6 +5,12 @@ export interface MemoryConflictGroup {
   nodes: MemoryNode[];
 }
 
+export interface MemoryVersionGroup {
+  key: string;
+  nodes: MemoryNode[];
+  replacement: MemoryNode;
+}
+
 interface ConflictGrouping {
   key: string;
   value: string;
@@ -15,6 +21,25 @@ export function normalizeMemoryPart(value: string): string {
 }
 
 export function findMemoryConflictGroups(memories: MemoryNode[]): MemoryConflictGroup[] {
+  return findCompetingMemoryGroups(memories)
+    .filter((group) => !getExplicitReplacement(group.nodes));
+}
+
+export function findMemoryVersionGroups(memories: MemoryNode[]): MemoryVersionGroup[] {
+  return findCompetingMemoryGroups(memories)
+    .map((group) => {
+      const replacement = getExplicitReplacement(group.nodes);
+      return replacement ? { ...group, replacement } : null;
+    })
+    .filter((group): group is MemoryVersionGroup => group != null);
+}
+
+export function hasExplicitUpdateCue(memory: Pick<MemoryNode, "value">): boolean {
+  const value = normalizeMemoryPart(memory.value);
+  return UPDATE_CUE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function findCompetingMemoryGroups(memories: MemoryNode[]): MemoryConflictGroup[] {
   const byFactKey = new Map<string, Array<{ memory: MemoryNode; value: string }>>();
 
   for (const memory of memories) {
@@ -43,6 +68,11 @@ export function findMemoryConflictGroups(memories: MemoryNode[]): MemoryConflict
       key,
       nodes: items.map((item) => item.memory),
     }));
+}
+
+function getExplicitReplacement(nodes: MemoryNode[]): MemoryNode | null {
+  const newest = getNewestMemoryNode(nodes);
+  return newest && hasExplicitUpdateCue(newest) ? newest : null;
 }
 
 export function isBroadTopicMemory(memory: Pick<MemoryNode, "subject" | "predicate">): boolean {
@@ -137,3 +167,14 @@ const GENERIC_PREDICATES = new Set([
   "plan",
   "wants",
 ]);
+
+const UPDATE_CUE_PATTERNS = [
+  /\bactually\b/,
+  /\bchanged to\b/,
+  /\bcorrect(?:ion|ed)?\b/,
+  /\bcurrent(?:ly)?\b/,
+  /\binstead\b/,
+  /\bnow\b/,
+  /\breplace(?:d|s)?\b/,
+  /\bupdated to\b/,
+];

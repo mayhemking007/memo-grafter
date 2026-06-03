@@ -29,7 +29,7 @@ const crawlerSmokeLLMAdapter: LLMAdapter = {
     }
 
     const normalized = last.toLowerCase();
-    const value = normalized.includes("bangalore") ? "Bangalore" : "Delhi";
+    const value = normalized.includes("bangalore") ? "Actually Bangalore now" : "Delhi";
 
     return JSON.stringify({
       label: "User Location",
@@ -87,7 +87,7 @@ try {
 
   const memoriesBefore = await memo.store.getMemoriesBySession(sessionId);
   assert.ok(memoriesBefore.some((memory) => memory.value === "Delhi"));
-  assert.ok(memoriesBefore.some((memory) => memory.value === "Bangalore"));
+  assert.ok(memoriesBefore.some((memory) => memory.value === "Actually Bangalore now"));
 
   const crawler = new MemoGrafterCrawler({
     store: memo.store,
@@ -98,20 +98,16 @@ try {
 
   const memoriesAfter = await memo.store.getMemoriesBySession(sessionId);
   const delhiMemory = memoriesAfter.find((memory) => memory.value === "Delhi");
-  const bangaloreMemory = memoriesAfter.find((memory) => memory.value === "Bangalore");
+  const bangaloreMemory = memoriesAfter.find((memory) => memory.value === "Actually Bangalore now");
   assert.ok(delhiMemory);
   assert.ok(bangaloreMemory);
   assert.equal(delhiMemory.supersededBy, bangaloreMemory.id);
   assert.equal(bangaloreMemory.supersededBy, null);
-  assert.equal(delhiMemory.hasConflict, true);
-  assert.equal(bangaloreMemory.hasConflict, true);
+  assert.equal(delhiMemory.hasConflict, false);
+  assert.equal(bangaloreMemory.hasConflict, false);
 
   const memoryEdges = await memo.store.getMemoryEdgesBySession(sessionId);
-  assert.ok(memoryEdges.some((edge) =>
-    edge.edgeType === "conflicts"
-    && [edge.sourceId, edge.targetId].includes(delhiMemory.id)
-    && [edge.sourceId, edge.targetId].includes(bangaloreMemory.id)
-  ));
+  assert.equal(memoryEdges.some((edge) => edge.edgeType === "conflicts"), false);
   assert.ok(memoryEdges.some((edge) =>
     edge.edgeType === "updates"
     && edge.sourceId === bangaloreMemory.id
@@ -121,10 +117,10 @@ try {
   const graft = await memo.inject(sessionId, [delhiMemory.topicNodeId]);
   assert.match(graft.systemPrompt, /Summary: .*Delhi/s);
   assert.match(graft.systemPrompt, /Memory maintenance notes:/);
-  assert.match(graft.systemPrompt, /superseded by "Bangalore"/);
+  assert.match(graft.systemPrompt, /superseded by "Actually Bangalore now"/);
   assert.match(graft.systemPrompt, /Prefer active memory facts over contradictory historical summary details/);
   assert.match(graft.systemPrompt, /Active memory facts:/);
-  assert.match(graft.systemPrompt, /user location: Bangalore/);
+  assert.match(graft.systemPrompt, /user location: Actually Bangalore now/);
 
   assert.equal(secondReport.passes[0]?.result?.conflictEdgesCreated, 0);
   assert.equal(secondReport.passes[1]?.result?.updateEdgesCreated, 0);

@@ -43,6 +43,7 @@ export function buildSegmentExtractionPrompt(messages: Message[], labelHint?: st
     "Rules:",
     "- The value field must be one sentence maximum.",
     "- The value field must be self-contained and meaningful without surrounding context.",
+    "- When a statement explicitly corrects, replaces, or updates an earlier fact, preserve that update cue in the value, such as actually, now, changed to, or instead.",
     "- If no memories are extractable from the segment, return an empty memories array.",
     "- Use null for open when there is no unresolved question or follow-up.",
     ...(labelHint

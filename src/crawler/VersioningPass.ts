@@ -1,7 +1,6 @@
 import type { CrawlerPass, CrawlerPassContext, CrawlerPassResult } from "./types.js";
 import {
-  findMemoryConflictGroups,
-  getNewestMemoryNode,
+  findMemoryVersionGroups,
   getSkippedMaintenanceCounts,
 } from "./memoryMaintenance.js";
 
@@ -14,23 +13,20 @@ export class VersioningPass implements CrawlerPass {
     }
 
     const memories = await context.store.listMemoryNodesForMaintenance();
-    const conflictGroups = findMemoryConflictGroups(memories);
+    const versionGroups = findMemoryVersionGroups(memories);
     let nodesSuperseded = 0;
     let updateEdgesCreated = 0;
 
-    for (const group of conflictGroups) {
-      const newest = getNewestMemoryNode(group.nodes);
-      if (!newest) continue;
-
+    for (const group of versionGroups) {
       for (const node of group.nodes) {
-        if (node.id === newest.id || node.supersededBy != null) continue;
+        if (node.id === group.replacement.id || node.supersededBy != null) continue;
 
-        const superseded = await context.store.markMemoryNodeSuperseded(node.id, newest.id);
+        const superseded = await context.store.markMemoryNodeSuperseded(node.id, group.replacement.id);
         if (superseded) nodesSuperseded += 1;
 
         // Direction convention: newer memory --updates--> older memory.
         const edgeCreated = await context.store.upsertMemoryEdge({
-          sourceId: newest.id,
+          sourceId: group.replacement.id,
           targetId: node.id,
           edgeType: "updates",
           weight: 1,
@@ -43,7 +39,7 @@ export class VersioningPass implements CrawlerPass {
 
     return {
       inspected: memories.length,
-      conflictsDetected: conflictGroups.length,
+      versionsDetected: versionGroups.length,
       nodesSuperseded,
       updateEdgesCreated,
       ...skipped,

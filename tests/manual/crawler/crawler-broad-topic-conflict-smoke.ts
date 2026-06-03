@@ -130,7 +130,8 @@ try {
 
   assert.equal(report.passes[0]?.result?.conflictsDetected, 1);
   assert.equal(report.passes[0]?.result?.conflictEdgesCreated, 1);
-  assert.equal(report.passes[1]?.result?.nodesSuperseded, 1);
+  assert.equal(report.passes[1]?.result?.versionsDetected, 0);
+  assert.equal(report.passes[1]?.result?.nodesSuperseded, 0);
   assert.equal(memoryEdges.filter((edge) => edge.edgeType === "conflicts").length, 1);
   assert.ok(memoryEdges.some((edge) =>
     edge.edgeType === "conflicts"
@@ -141,6 +142,8 @@ try {
   assert.equal(vietnamFoodMemory.hasConflict, false);
   assert.equal(vietnamPlacesMemory.hasConflict, false);
   assert.equal(rajmaMemory.supersededBy, null);
+  assert.equal(goaMemory.supersededBy, null);
+  assert.equal(vietnamMemory.supersededBy, null);
   assert.equal(vietnamFoodMemory.supersededBy, null);
   assert.equal(vietnamPlacesMemory.supersededBy, null);
 

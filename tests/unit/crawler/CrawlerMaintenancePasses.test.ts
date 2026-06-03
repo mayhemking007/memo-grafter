@@ -112,14 +112,14 @@ function makeMemory(overrides: Partial<MemoryNode> = {}): MemoryNode {
 }
 
 describe("crawler memory maintenance passes", () => {
-  it("detects conflicts for same subject and predicate with different values", async () => {
+  it("keeps plain disagreements as active conflicts without versioning them", async () => {
     const store = new InMemoryMaintenanceStore([
       makeMemory({ id: "memory-a", value: "Delhi" }),
       makeMemory({ id: "memory-b", value: "Bangalore" }),
     ]);
     const crawler = new MemoGrafterCrawler({
       store,
-      passes: [new ConflictDetectionPass()],
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
     });
 
     const report = await crawler.runOnce();
@@ -130,7 +130,13 @@ describe("crawler memory maintenance passes", () => {
       nodesMarkedConflicting: 2,
       conflictEdgesCreated: 1,
     });
+    expect(report.passes[1]?.result).toMatchObject({
+      versionsDetected: 0,
+      nodesSuperseded: 0,
+      updateEdgesCreated: 0,
+    });
     expect(store.memories.every((memory) => memory.hasConflict)).toBe(true);
+    expect(store.memories.every((memory) => memory.supersededBy === null)).toBe(true);
     expect(store.edges).toMatchObject([
       {
         sourceId: "memory-a",
@@ -194,9 +200,9 @@ describe("crawler memory maintenance passes", () => {
       conflictEdgesCreated: 1,
     });
     expect(report.passes[1]?.result).toMatchObject({
-      conflictsDetected: 1,
-      nodesSuperseded: 1,
-      updateEdgesCreated: 1,
+      versionsDetected: 0,
+      nodesSuperseded: 0,
+      updateEdgesCreated: 0,
     });
     expect(store.edges.filter((edge) => edge.edgeType === "conflicts")).toMatchObject([
       {
@@ -209,6 +215,8 @@ describe("crawler memory maintenance passes", () => {
     expect(store.memories.find((memory) => memory.id === "rajma")?.supersededBy).toBeNull();
     expect(store.memories.find((memory) => memory.id === "goa")?.hasConflict).toBe(true);
     expect(store.memories.find((memory) => memory.id === "vietnam")?.hasConflict).toBe(true);
+    expect(store.memories.find((memory) => memory.id === "goa")?.supersededBy).toBeNull();
+    expect(store.memories.find((memory) => memory.id === "vietnam")?.supersededBy).toBeNull();
   });
 
   it("does not conflict broad travel subtopics for the same destination", async () => {
@@ -239,7 +247,7 @@ describe("crawler memory maintenance passes", () => {
       conflictEdgesCreated: 0,
     });
     expect(report.passes[1]?.result).toMatchObject({
-      conflictsDetected: 0,
+      versionsDetected: 0,
       nodesSuperseded: 0,
       updateEdgesCreated: 0,
     });
@@ -248,7 +256,7 @@ describe("crawler memory maintenance passes", () => {
     expect(store.memories.every((memory) => memory.supersededBy === null)).toBe(true);
   });
 
-  it("supersedes older conflicting memories and creates update edges", async () => {
+  it("versions explicit replacements without creating unresolved conflicts", async () => {
     const store = new InMemoryMaintenanceStore([
       makeMemory({
         id: "older",
@@ -257,24 +265,30 @@ describe("crawler memory maintenance passes", () => {
       }),
       makeMemory({
         id: "newer",
-        value: "Bangalore",
+        value: "Actually Bangalore now",
         createdAt: new Date("2026-01-02T00:00:00.000Z"),
       }),
     ]);
     const crawler = new MemoGrafterCrawler({
       store,
-      passes: [new VersioningPass()],
+      passes: [new ConflictDetectionPass(), new VersioningPass()],
     });
 
     const report = await crawler.runOnce();
 
     expect(report.passes[0]?.result).toMatchObject({
-      conflictsDetected: 1,
+      conflictsDetected: 0,
+      nodesMarkedConflicting: 0,
+      conflictEdgesCreated: 0,
+    });
+    expect(report.passes[1]?.result).toMatchObject({
+      versionsDetected: 1,
       nodesSuperseded: 1,
       updateEdgesCreated: 1,
     });
     expect(store.memories.find((memory) => memory.id === "older")?.supersededBy).toBe("newer");
     expect(store.memories.find((memory) => memory.id === "newer")?.supersededBy).toBeNull();
+    expect(store.memories.every((memory) => memory.hasConflict === false)).toBe(true);
     expect(store.edges).toMatchObject([
       {
         sourceId: "newer",
@@ -288,7 +302,7 @@ describe("crawler memory maintenance passes", () => {
     const createdAt = new Date("2026-01-01T00:00:00.000Z");
     const store = new InMemoryMaintenanceStore([
       makeMemory({ id: "aaa", value: "Delhi", createdAt }),
-      makeMemory({ id: "zzz", value: "Bangalore", createdAt }),
+      makeMemory({ id: "zzz", value: "Now Bangalore", createdAt }),
     ]);
     const crawler = new MemoGrafterCrawler({
       store,
@@ -306,7 +320,7 @@ describe("crawler memory maintenance passes", () => {
       makeMemory({ id: "older", value: "Delhi" }),
       makeMemory({
         id: "newer",
-        value: "Bangalore",
+        value: "Now Bangalore",
         createdAt: new Date("2026-01-02T00:00:00.000Z"),
       }),
     ]);
@@ -318,8 +332,8 @@ describe("crawler memory maintenance passes", () => {
     await crawler.runOnce();
     const secondReport = await crawler.runOnce();
 
-    expect(store.edges).toHaveLength(2);
-    expect(store.memories.filter((memory) => memory.hasConflict)).toHaveLength(2);
+    expect(store.edges).toHaveLength(1);
+    expect(store.memories.filter((memory) => memory.hasConflict)).toHaveLength(0);
     expect(secondReport.passes[0]?.result).toMatchObject({
       conflictsDetected: 0,
       nodesMarkedConflicting: 0,
@@ -327,7 +341,7 @@ describe("crawler memory maintenance passes", () => {
       skippedSuperseded: 1,
     });
     expect(secondReport.passes[1]?.result).toMatchObject({
-      conflictsDetected: 0,
+      versionsDetected: 0,
       nodesSuperseded: 0,
       updateEdgesCreated: 0,
       skippedSuperseded: 1,
@@ -355,7 +369,7 @@ describe("crawler memory maintenance passes", () => {
       skippedSuperseded: 1,
     });
     expect(report.passes[1]?.result).toMatchObject({
-      conflictsDetected: 0,
+      versionsDetected: 0,
       skippedDecayed: 1,
       skippedSuperseded: 1,
     });

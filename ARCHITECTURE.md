@@ -174,11 +174,11 @@ The built-in `PostgresGraphStore` creates and manages the current schema, includ
 
 The built-in maintenance passes are deterministic:
 
-- `ConflictDetectionPass` groups active memories by session, normalized `subject`, and normalized `predicate`. A group conflicts when it contains different normalized `value` strings. Decayed memories and already superseded memories are skipped.
-- `VersioningPass` runs over the same conflict groups, picks the newest memory by `createdAt`, falls back to deterministic ID ordering on ties, marks older memories with `superseded_by`, and creates version edges.
+- `ConflictDetectionPass` groups active memories by session, normalized `subject`, and normalized `predicate`. A group conflicts when it contains different normalized `value` strings and the newest value does not carry an explicit update cue. Decayed memories and already superseded memories are skipped.
+- `VersioningPass` uses a separate version classifier. It only accepts competing groups whose newest memory carries an explicit replacement or update cue such as `actually`, `now`, `changed to`, or `instead`, then marks older memories with `superseded_by` and creates version edges.
 - `DecayScoringPass` scores non-superseded active memories with confidence-weighted exponential recency decay. Memories whose score falls below the configured threshold are marked `decayed = TRUE`.
 
-Conflict grouping treats broad topic memories carefully when both the subject and predicate are generic, such as `user asked_about ...` or `conversation discussed ...`. Most broad topic rows are skipped because they describe what was discussed rather than mutually exclusive fact slots. Recognized travel destination plan rows are partitioned into a deterministic `travel-trip-plan` bucket and compared by destination, so `Goa trip plan` can conflict with `Vietnam trip plan`, while unrelated topics like `how to cook rajma chawal` or non-exclusive Vietnam subtopics do not join that conflict group.
+Conflict grouping treats broad topic memories carefully when both the subject and predicate are generic, such as `user asked_about ...` or `conversation discussed ...`. Most broad topic rows are skipped because they describe what was discussed rather than mutually exclusive fact slots. Recognized travel destination plan rows are partitioned into a deterministic `travel-trip-plan` bucket and compared by destination, so `Goa trip plan` can conflict with `Vietnam trip plan`, while unrelated topics like `how to cook rajma chawal` or non-exclusive Vietnam subtopics do not join that conflict group. Plain disagreements remain active conflicts; they are not superseded merely because one memory is newer.
 
 Decay scoring uses:
 
