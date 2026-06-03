@@ -589,17 +589,20 @@ await memo.close();
 
 `start()` is safe to call more than once; it does not create duplicate intervals. If a scheduled tick fires while the previous run is still executing, that tick is skipped.
 
-The built-in conflict/versioning passes use deterministic matching:
+The built-in conflict and versioning passes use separate deterministic classifiers:
 
-- they group active memories by session, normalized `subject`, and normalized `predicate`;
-- a group conflicts when it has different normalized `value` strings;
+- both classifiers begin by grouping active memories by session, normalized `subject`, and normalized `predicate`;
+- a group conflicts when it has different normalized `value` strings and the newest value does not contain an explicit update cue;
+- a group versions only when its newest value contains an explicit replacement or update cue such as `actually`, `now`, `changed to`, or `instead`;
 - decayed memories are skipped;
 - already superseded memories are skipped;
 - broad topic memories with generic subject/predicate pairs are skipped unless they match a recognized competing trip-plan pattern;
-- the newest conflicting fact wins by `createdAt`;
-- if timestamps tie, deterministic ID ordering is used.
+- version replacement candidates are selected by `createdAt`;
+- if version candidate timestamps tie, deterministic ID ordering is used.
 
 Conflict detection is meant for mutually exclusive fact slots such as `user location Delhi` versus `user location Bangalore`. For generic "things discussed" memories, MemoGrafter only recognizes a narrow travel destination plan pattern by default. That means `Goa trip plan` and `Vietnam trip plan` can conflict, while `how to cook rajma chawal`, `food in Vietnam`, and `places to visit Vietnam` do not all conflict just because extraction used a generic subject and predicate.
+
+Versioning is meant for explicit replacements such as `user location Delhi` followed by `user location Actually Bangalore now`. The extraction prompt asks adapters to preserve update cues in memory values because the built-in crawler operates on stored memory rows and does not inspect the original conversation text.
 
 `DecayScoringPass` uses confidence-weighted exponential recency decay:
 
@@ -623,6 +626,10 @@ When conflicts are found:
 
 - both active facts get `hasConflict: true`;
 - a `conflicts` memory edge is created;
+- neither fact is superseded.
+
+When explicit replacements are found:
+
 - the older fact gets `supersededBy` pointing to the newer fact;
 - an `updates` edge is created as `newer_memory --updates--> older_memory`.
 - stale active memories can be marked `decayed: true` by the decay pass.

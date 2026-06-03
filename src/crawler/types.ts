@@ -22,6 +22,7 @@ export interface CrawlerPassResult {
   annotated?: number;
   skipped?: number;
   conflictsDetected?: number;
+  versionsDetected?: number;
   nodesMarkedConflicting?: number;
   conflictEdgesCreated?: number;
   nodesSuperseded?: number;
