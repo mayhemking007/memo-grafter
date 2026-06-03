@@ -23,6 +23,7 @@ export type {
   GraphSnapshotNode,
   InjectionResult,
   IngestOptions,
+  IngestTextOptions,
   LLMAdapter,
   MemoryEdge,
   MemoryNode,

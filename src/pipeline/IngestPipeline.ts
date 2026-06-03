@@ -2,8 +2,8 @@ import type { GraphStore } from "../store/index.js";
 import type {
   DriftSensitivity,
   EmbedAdapter,
+  IngestPipelineOptions,
   LLMAdapter,
-  IngestOptions,
   MemoGrafterDriftConfig,
   Message,
   TopicNode,
@@ -12,6 +12,7 @@ import { resolveAdaptiveDriftThreshold } from "../utils/drift/adaptiveDriftSensi
 import { cosineSimilarity } from "../utils/drift/cosineSimilarity.js";
 import { resolveDriftThreshold } from "../utils/drift/driftThreshold.js";
 import { normalizeText } from "../utils/text/normalizeText.js";
+import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
 import { edgePairKey, findCurrentRunReentryEdges } from "../utils/reentry/reentryEdges.js";
 import { SegmentProcessor } from "./SegmentProcessor.js";
 import { type DriftSegment, TopicDriftDetector } from "./TopicDriftDetector.js";
@@ -51,7 +52,7 @@ export class IngestPipeline {
     });
   }
 
-  async run(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<TopicNode[]> {
+  async run(messages: Message[], sessionId: string, options: IngestPipelineOptions = {}): Promise<TopicNode[]> {
     if (messages.length === 0) return [];
 
     await this.store.saveMessages(sessionId, messages);
@@ -63,7 +64,7 @@ export class IngestPipeline {
     const contextStartIndex = Math.max(0, firstNewMessageIndex - INGEST_OVERLAP_MESSAGES);
     const contextMessages = messages.slice(contextStartIndex);
     const contextEmbeddings = await Promise.all(contextMessages.map((message) => this.embedMessage(message)));
-    const driftDetector = await this.createDriftDetector(sessionId);
+    const driftDetector = await this.createDriftDetector(sessionId, options.minSegmentMessages);
     const { segments, reentryMap } = await driftDetector.detectSegments(
       contextMessages,
       contextEmbeddings,
@@ -79,9 +80,13 @@ export class IngestPipeline {
     const nodes: TopicNode[] = [];
     const nodeByDetectorTopicOrder = new Map<number, TopicNode>();
     const savedReentryPairs = new Set<string>();
+    const { label, minSegmentMessages: _minSegmentMessages, ...segmentOptions } = options;
 
-    for (const { segment, detectorTopicOrder } of absoluteSegments) {
-      const node = await this.segmentProcessor.process(segment, messages, sessionId, options);
+    for (const [index, { segment, detectorTopicOrder }] of absoluteSegments.entries()) {
+      const node = await this.segmentProcessor.process(segment, messages, sessionId, {
+        ...segmentOptions,
+        ...(index === 0 && label ? { label } : {}),
+      });
       nodes.push(node);
       nodeByDetectorTopicOrder.set(detectorTopicOrder, node);
 
@@ -119,6 +124,31 @@ export class IngestPipeline {
     await this.store.updateSessionIngestState(sessionId, messages.length - 1);
 
     return nodes;
+  }
+
+  async runText(
+    text: string,
+    sessionId: string,
+    options: IngestPipelineOptions = {},
+  ): Promise<TopicNode[]> {
+    if (text.trim().length === 0) return [];
+
+    if (options.replace) {
+      await this.store.clearSession(sessionId);
+    }
+
+    const chunks = splitTextForIngestion(text);
+    if (chunks.length === 0) return [];
+
+    const messages = await this.store.getMessagesBySession(sessionId);
+    return this.run([
+      ...messages,
+      ...chunks.map((content): Message => ({ role: "user", content })),
+    ], sessionId, {
+      ...options,
+      sourceType: options.sourceType ?? "document",
+      minSegmentMessages: options.minSegmentMessages ?? 1,
+    });
   }
 
   private toNewAbsoluteSegments(
@@ -203,7 +233,7 @@ export class IngestPipeline {
     return this.embedder.embed(content);
   }
 
-  private async createDriftDetector(sessionId: string): Promise<TopicDriftDetector> {
+  private async createDriftDetector(sessionId: string, minSegmentMessages?: number): Promise<TopicDriftDetector> {
     const adaptiveConfig = this.config.adaptiveSensitivity;
     const threshold = adaptiveConfig?.enabled
       ? resolveAdaptiveDriftThreshold(
@@ -218,7 +248,7 @@ export class IngestPipeline {
         windowSize: this.config.windowSize,
         threshold,
         mode: this.config.mode,
-        minSegmentMessages: this.config.minSegmentMessages,
+        minSegmentMessages: minSegmentMessages ?? this.config.minSegmentMessages,
         llmAmbiguityDetection: this.config.llmAmbiguityDetection ?? false,
         reentryDetection: this.config.reentryDetection ?? true,
         reentryThreshold: this.config.reentryThreshold ?? 0.85,

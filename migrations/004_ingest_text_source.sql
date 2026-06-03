@@ -1,0 +1,5 @@
+ALTER TABLE mg_topic_nodes
+ADD COLUMN IF NOT EXISTS source TEXT;
+
+ALTER TABLE mg_memory_nodes
+ADD COLUMN IF NOT EXISTS source TEXT;

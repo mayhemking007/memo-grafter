@@ -2,13 +2,19 @@ import { randomUUID } from "node:crypto";
 import { Queue, Worker, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
 import type { IngestPipeline } from "../pipeline/IngestPipeline.js";
-import type { IngestOptions, MemoGrafterQueueConfig, Message } from "../types.js";
+import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../types.js";
 
-interface IngestJobData {
+type IngestJobData = {
+  kind: "messages";
   messages: Message[];
   sessionId: string;
-  options?: IngestOptions;
-}
+  options?: IngestPipelineOptions;
+} | {
+  kind: "text";
+  text: string;
+  sessionId: string;
+  options?: IngestPipelineOptions;
+};
 
 export class IngestQueue {
   private readonly connection: Redis;
@@ -51,12 +57,13 @@ export class IngestQueue {
     });
   }
 
-  async enqueue(messages: Message[], sessionId: string, options: IngestOptions = {}): Promise<void> {
+  async enqueue(messages: Message[], sessionId: string, options: IngestPipelineOptions = {}): Promise<void> {
     try {
       await this.withTimeout(
         this.queue.add(
           "ingest",
           {
+            kind: "messages",
             messages: [...messages],
             sessionId,
             options,
@@ -69,6 +76,28 @@ export class IngestQueue {
       this.ensureWorker();
     } catch (error) {
       console.warn("MemoGrafter ingest queue enqueue failed:", error);
+    }
+  }
+
+  async enqueueText(text: string, sessionId: string, options: IngestPipelineOptions = {}): Promise<void> {
+    try {
+      await this.withTimeout(
+        this.queue.add(
+          "ingest-text",
+          {
+            kind: "text",
+            text,
+            sessionId,
+            options,
+          },
+          this.defaultJobOptions,
+        ),
+        1000,
+        "MemoGrafter text ingest queue enqueue timed out.",
+      );
+      this.ensureWorker();
+    } catch (error) {
+      console.warn("MemoGrafter text ingest queue enqueue failed:", error);
     }
   }
 
@@ -99,6 +128,11 @@ export class IngestQueue {
       this.queueName,
       async (job) => {
         try {
+          if (job.data.kind === "text") {
+            await this.pipeline.runText(job.data.text, job.data.sessionId, job.data.options ?? {});
+            return;
+          }
+
           await this.pipeline.run(job.data.messages, job.data.sessionId, job.data.options ?? {});
         } catch (error) {
           console.warn("MemoGrafter background ingest failed:", error);
