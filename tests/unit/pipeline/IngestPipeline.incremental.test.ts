@@ -52,6 +52,19 @@ class IncrementalStore {
     this.messages = [...messages];
   }
 
+  async getMessagesBySession(): Promise<Message[]> {
+    return [...this.messages];
+  }
+
+  async clearSession(): Promise<void> {
+    this.messages = [];
+    this.segments = [];
+    this.nodes = [];
+    this.edges = [];
+    this.memories = [];
+    this.ingestState = null;
+  }
+
   async getSessionIngestState(): Promise<SessionIngestState | null> {
     return this.ingestState;
   }
@@ -161,5 +174,59 @@ describe("IngestPipeline incremental ingest", () => {
     ]);
     expect(store.ingestState?.lastIngestedMessageIndex).toBe(3);
     expect(store.edges.length).toBeGreaterThan(0);
+  });
+
+  it("ingests raw text with label and source metadata, then replaces it", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+
+    const firstNodes = await pipeline.runText("I prefer quiet cafes for planning.", "session-1", {
+      label: "Morning entry",
+      source: "classic-editor",
+    });
+
+    expect(firstNodes).toHaveLength(1);
+    expect(store.messages).toEqual([
+      { role: "user", content: "I prefer quiet cafes for planning." },
+    ]);
+    expect(store.nodes[0]?.source).toBe("classic-editor");
+    expect(store.memories[0]?.source).toBe("classic-editor");
+    expect(store.memories[0]?.sourceType).toBe("document");
+
+    const replacementNodes = await pipeline.runText("The roadmap now focuses on imports.", "session-1", {
+      replace: true,
+      source: "import",
+    });
+
+    expect(replacementNodes).toHaveLength(1);
+    expect(store.messages).toEqual([
+      { role: "user", content: "The roadmap now focuses on imports." },
+    ]);
+    expect(store.nodes).toHaveLength(1);
+    expect(store.nodes[0]?.source).toBe("import");
+  });
+
+  it("detects multiple topics inside one raw text string", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+
+    const nodes = await pipeline.runText([
+      "I am planning a quiet Japan trip.",
+      "I want to visit local cafes.",
+      "The project budget is now 2500 dollars.",
+      "Budget approval is required before booking.",
+    ].join("\n"), "session-1");
+
+    expect(store.messages).toEqual([
+      { role: "user", content: "I am planning a quiet Japan trip." },
+      { role: "user", content: "I want to visit local cafes." },
+      { role: "user", content: "The project budget is now 2500 dollars." },
+      { role: "user", content: "Budget approval is required before booking." },
+    ]);
+    expect(nodes).toHaveLength(2);
+    expect(store.segments.map((segment) => [segment.startIndex, segment.endIndex])).toEqual([
+      [0, 1],
+      [2, 3],
+    ]);
   });
 });

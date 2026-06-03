@@ -6,6 +6,7 @@ import type {
   GraftRegistryEntry,
   GraphSnapshot,
   InjectionResult,
+  IngestTextOptions,
   MemoGrafterConfig,
   Message,
   RetrievalResult,
@@ -15,11 +16,13 @@ import type {
   TopicSegment,
 } from "./types.js";
 import { normalizeTags } from "./utils/tags.js";
+import { splitTextForIngestion } from "./utils/text/splitTextForIngestion.js";
 
 export class MemoGrafterAgent {
   private readonly core: MemoGrafter;
   private readonly sessionId = randomUUID();
   private readonly history: Message[] = [];
+  private readonly ingestionHistory: Message[] = [];
   private readonly baseSystemPrompt: string;
   private readonly recentWindowSize: number;
   private readonly recallLimit: number;
@@ -56,6 +59,8 @@ export class MemoGrafterAgent {
 
     this.history.push({ role: "user", content: userMessage });
     this.history.push({ role: "assistant", content: response });
+    this.ingestionHistory.push({ role: "user", content: userMessage });
+    this.ingestionHistory.push({ role: "assistant", content: response });
     this.enqueueBackgroundIngest();
 
     return response;
@@ -67,6 +72,27 @@ export class MemoGrafterAgent {
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  ingestText(text: string, options: IngestTextOptions = {}): Promise<void> {
+    const chunks = splitTextForIngestion(text);
+    if (chunks.length === 0) return Promise.resolve();
+
+    const run = async (): Promise<void> => {
+      if (options.replace) {
+        this.ingestionHistory.splice(0, this.ingestionHistory.length);
+      }
+
+      await this.core.enqueueTextIngest(text, this.sessionId, {
+        ...options,
+        tags: this.sessionTags,
+      });
+      this.ingestionHistory.push(...chunks.map((content): Message => ({ role: "user", content })));
+    };
+
+    const operation = this.pendingIngest.then(run);
+    this.pendingIngest = operation.catch(() => undefined);
+    return operation;
   }
 
   async getActiveNodes(options: TagFilterOptions = {}): Promise<TopicNode[]> {
@@ -146,6 +172,7 @@ export class MemoGrafterAgent {
     await this.pendingIngest;
     await this.core.store.clearSession(this.sessionId);
     this.history.splice(0, this.history.length);
+    this.ingestionHistory.splice(0, this.ingestionHistory.length);
   }
 
   async graft(topicIds?: string[]): Promise<InjectionResult> {
@@ -183,7 +210,7 @@ export class MemoGrafterAgent {
   }
 
   private enqueueBackgroundIngest(): void {
-    const historySnapshot = [...this.history];
+    const historySnapshot = [...this.ingestionHistory];
 
     this.pendingIngest = this.pendingIngest
       .then(() => this.core.enqueueIngest(historySnapshot, this.sessionId, { tags: this.sessionTags }))

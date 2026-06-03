@@ -296,6 +296,34 @@ On the first turn there may be no memory to recall. Later turns can use memory c
 
 Normal ingestion does not call `clearSession()`. Existing topic nodes, grafted nodes, memory rows, and graph edges are preserved unless you explicitly clear the session.
 
+### Ingesting Text Without A Conversation
+
+Use `ingestText()` to build topic nodes, memory nodes, and graph edges from raw text without generating an assistant response:
+
+```ts
+await agent.ingestText(editorContent, {
+  replace: true,
+  label: "Morning entry",
+  source: "classic-editor",
+});
+```
+
+The extraction LLM is still used internally to summarize the text and extract structured memories. The raw text is stored for graph ingestion but is not added to `getHistory()` and is not sent through the normal assistant response-generation path.
+
+Before ingestion, MemoGrafter splits the text into internal chunks using line and sentence boundaries, with a size limit for unusually long sentences. The existing drift detector runs across those chunks, so one `ingestText()` call can create multiple topic segments and topic nodes when the text changes subject. These chunks remain internal and do not appear in `getHistory()`.
+
+Options:
+
+- `replace`: clear the current session's stored graph before ingesting the text. Defaults to `false`.
+- `label`: optional hint for the first topic label created by this ingestion.
+- `source`: optional arbitrary metadata stored on created topic and memory nodes, such as `"import"` or `"classic-editor"`.
+
+Use `replace: true` for autosave workflows where each call represents the complete current document. Replacement removes stored messages, topic nodes, memory nodes, graph edges, segments, grafted nodes, and the ingest cursor for the current session. It does not clear the agent's public conversational history or change the session ID.
+
+Without `replace`, each text call appends to the current session memory. Later `invoke()` calls continue to work normally and can recall facts extracted from the ingested text.
+
+In queue mode, `await agent.ingestText()` confirms that the ingestion job was queued. Reads may need to wait for the worker to finish before the new graph content is visible.
+
 ### Clearing A Session
 
 Use `clearSession()` when you intentionally want to reset an agent:
@@ -1370,6 +1398,7 @@ Main exports:
 - `RetrieverConfig`
 - `TagFilterOptions`
 - `IngestOptions`
+- `IngestTextOptions`
 - public shared and fleet types
 
 Useful `GraphStore` inspection methods:
@@ -1388,6 +1417,7 @@ Common `MemoGrafterAgent` methods:
 
 - `initialize()`: initialize storage.
 - `invoke(message)`: send a user message and receive an assistant response.
+- `ingestText(text, options?)`: ingest raw text without generating an assistant response.
 - `getHistory()`: read local chat history.
 - `getSessionId()`: read the current session ID.
 - `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.

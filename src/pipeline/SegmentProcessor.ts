@@ -4,6 +4,7 @@ import type { GraphStore } from "../store/index.js";
 import type {
   EmbedAdapter,
   ExtractedMemory,
+  IngestPipelineOptions,
   LLMAdapter,
   MemoryNodeInsert,
   Message,
@@ -42,12 +43,12 @@ export class SegmentProcessor {
     segment: DriftSegment,
     messages: Message[],
     sessionId: string,
-    options: { tags?: string[] } = {},
+    options: IngestPipelineOptions = {},
   ): Promise<TopicNode> {
     const savedSegment = await this.createSegment(segment, sessionId);
     const tags = normalizeTags(options.tags);
-    const topicNode = await this.nodeRunner(savedSegment, messages, tags);
-    await this.processMemories(this.lastExtraction.memories, savedSegment, topicNode);
+    const topicNode = await this.nodeRunner(savedSegment, messages, tags, options);
+    await this.processMemories(this.lastExtraction.memories, savedSegment, topicNode, options);
     return topicNode;
   }
 
@@ -63,15 +64,25 @@ export class SegmentProcessor {
     });
   }
 
-  private async nodeRunner(segment: TopicSegment, messages: Message[], tags: string[]): Promise<TopicNode> {
-    const node = await this.nodeProcessor(messages, segment, tags);
+  private async nodeRunner(
+    segment: TopicSegment,
+    messages: Message[],
+    tags: string[],
+    options: IngestPipelineOptions,
+  ): Promise<TopicNode> {
+    const node = await this.nodeProcessor(messages, segment, tags, options);
     await this.store.saveNode(node);
     return node;
   }
 
-  private async nodeProcessor(messages: Message[], segment: TopicSegment, tags: string[]): Promise<TopicNode> {
+  private async nodeProcessor(
+    messages: Message[],
+    segment: TopicSegment,
+    tags: string[],
+    options: IngestPipelineOptions,
+  ): Promise<TopicNode> {
     const segmentMessages = messages.slice(segment.startIndex, segment.endIndex + 1);
-    const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages);
+    const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages, options.label);
     const raw = await this.llm.complete([{ role: "user", content: extractionPrompt }]);
     const extracted = parseSegmentExtraction(raw);
     this.lastExtraction = extracted;
@@ -86,6 +97,7 @@ export class SegmentProcessor {
       summary,
       embedding,
       tags,
+      ...(options.source ? { source: options.source } : {}),
       messageRange: [segment.startIndex, segment.endIndex],
       topicOrder: segment.topicOrder,
       driftScore: segment.driftScore,
@@ -100,6 +112,7 @@ export class SegmentProcessor {
     memories: ExtractedMemory[],
     segment: TopicSegment,
     topicNode: TopicNode,
+    options: IngestPipelineOptions,
   ): Promise<void> {
     if (memories.length === 0) return;
 
@@ -117,13 +130,14 @@ export class SegmentProcessor {
           agentColor: topicNode.agentColor,
           fleetId: topicNode.fleetId,
           memoryType: memory.memoryType,
-          sourceType: "conversation",
+          sourceType: options.sourceType ?? "conversation",
           subject: memory.subject,
           predicate: memory.predicate,
           value: memory.value,
           confidence: memory.confidence,
           embedding,
           tags: topicNode.tags ?? [],
+          ...(options.source ? { source: options.source } : {}),
           sourceUrl: null,
           sourceTitle: null,
           supersededBy: null,

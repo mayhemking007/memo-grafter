@@ -1,7 +1,7 @@
 import type { Message } from "../types.js";
 import { normalizeText } from "../utils/text/normalizeText.js";
 
-export function buildSegmentExtractionPrompt(messages: Message[]): string {
+export function buildSegmentExtractionPrompt(messages: Message[], labelHint?: string): string {
   const messageContent = messages
     .map((message, index) => `Message ${index + 1}:\n[${message.role}] ${normalizeText(message.content) ?? message.content}`)
     .join("\n\n");
@@ -45,6 +45,11 @@ export function buildSegmentExtractionPrompt(messages: Message[]): string {
     "- The value field must be self-contained and meaningful without surrounding context.",
     "- If no memories are extractable from the segment, return an empty memories array.",
     "- Use null for open when there is no unresolved question or follow-up.",
+    ...(labelHint
+      ? [
+        `- Use "${labelHint}" as a hint when choosing the topic label. Keep the label accurate to the content.`,
+      ]
+      : []),
     "",
     "Example segment:",
     "Message 1:",

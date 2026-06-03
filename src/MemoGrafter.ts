@@ -10,6 +10,8 @@ import type {
   AbsorbFromAgentOptions,
   EmbedAdapter,
   IngestOptions,
+  IngestPipelineOptions,
+  IngestTextOptions,
   InjectionResult,
   LLMAdapter,
   MemoGrafterConfig,
@@ -105,6 +107,25 @@ export class MemoGrafter {
     await this.ingestPipeline.run(messages, sessionId, options);
   }
 
+  ingestText(text: string, sessionId: string, options: IngestTextOptions & IngestOptions = {}): Promise<TopicNode[]> {
+    const pipelineOptions = this.toTextPipelineOptions(options);
+    if (this.ingestQueue) {
+      return this.enqueueTextIngest(text, sessionId, options).then(() => []);
+    }
+
+    return this.ingestPipeline.runText(text, sessionId, pipelineOptions);
+  }
+
+  async enqueueTextIngest(text: string, sessionId: string, options: IngestTextOptions & IngestOptions = {}): Promise<void> {
+    const pipelineOptions = this.toTextPipelineOptions(options);
+    if (this.ingestQueue) {
+      await this.ingestQueue.enqueueText(text, sessionId, pipelineOptions);
+      return;
+    }
+
+    await this.ingestPipeline.runText(text, sessionId, pipelineOptions);
+  }
+
   async getTopics(sessionId: string, options: { tags?: string[]; tagMode?: "all" | "any" } = {}): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }> {
     const nodes = await this.store.getNodesBySession(sessionId, options);
     const segments = await this.store.getSegmentsBySession(sessionId);
@@ -168,5 +189,15 @@ export class MemoGrafter {
     if (typeof globalScope.window !== "undefined" && typeof globalScope.document !== "undefined") {
       throw new Error("MemoGrafter requires a Node.js server environment and cannot run in the browser.");
     }
+  }
+
+  private toTextPipelineOptions(options: IngestTextOptions & IngestOptions): IngestPipelineOptions {
+    return {
+      ...(options.replace ? { replace: true } : {}),
+      ...(options.label ? { label: options.label } : {}),
+      ...(options.source ? { source: options.source } : {}),
+      ...(options.tags ? { tags: options.tags } : {}),
+      sourceType: "document",
+    };
   }
 }

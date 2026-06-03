@@ -14,6 +14,7 @@ interface TopicNodeRow {
   summary: string | null;
   embedding: string | number[] | null;
   tags: string[] | null;
+  source: string | null;
   message_range: number[] | null;
   topic_order: number | null;
   drift_score: number | null;
@@ -47,6 +48,7 @@ interface MemoryNodeRow {
   confidence: number;
   embedding: string | number[] | null;
   tags: string[] | null;
+  source: string | null;
   source_url: string | null;
   source_title: string | null;
   superseded_by: string | null;
@@ -148,6 +150,7 @@ export class PostgresGraphStore implements GraphStore {
         summary       TEXT,
         embedding     vector(1536),
         tags          TEXT[] NOT NULL DEFAULT '{}',
+        source        TEXT,
         message_range INT[],
         topic_order   INT NOT NULL DEFAULT 0,
         drift_score   FLOAT NOT NULL DEFAULT 0,
@@ -184,6 +187,7 @@ export class PostgresGraphStore implements GraphStore {
         confidence    FLOAT NOT NULL DEFAULT 1.0,
         embedding     vector(1536),
         tags          TEXT[] NOT NULL DEFAULT '{}',
+        source        TEXT,
         source_url    TEXT,
         source_title  TEXT,
         superseded_by UUID REFERENCES mg_memory_nodes(id),
@@ -208,6 +212,16 @@ export class PostgresGraphStore implements GraphStore {
     await this.sql`
       ALTER TABLE mg_memory_nodes
       ADD COLUMN IF NOT EXISTS has_conflict BOOLEAN NOT NULL DEFAULT FALSE
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_topic_nodes
+      ADD COLUMN IF NOT EXISTS source TEXT
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_memory_nodes
+      ADD COLUMN IF NOT EXISTS source TEXT
     `;
 
     await this.sql`
@@ -365,6 +379,7 @@ export class PostgresGraphStore implements GraphStore {
         summary,
         embedding,
         tags,
+        source,
         message_range,
         topic_order,
         drift_score,
@@ -381,6 +396,7 @@ export class PostgresGraphStore implements GraphStore {
         ${node.summary},
         ${toVectorLiteral(node.embedding)}::vector,
         ${this.sql.array(normalizeTags(node.tags))}::text[],
+        ${node.source ?? null},
         ${node.messageRange},
         ${node.topicOrder},
         ${node.driftScore},
@@ -397,6 +413,7 @@ export class PostgresGraphStore implements GraphStore {
         summary = EXCLUDED.summary,
         embedding = EXCLUDED.embedding,
         tags = EXCLUDED.tags,
+        source = EXCLUDED.source,
         message_range = EXCLUDED.message_range,
         topic_order = EXCLUDED.topic_order,
         drift_score = EXCLUDED.drift_score,
@@ -585,6 +602,7 @@ export class PostgresGraphStore implements GraphStore {
       confidence: node.confidence,
       embedding: toVectorLiteral(node.embedding),
       tags: normalizeTags(node.tags),
+      source: node.source ?? null,
       source_url: node.sourceUrl,
       source_title: node.sourceTitle,
       superseded_by: node.supersededBy,
@@ -610,6 +628,7 @@ export class PostgresGraphStore implements GraphStore {
         "confidence",
         "embedding",
         "tags",
+        "source",
         "source_url",
         "source_title",
         "superseded_by",
@@ -1145,6 +1164,7 @@ export class PostgresGraphStore implements GraphStore {
         confidence,
         embedding,
         tags,
+        source,
         source_url,
         source_title,
         superseded_by,
@@ -1165,6 +1185,7 @@ export class PostgresGraphStore implements GraphStore {
         confidence,
         embedding,
         tags,
+        source,
         source_url,
         source_title,
         NULL,
@@ -1435,6 +1456,7 @@ export class PostgresGraphStore implements GraphStore {
       summary: row.summary ?? "",
       embedding: parseVector(row.embedding),
       tags: normalizeTags(row.tags ?? []),
+      ...(row.source ? { source: row.source } : {}),
       messageRange: [start, end],
       topicOrder: row.topic_order ?? 0,
       driftScore: row.drift_score ?? 0,
@@ -1460,6 +1482,7 @@ export class PostgresGraphStore implements GraphStore {
       confidence: row.confidence,
       embedding: parseVector(row.embedding),
       tags: normalizeTags(row.tags ?? []),
+      ...(row.source ? { source: row.source } : {}),
       sourceUrl: row.source_url,
       sourceTitle: row.source_title,
       supersededBy: row.superseded_by,

@@ -17,6 +17,7 @@ MemoGrafter builds the memory graph incrementally. New chatbot turns append topi
 ## What It Is For
 
 - Chatbots that need long-running memory.
+- Editors, document imports, and transcripts that need memory without assistant responses.
 - Assistants that should recall user preferences, prior context, and open questions.
 - Multi-chatbot or multi-session flows where selected memory can be grafted into another conversation.
 - TypeScript apps that need reusable memory, retrieval, and graph-backed conversation primitives.
@@ -62,6 +63,10 @@ await agent.initialize();
 
 await agent.invoke("I am planning a Japan trip.");
 await agent.invoke("I like quiet towns, bookstores, and local cafes.");
+
+await agent.ingestText("The product roadmap now prioritizes document imports.", {
+  source: "import",
+});
 
 const recall = await agent.recall("travel preferences");
 console.log(recall.facts);

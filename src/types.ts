@@ -14,6 +14,7 @@ export interface TopicNode {
   summary: string;
   embedding: number[];
   tags?: string[];
+  source?: string;
   messageRange: [number, number];
   topicOrder: number;
   driftScore: number;
@@ -57,6 +58,7 @@ export interface MemoryNode {
   confidence: number;
   embedding: number[];
   tags?: string[];
+  source?: string;
   sourceUrl: string | null;
   sourceTitle: string | null;
   supersededBy: string | null;
@@ -163,6 +165,21 @@ export interface TagFilterOptions {
 
 export interface IngestOptions {
   tags?: string[];
+}
+
+export interface IngestTextOptions {
+  replace?: boolean;
+  label?: string;
+  source?: string;
+}
+
+/** @internal */
+export interface IngestPipelineOptions extends IngestOptions {
+  replace?: boolean;
+  label?: string;
+  source?: string;
+  sourceType?: MemorySourceType;
+  minSegmentMessages?: number;
 }
 
 export interface RetrievalResult {

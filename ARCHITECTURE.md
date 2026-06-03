@@ -18,7 +18,7 @@ The main runtime layers are:
 At a simplified level:
 
 ```text
-user / assistant messages
+user / assistant messages or raw text
   -> message buffer
   -> topic drift detection
   -> topic segments
@@ -40,6 +40,8 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 5. The user message and assistant response are appended to session history.
 6. The full history snapshot is queued for background ingestion.
 7. Ingestion persists messages, processes only unprocessed message ranges, appends new graph state, and updates graph edges.
+
+`MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. The existing drift detector runs across the chunks, and the extraction LLM, topic segmentation, memory extraction, and edge-building stages are reused.
 
 The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
 
@@ -70,6 +72,7 @@ The current ingestion model is incremental. `mg_session_ingest_state` tracks the
 Its responsibilities include:
 
 - accepting user messages through `invoke()`;
+- accepting raw non-conversational content through `ingestText()`;
 - recalling relevant memory before the LLM call when the session has graph content;
 - calling the configured LLM with an optional prepended recall memory block, recent raw turns, and the current user message;
 - scheduling ingestion after assistant responses;
@@ -79,6 +82,8 @@ Its responsibilities include:
 - providing targeted recall through `RetrieverPipeline`;
 - storing optional session tags and applying them to future ingested topic and memory rows;
 - waiting for pending ingestion before reads that depend on memory state.
+
+The agent keeps public conversational history separate from its graph ingestion history. This allows raw text and later chat turns to share one incremental graph cursor while keeping `getHistory()` and invoke-time prompts conversational.
 
 `MemoGrafterAgent` is intentionally a memory-aware chatbot wrapper, not an autonomous agent runtime.
 
