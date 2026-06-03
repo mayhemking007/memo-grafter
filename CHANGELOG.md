@@ -81,3 +81,13 @@ All notable changes to this project will be documented here.
 ### Fixed
 
 - Prevented false-positive conflict detection caused by broad topic memories.
+
+## [0.2.6] - 2026-06-03
+
+### Added
+
+- Added `ingestText()` API for ingesting non-conversational text directly into the memory graph.
+
+### Fixed
+
+- Separated conflict detection from versioning classification to improve memory lifecycle accuracy and prevent incorrect conflict annotations.
