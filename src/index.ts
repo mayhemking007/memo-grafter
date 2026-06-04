@@ -12,6 +12,9 @@ export { IngestPipeline } from "./pipeline/IngestPipeline.js";
 export { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 export { PostgresGraphStore } from "./store/index.js";
 export type {
+  OpenAILLMAdapterOptions,
+} from "./adapters/OpenAIAdapter.js";
+export type {
   AbsorbFromAgentOptions,
   DriftMode,
   DriftSensitivity,

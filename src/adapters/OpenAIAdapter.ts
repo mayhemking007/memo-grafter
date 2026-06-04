@@ -1,11 +1,19 @@
-﻿import OpenAI from "openai";
+import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { EmbedAdapter, LLMAdapter, Message } from "../types.js";
+
+export interface OpenAILLMAdapterOptions {
+  streaming?: boolean;
+  onChunk?: (chunk: string) => void | Promise<void>;
+}
 
 export class OpenAILLMAdapter implements LLMAdapter {
   private readonly client = new OpenAI();
 
-  constructor(private readonly model = "gpt-4o") {}
+  constructor(
+    private readonly model = "gpt-4o",
+    private readonly options: OpenAILLMAdapterOptions = {},
+  ) {}
 
   async complete(messages: Message[], system?: string): Promise<string> {
     const openAiMessages: ChatCompletionMessageParam[] = [
@@ -15,6 +23,25 @@ export class OpenAILLMAdapter implements LLMAdapter {
         content: message.content,
       })),
     ];
+
+    if (this.options.streaming) {
+      const stream = await this.client.chat.completions.create({
+        model: this.model,
+        messages: openAiMessages,
+        stream: true,
+      });
+      let response = "";
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta.content;
+        if (!content) continue;
+
+        response += content;
+        await this.options.onChunk?.(content);
+      }
+
+      return response;
+    }
 
     const response = await this.client.chat.completions.create({
       model: this.model,
