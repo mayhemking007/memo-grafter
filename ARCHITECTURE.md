@@ -43,7 +43,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 
 `MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. The existing drift detector runs across the chunks, and the extraction LLM, topic segmentation, memory extraction, and edge-building stages are reused.
 
-The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, and `close()`, wait for pending ingestion to finish.
+The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, `graftByRelevance()`, and `close()`, wait for pending ingestion to finish.
 
 ## Ingestion Flow
 
@@ -133,9 +133,9 @@ The topic node is the coarse unit of conversation memory. Memory nodes are the f
 
 `GrafterPipeline` assembles memory injection context from selected topic nodes.
 
-It starts from requested topic IDs, expands through graph neighbours up to the configured hop depth, orders nodes by conversation position, and formats each topic with a small configurable message buffer around its source range. It then trims from the end until the assembled system prompt fits the configured token budget.
+It starts from requested topic IDs, expands through graph neighbours up to the configured hop depth, orders nodes by conversation position, and formats each topic with a small configurable message buffer around its source range. It then trims from the end until the assembled system prompt fits the configured token budget. Per-call options can override hop depth or disable graph expansion so only the provided seed nodes are formatted.
 
-This pipeline is used by `MemoGrafter.inject()` and `MemoGrafterAgent.graft()`. Copying memory into another session is handled by store-level node absorption, followed by edge updates.
+This pipeline is used by `MemoGrafter.inject()`, `MemoGrafterAgent.graft()`, and semantic grafting. `graft()` passes explicit topic IDs directly into the pipeline. `graftByRelevance()` first embeds the query, selects seed topic nodes with `GraphStore.getSimilarNodes()`, then reuses the same graft assembly path with optional graph expansion from those seeds. Copying memory into another session is handled by store-level node absorption, followed by edge updates.
 
 When selected topics contain crawler-maintained conflict or version metadata, graft prompt assembly keeps the original topic summary intact and adds deterministic maintenance notes plus active memory facts. This is important because topic summaries are historical segment summaries and may contain older facts. The prompt explicitly tells downstream LLMs to prefer active memory facts over contradictory historical summary details instead of rewriting stored summaries.
 
@@ -214,7 +214,8 @@ This read-side path is separate from grafting:
 
 - recall returns atomic memories and parent topics for a query;
 - graph snapshots return raw graph inspection data for a session;
-- grafting assembles broader topic context from selected topic nodes and their neighbours;
+- explicit grafting assembles broader topic context from selected topic nodes and their neighbours;
+- semantic grafting selects topic-node seeds by query similarity before using the same graft assembly path;
 - absorbing copies selected topic nodes and their active atomic memories into another session.
 
 Crawler versioning and decay feed this path through existing lifecycle fields. Once an older memory has `superseded_by` set, or a stale memory has `decayed = TRUE`, targeted recall and absorption treat it as inactive without needing a separate conflict-resolution step.
@@ -255,6 +256,7 @@ During normal ingestion, existing graph state is not cleared. New topic nodes an
 - **Non-destructive maintenance:** crawler passes annotate memory lifecycle state and memory edges without deleting graph data or rewriting historical topic summaries.
 - **Invoke-time recall:** `MemoGrafterAgent.invoke()` recalls relevant active memories before answering whenever the session has graph content, while still falling back to raw history if recall is unavailable.
 - **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context and includes maintenance notes when active memory facts supersede contradictory summary details.
+- **Semantic graft selection is additive:** `graftByRelevance()` uses topic-node vector search to choose graft seeds by natural-language query, then delegates to the existing graft assembly path. Existing `graft()` and `inject()` behavior remains unchanged.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
 - **Optional recall cache:** recall can cache raw memory search results in Redis for a short bounded TTL without caching final prompt assembly.
 - **Grafting is explicit and traceable:** memory transfer copies selected topic nodes and active atomic memories into a target session, records graph edges, and stores provenance in `mg_graft_registry` instead of silently mixing sessions.

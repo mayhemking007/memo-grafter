@@ -1,4 +1,11 @@
-import type { AbsorbFromAgentOptions, InjectionResult, MemoGrafterConfig, Message, TopicNode } from "../types.js";
+import type {
+  AbsorbFromAgentOptions,
+  GraftByRelevanceOptions,
+  InjectionResult,
+  MemoGrafterConfig,
+  Message,
+  TopicNode,
+} from "../types.js";
 
 export interface FleetGraph {
   id: string;
@@ -40,6 +47,7 @@ export interface FleetWorker {
   getHistory(): Message[];
   getActiveNodes(): Promise<TopicNode[]>;
   graft(topicIds?: string[]): Promise<InjectionResult>;
+  graftByRelevance(query: string, options?: GraftByRelevanceOptions): Promise<InjectionResult>;
 }
 
 export type { MemoGrafterConfig };

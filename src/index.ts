@@ -21,6 +21,8 @@ export type {
   EmbedAdapter,
   ExtractedMemory,
   GraftOrigin,
+  GraftByRelevanceOptions,
+  GraftExpansionStrategy,
   GraftRegistryEntry,
   GraphSnapshot,
   GraphSnapshotNode,

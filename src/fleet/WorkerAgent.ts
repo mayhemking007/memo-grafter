@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { MemoGrafter } from "../MemoGrafter.js";
-import type { InjectionResult, Message, TopicNode, TopicSegment } from "../types.js";
+import type { GraftByRelevanceOptions, InjectionResult, Message, TopicNode, TopicSegment } from "../types.js";
 import type { WorkerAgentConfig } from "./types.js";
 
 export class WorkerAgent {
@@ -72,6 +72,10 @@ export class WorkerAgent {
     const { nodes } = await this.core.getTopics(this.sessionId);
     const selectedTopicIds = topicIds ?? nodes.map((node) => node.id);
     return this.core.inject(this.sessionId, selectedTopicIds);
+  }
+
+  graftByRelevance(query: string, options: GraftByRelevanceOptions = {}): Promise<InjectionResult> {
+    return this.core.graftByRelevance(this.sessionId, query, options);
   }
 
   async ingestGraftedNodes(nodes: TopicNode[]): Promise<TopicNode[]> {

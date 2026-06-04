@@ -1,7 +1,12 @@
 import { buildMemoryInjectionPrompt, formatMemoryNode } from "../prompts/memoryInjectionPrompt.js";
 import type { GraphStore } from "../store/index.js";
-import type { InjectionResult, MemoryEdge, MemoryNode, TopicNode } from "../types.js";
+import type { GraftExpansionStrategy, InjectionResult, MemoryEdge, MemoryNode, TopicNode } from "../types.js";
 import { countApproxTokens } from "../utils/text/tokenCount.js";
+
+export interface GrafterPipelineRunOptions {
+  hopDepth?: number;
+  expansionStrategy?: GraftExpansionStrategy;
+}
 
 export class GrafterPipeline {
   constructor(
@@ -15,12 +20,13 @@ export class GrafterPipeline {
     },
   ) {}
 
-  async run(sessionId: string, topicIds: string[]): Promise<InjectionResult> {
+  async run(sessionId: string, topicIds: string[], options: GrafterPipelineRunOptions = {}): Promise<InjectionResult> {
     if (topicIds.length === 0) {
       return { systemPrompt: "", nodes: [], tokenCount: 0 };
     }
 
-    const neighbourhood = await this.store.getNeighbours(topicIds, this.config.hopDepth, sessionId);
+    const hopDepth = options.expansionStrategy === "none" ? 0 : options.hopDepth ?? this.config.hopDepth;
+    const neighbourhood = await this.store.getNeighbours(topicIds, hopDepth, sessionId);
     const nodes = neighbourhood.sort((a, b) =>
       a.messageRange[0] - b.messageRange[0]
       || a.messageRange[1] - b.messageRange[1]
