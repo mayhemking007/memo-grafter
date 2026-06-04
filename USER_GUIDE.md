@@ -825,6 +825,15 @@ llm: new OpenAILLMAdapter("gpt-4o")
 
 Adapter used to generate assistant responses and summarize segments.
 
+OpenAI response streaming is opt-in. When enabled, `complete()` still returns the full final response, and `onChunk` receives text chunks as they arrive:
+
+```ts
+llm: new OpenAILLMAdapter("gpt-4o", {
+  streaming: true,
+  onChunk: (chunk) => process.stdout.write(chunk),
+})
+```
+
 Anthropic models can be used with the included Anthropic adapter:
 
 ```ts
@@ -994,6 +1003,12 @@ From this repository, run the session-tagging smoke with a real PostgreSQL datab
 
 ```powershell
 npx tsx --env-file=.env ./tests/manual/graft/session-tags-smoke.ts
+```
+
+Run the OpenAI streaming smoke with a real `OPENAI_API_KEY`:
+
+```powershell
+npx tsx --env-file=.env ./tests/manual/providers/openai-streaming-smoke.ts
 ```
 
 Use the forward-slash path in PowerShell. An unquoted backslash path can be collapsed before `tsx` receives it.
