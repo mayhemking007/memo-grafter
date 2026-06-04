@@ -9,6 +9,7 @@ import type { GraphStore } from "./store/index.js";
 import type {
   AbsorbFromAgentOptions,
   EmbedAdapter,
+  GraftByRelevanceOptions,
   IngestOptions,
   IngestPipelineOptions,
   IngestTextOptions,
@@ -28,6 +29,8 @@ export class MemoGrafter {
   private readonly ingestPipeline: IngestPipeline;
   private readonly grafterPipeline: GrafterPipeline;
   private readonly ingestQueue: IngestQueue | null;
+  private readonly graphTopK: number;
+  private readonly graphHopDepth: number;
 
   constructor(config: MemoGrafterConfig) {
     this.assertServerEnvironment();
@@ -49,6 +52,8 @@ export class MemoGrafter {
     this.llm = config.llm;
     this.embedder = config.embedder;
     this.store = new PostgresGraphStore(config.db.connectionString);
+    this.graphTopK = topK;
+    this.graphHopDepth = hopDepth;
     this.recallCache = config.cache
       ? new Redis(config.cache.connectionString, {
         enableOfflineQueue: false,
@@ -134,6 +139,31 @@ export class MemoGrafter {
 
   inject(sessionId: string, topicIds: string[]): Promise<InjectionResult> {
     return this.grafterPipeline.run(sessionId, topicIds);
+  }
+
+  async graftByRelevance(
+    sessionId: string,
+    query: string,
+    options: GraftByRelevanceOptions = {},
+  ): Promise<InjectionResult> {
+    const embedding = await this.embedder.embed(query);
+    const seedNodes = await this.store.getSimilarNodes(embedding, sessionId, {
+      k: options.topK ?? this.graphTopK,
+      minSimilarity: options.minSimilarity ?? 0.6,
+    });
+
+    if (seedNodes.length === 0) {
+      return { systemPrompt: "", nodes: [], tokenCount: 0 };
+    }
+
+    return this.grafterPipeline.run(
+      sessionId,
+      seedNodes.map((node) => node.id),
+      {
+        hopDepth: options.hopDepth ?? this.graphHopDepth,
+        expansionStrategy: options.expansionStrategy ?? "graph",
+      },
+    );
   }
 
   async ingestGraftedNodes(nodes: TopicNode[], targetSessionId: string): Promise<TopicNode[]> {

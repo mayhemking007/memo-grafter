@@ -196,6 +196,15 @@ export interface AbsorbFromAgentOptions {
   limit?: number;
 }
 
+export type GraftExpansionStrategy = "none" | "graph";
+
+export interface GraftByRelevanceOptions {
+  topK?: number;
+  minSimilarity?: number;
+  hopDepth?: number;
+  expansionStrategy?: GraftExpansionStrategy;
+}
+
 export interface LLMAdapter {
   complete(messages: Message[], system?: string): Promise<string>;
 }

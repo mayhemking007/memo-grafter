@@ -3,6 +3,7 @@ import { MemoGrafter } from "./MemoGrafter.js";
 import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
 import type {
   AbsorbFromAgentOptions,
+  GraftByRelevanceOptions,
   GraftRegistryEntry,
   GraphSnapshot,
   InjectionResult,
@@ -180,6 +181,11 @@ export class MemoGrafterAgent {
     const { nodes } = await this.core.getTopics(this.sessionId);
     const selectedTopicIds = topicIds ?? nodes.map((node) => node.id);
     return this.core.inject(this.sessionId, selectedTopicIds);
+  }
+
+  async graftByRelevance(query: string, options: GraftByRelevanceOptions = {}): Promise<InjectionResult> {
+    await this.pendingIngest;
+    return this.core.graftByRelevance(this.sessionId, query, options);
   }
 
   ingestGraftedNodes(nodes: TopicNode[]): Promise<TopicNode[]> {

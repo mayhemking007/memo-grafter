@@ -522,7 +522,20 @@ const nodes = await agent.getActiveNodes();
 const graft = await agent.graft([nodes[0]!.id]);
 ```
 
-`graft()` returns:
+You can also select graft seed nodes by semantic relevance when you know the context you want but not the topic IDs:
+
+```ts
+const graft = await agent.graftByRelevance("authentication discussion", {
+  topK: 5,
+  minSimilarity: 0.6,
+  hopDepth: 1,
+  expansionStrategy: "graph",
+});
+```
+
+Set `expansionStrategy: "none"` to graft only the semantic seed nodes. The default `"graph"` strategy expands from those seeds through graph neighbours using `hopDepth`.
+
+`graft()` and `graftByRelevance()` return:
 
 - `systemPrompt`: memory context suitable for an LLM system prompt.
 - `nodes`: selected topic nodes.
@@ -1011,6 +1024,12 @@ Run the OpenAI streaming smoke with a real `OPENAI_API_KEY`:
 npx tsx --env-file=.env ./tests/manual/providers/openai-streaming-smoke.ts
 ```
 
+Run the semantic grafting smoke with a real PostgreSQL database:
+
+```powershell
+npx tsx --env-file=.env ./tests/manual/graft/graft-by-relevance-smoke.ts
+```
+
 Use the forward-slash path in PowerShell. An unquoted backslash path can be collapsed before `tsx` receives it.
 
 The smoke creates two tagged sessions, writes one memory into each, verifies current-session tag filtering with `getActiveNodes()`, and verifies cross-session project recall with `recall(..., { scope: "tagged" })`. If you run it repeatedly against the same database, tagged recall can return rows from previous smoke runs because those historical sessions are still present.
@@ -1451,6 +1470,7 @@ Common `MemoGrafterAgent` methods:
 - `clearSession()`: explicitly clear local history and stored session memory.
 - `recall(query, options?)`: retrieve structured memory by semantic query, optionally filtered by tags.
 - `graft(topicIds?)`: preview memory injection.
+- `graftByRelevance(query, options?)`: preview memory injection selected by semantic topic-node relevance.
 - `ingestGraftedNodes(nodes)`: copy provided nodes into this agent.
 - `absorbFromAgent(sourceAgent, options)`: select and copy memory from another agent.
 - `removeGraft(nodeId)`: remove a registered graft node from the current session.
