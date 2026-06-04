@@ -91,3 +91,11 @@ All notable changes to this project will be documented here.
 ### Fixed
 
 - Separated conflict detection from versioning classification to improve memory lifecycle accuracy and prevent incorrect conflict annotations.
+
+## [0.2.7] - 2026-06-04
+
+### Added
+
+- Added `graftByRelevance()` for semantic selective grafting without requiring explicit topic node IDs.
+- Added configurable graft selection controls including relevance-based seed node discovery, similarity filtering, and graph expansion options.
+- Added streaming support to `OpenAIAdapter` with optional token callbacks for real-time response generation.
