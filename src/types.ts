@@ -21,6 +21,8 @@ export interface TopicNode {
   agentColor: string | null;
   fleetId: string | null;
   agentId: string | null;
+  suppressed?: boolean;
+  suppressedAt?: Date | null;
   createdAt: Date;
 }
 
@@ -63,6 +65,8 @@ export interface MemoryNode {
   sourceTitle: string | null;
   supersededBy: string | null;
   decayed: boolean;
+  forgotten?: boolean;
+  forgottenAt?: Date | null;
   hasConflict?: boolean;
   agentColor: string | null;
   fleetId: string | null;
@@ -161,6 +165,8 @@ export interface TagFilterOptions {
   tags?: string[];
   tagMode?: "all" | "any";
   scope?: "session" | "session-and-tags" | "tagged";
+  includeSuppressed?: boolean;
+  includeForgotten?: boolean;
 }
 
 export interface IngestOptions {

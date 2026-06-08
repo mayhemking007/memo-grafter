@@ -375,6 +375,42 @@ describe("crawler memory maintenance passes", () => {
     });
   });
 
+  it("skips forgotten memories during conflict, versioning, and decay passes", async () => {
+    const store = new InMemoryMaintenanceStore([
+      makeMemory({ id: "forgotten-a", value: "Delhi", forgotten: true }),
+      makeMemory({ id: "forgotten-b", value: "Actually Bangalore", forgotten: true }),
+      makeMemory({ id: "active", value: "Mumbai" }),
+    ]);
+    const crawler = new MemoGrafterCrawler({
+      store,
+      passes: [
+        new ConflictDetectionPass(),
+        new VersioningPass(),
+        new DecayScoringPass({
+          now: () => new Date("2026-12-01T00:00:00.000Z"),
+          minScore: 0.9,
+        }),
+      ],
+    });
+
+    const report = await crawler.runOnce();
+
+    expect(report.passes[0]?.result).toMatchObject({
+      conflictsDetected: 0,
+      skippedForgotten: 2,
+    });
+    expect(report.passes[1]?.result).toMatchObject({
+      versionsDetected: 0,
+      skippedForgotten: 2,
+    });
+    expect(report.passes[2]?.result).toMatchObject({
+      decayScored: 1,
+      skippedForgotten: 2,
+    });
+    expect(store.memories.find((memory) => memory.id === "forgotten-a")?.hasConflict).toBe(false);
+    expect(store.memories.find((memory) => memory.id === "forgotten-b")?.supersededBy).toBeNull();
+  });
+
   it("keeps recent high-scoring memories active during decay scoring", async () => {
     const store = new InMemoryMaintenanceStore([
       makeMemory({

@@ -197,4 +197,47 @@ describe("GrafterPipeline maintenance-aware prompts", () => {
     expect(systemPrompt).not.toContain("Memory maintenance notes:");
     expect(systemPrompt).not.toContain("Active memory facts:");
   });
+
+  it("does not include forgotten memories in graft maintenance context", async () => {
+    const topic = makeTopicNode();
+    const forgotten = makeMemory({
+      id: "forgotten-memory",
+      value: "private old value",
+      forgotten: true,
+    });
+    const active = makeMemory({
+      id: "active-memory",
+      value: "kept value",
+    });
+
+    const systemPrompt = await runWithMemories(topic, [forgotten, active], []);
+
+    expect(systemPrompt).not.toContain("private old value");
+    expect(systemPrompt).not.toContain("forgotten-memory");
+  });
+
+  it("drops suppressed topics returned by custom stores", async () => {
+    const topic = makeTopicNode({
+      suppressed: true,
+      summary: "Suppressed summary.",
+    });
+    const store = {
+      getNeighbours: async () => [topic],
+      getBufferMessages: async (): Promise<Message[]> => [
+        { role: "user", content: "Hidden detail." },
+      ],
+      getMemoriesBySession: async () => [makeMemory({ value: "hidden memory" })],
+      getMemoryEdgesBySession: async () => [],
+    };
+    const pipeline = new GrafterPipeline(store as never, {
+      hopDepth: 1,
+      bufferSize: 0,
+      tokenBudget: 4000,
+    });
+
+    const result = await pipeline.run("session-1", [topic.id]);
+
+    expect(result.nodes).toEqual([]);
+    expect(result.systemPrompt).toBe("");
+  });
 });

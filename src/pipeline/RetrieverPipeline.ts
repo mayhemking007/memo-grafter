@@ -55,7 +55,7 @@ export class RetrieverPipeline {
       scope,
     });
     const activeFacts = searchedFacts
-      .filter((fact) => fact.decayed === false && fact.supersededBy == null)
+      .filter((fact) => fact.decayed === false && fact.supersededBy == null && !fact.forgotten)
       .map((fact) => this.rankFact(fact))
       .sort((a, b) => b.retrievalScore - a.retrievalScore);
 
@@ -179,7 +179,7 @@ export class RetrieverPipeline {
       const parentSessionId = scope === "tagged" ? topicFacts[0]?.sessionId : sessionId;
       const parentNode = await this.store.getTopicNode(topicNodeId, parentSessionId);
 
-      if (!parentNode) {
+      if (!parentNode || parentNode.suppressed) {
         continue;
       }
 

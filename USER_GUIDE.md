@@ -185,6 +185,8 @@ Important fields:
 - `messageRange`: source message range.
 - `topicOrder`: chronological order.
 - `driftScore`: topic-change score.
+- `suppressed`: whether the topic is temporarily hidden from recall, grafting, crawler maintenance, and active topic reads.
+- `suppressedAt`: timestamp for the latest suppression, or `null` when active.
 - `agentColor`, `fleetId`, `agentId`: nullable fleet metadata.
 
 Topic nodes are stored in `mg_topic_nodes`.
@@ -201,12 +203,14 @@ Important fields:
 - `topicNodeId`: parent topic node ID.
 - `tags`: optional normalized tags copied from the session or ingest call.
 - `decayed`: whether the memory is stale.
+- `forgotten`: whether the memory has been explicitly hidden by an application.
+- `forgottenAt`: timestamp for the explicit forget action, or `null` when active.
 - `hasConflict`: whether crawler maintenance found a conflicting active fact.
 - `supersededBy`: newer memory ID when this memory has been replaced.
 
 Memory nodes are stored in `mg_memory_nodes`.
 
-`decayed`, `hasConflict`, and `supersededBy` are maintenance fields. Normal ingestion creates active memories. Optional crawler passes can later annotate existing memory rows, but they do not delete rows or rewrite topic summaries.
+`decayed`, `hasConflict`, and `supersededBy` are maintenance fields. `forgotten` is an application-controlled lifecycle field. Normal ingestion creates active memories. Optional crawler passes can later annotate existing memory rows, but they do not delete rows or rewrite topic summaries.
 
 ### Graph Edges
 
@@ -241,7 +245,7 @@ There are two common forms:
 - Preview memory with `graft()`.
 - Copy memory into another chatbot with `absorbFromAgent()` or `ingestGraftedNodes()`.
 
-When topic nodes are absorbed into another session, MemoGrafter also copies their active memory nodes so targeted recall can find the transferred facts. Copied memory rows get fresh IDs, keep their existing embeddings, and are copied as active memories only when the source row is not decayed or superseded.
+When topic nodes are absorbed into another session, MemoGrafter also copies their active memory nodes so targeted recall can find the transferred facts. Copied memory rows get fresh IDs, keep their existing embeddings, and are copied as active memories only when the source row is not decayed, superseded, forgotten, or attached to a suppressed topic.
 
 Absorbed topic nodes are also registered in `mg_graft_registry`. The registry records the destination session, copied node ID, source session ID, source node ID, and graft timestamp so applications can inspect provenance or remove a graft later.
 
@@ -334,6 +338,59 @@ await agent.clearSession();
 
 This waits for pending ingestion, clears the agent's local in-memory history, removes stored messages, topic nodes, memory nodes, graph edges, segments, and resets the session ingest cursor. It is a destructive operation and is not part of normal `invoke()` processing.
 
+### Memory Lifecycle Controls
+
+Use lifecycle controls when your application needs user-controlled memory management without physically deleting graph rows by default.
+
+Forget a single memory node:
+
+```ts
+const recall = await agent.recall("food preferences");
+const memoryId = recall.facts[0]!.id;
+
+const changed = await agent.forget(memoryId);
+console.log(changed); // true when the memory was newly marked forgotten
+```
+
+Forget several memory nodes at once:
+
+```ts
+const changedCount = await agent.forgetMany([
+  "memory-id-a",
+  "memory-id-b",
+]);
+```
+
+Suppress a topic temporarily:
+
+```ts
+const nodes = await agent.getActiveNodes();
+const topicId = nodes[0]!.id;
+
+await agent.suppressTopic(topicId);
+```
+
+Restore a suppressed topic:
+
+```ts
+await agent.restoreTopic(topicId);
+```
+
+Forgotten memories stay in `mg_memory_nodes` with `forgotten = TRUE` and `forgotten_at` set. Suppressed topics stay in `mg_topic_nodes` with `suppressed = TRUE` and `suppressed_at` set. These rows are excluded from targeted recall, invoke-time recall, graft prompt assembly, semantic graft seed selection, absorption, active topic listing, and crawler maintenance until restored where applicable.
+
+`forget()` and `forgetMany()` are one-way soft lifecycle operations. There is no built-in `restoreMemory()` API because user-requested memory deletion and privacy flows usually need conservative behavior. Applications that require undo or hard deletion can implement that policy at the storage layer.
+
+`getGraphSnapshot()` remains useful for audit and visualization. Snapshot memory reads include forgotten, decayed, conflicted, and superseded rows, and snapshot topic reads include suppressed topics, so UIs can display lifecycle state explicitly.
+
+The lower-level `MemoGrafter` class exposes the same methods when you manage sessions yourself:
+
+```ts
+await memo.forget(memoryId);
+await memo.forgetMany(memoryIds);
+await memo.suppressTopic(topicId);
+await memo.restoreTopic(topicId);
+```
+
 ### Session Tags
 
 Use session tags when you want to organize memory by project, planning area, week, domain, or worker route.
@@ -418,7 +475,7 @@ const projectMemory = await agent.recall("deployment decisions", {
 });
 ```
 
-This can return matching active memories from older or different sessions with the same tag. If your development database contains repeated smoke-test runs, you may see more than one matching fact because the older tagged rows are still present.
+This can return matching active memories from older or different sessions with the same tag. Active recall excludes decayed, superseded, forgotten, and suppressed-topic memories. If your development database contains repeated smoke-test runs, you may see more than one matching fact because the older tagged rows are still present.
 
 `MemoGrafterAgent.invoke()` also calls `recall()` internally before answering when the session has topic nodes. In that automatic path, the returned `systemPrompt` is pinned as a single system message before the recent raw chat window. Automatic recall uses `inject.recallLimit` and `inject.recallMinSimilarity`, defaulting to `6` and `0.55`.
 
@@ -444,9 +501,9 @@ console.log(snapshot.capturedAt);
 
 - `sessionId`: current agent session ID.
 - `nodes`: active topic nodes for the session.
-- `snapshotNodes`: active topic nodes wrapped with provenance metadata when a node came from a graft.
+- `snapshotNodes`: topic nodes wrapped with provenance metadata when a node came from a graft, including suppressed topics for audit views.
 - `edges`: topic edges where either endpoint belongs to a session topic node.
-- `memories`: all memory nodes for the session, including decayed or superseded rows.
+- `memories`: all memory nodes for the session, including forgotten, decayed, conflicted, or superseded rows.
 - `memoryEdges`: memory-level edges such as `semantic`, `conflicts`, `updates`, and `related`.
 - `capturedAt`: ISO timestamp for when the snapshot was produced.
 
@@ -454,7 +511,7 @@ Each `snapshotNodes` entry contains the topic `node` and an optional `graftOrigi
 
 This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
 
-Graph snapshots intentionally include stale and maintenance metadata so visualizers can show memory lifecycle state. For example, a UI can fade `decayed` memories, show `hasConflict` badges, draw `conflicts` edges between contradictory facts, and draw `updates` edges from the current fact to the older fact it replaced.
+Graph snapshots intentionally include stale and maintenance metadata so visualizers can show memory lifecycle state. For example, a UI can hide or label `forgotten` memories, fade `decayed` memories, show `hasConflict` badges, draw `conflicts` edges between contradictory facts, draw `updates` edges from the current fact to the older fact it replaced, and show suppressed topics separately from active topics.
 
 Read active topic nodes:
 
@@ -553,6 +610,8 @@ Active memory facts:
 
 This keeps history intact while telling the downstream model which fact is current.
 
+Suppressed topics are not included in graft prompts, even if their IDs are passed explicitly. Forgotten memories are not included as active facts or as replacement details in maintenance notes.
+
 ## Maintaining Memory With The Crawler
 
 `MemoGrafterCrawler` is an optional graph maintenance worker. It can run once on demand or on a simple in-process interval. It does not use Redis, BullMQ, OpenAI, embeddings, or LLMs for the built-in conflict/versioning/decay passes.
@@ -608,6 +667,7 @@ The built-in conflict and versioning passes use separate deterministic classifie
 - a group conflicts when it has different normalized `value` strings and the newest value does not contain an explicit update cue;
 - a group versions only when its newest value contains an explicit replacement or update cue such as `actually`, `now`, `changed to`, or `instead`;
 - decayed memories are skipped;
+- forgotten memories and memories attached to suppressed topics are skipped;
 - already superseded memories are skipped;
 - broad topic memories with generic subject/predicate pairs are skipped unless they match a recognized competing trip-plan pattern;
 - version replacement candidates are selected by `createdAt`;
@@ -624,7 +684,7 @@ recency_factor = exp(-(ln(2) / half_life_days) * age_days)
 decay_score = confidence * recency_factor
 ```
 
-If `decay_score < minScore`, the memory is marked `decayed: true`. Superseded memories and already decayed memories are skipped. Conservative defaults are used when options are omitted:
+If `decay_score < minScore`, the memory is marked `decayed: true`. Superseded memories, forgotten memories, and already decayed memories are skipped. Conservative defaults are used when options are omitted:
 
 ```ts
 new DecayScoringPass({
@@ -647,7 +707,7 @@ When explicit replacements are found:
 - an `updates` edge is created as `newer_memory --updates--> older_memory`.
 - stale active memories can be marked `decayed: true` by the decay pass.
 
-Crawler maintenance is non-destructive. It annotates existing memory rows and creates memory edges. It does not delete nodes, does not rebuild topics, and does not rewrite topic summaries.
+Crawler maintenance is non-destructive. It annotates existing memory rows and creates memory edges. It does not delete nodes, does not rebuild topics, and does not rewrite topic summaries. Forgotten memories and memories attached to suppressed topics are ignored by maintenance scans.
 
 Existing incorrect conflict edges are not automatically deleted. If an older crawler run created a false-positive edge, handle cleanup with a future explicit pruning pass or filter displayed memory edges to active memories in your app.
 
@@ -689,7 +749,7 @@ const response = await writingBot.invoke(
 console.log(response);
 ```
 
-Absorbing copies selected topic nodes into the target session and creates `grafted` edges back to their source nodes. It also copies active memory facts attached to those topic nodes into the target session so future `recall()` and `invoke()` calls can surface the transferred context. Decayed or superseded source memories are not copied.
+Absorbing copies selected topic nodes into the target session and creates `grafted` edges back to their source nodes. It also copies active memory facts attached to those topic nodes into the target session so future `recall()` and `invoke()` calls can surface the transferred context. Decayed, superseded, forgotten, or suppressed-topic source memories are not copied.
 
 Each copied topic node is recorded in the graft registry. Registry entries let you answer where a graft came from and which copied destination node owns it.
 
@@ -1028,6 +1088,12 @@ Run the semantic grafting smoke with a real PostgreSQL database:
 
 ```powershell
 npx tsx --env-file=.env ./tests/manual/graft/graft-by-relevance-smoke.ts
+```
+
+Run the memory lifecycle smoke with a real PostgreSQL database and `OPENAI_API_KEY`:
+
+```powershell
+npx tsx --env-file=.env ./tests/manual/graft/memory-lifecycle-smoke.ts
 ```
 
 Use the forward-slash path in PowerShell. An unquoted backslash path can be collapsed before `tsx` receives it.
@@ -1405,6 +1471,7 @@ Practical notes:
 - Tune `tokenBudget` to control prompt size and cost.
 - Use queue mode if ingestion becomes slow.
 - Use `clearSession()` only for intentional resets; normal ingestion preserves the graph incrementally.
+- Use `forget()`, `forgetMany()`, `suppressTopic()`, and `restoreTopic()` for user-controlled memory lifecycle flows.
 - Use the optional recall cache for long sessions with repeated direct or invoke-time recall.
 - Store your own user/session mapping outside MemoGrafter.
 - Call `close()` during graceful shutdown.
@@ -1453,6 +1520,10 @@ Useful `GraphStore` inspection methods:
 - `getMemoryEdgesBySession(sessionId)`
 - `getSessionNodeCount(sessionId)`
 - `getSessionIngestState(sessionId)`
+- `forgetMemory(memoryId)`
+- `forgetMemories(memoryIds)`
+- `suppressTopic(topicId)`
+- `restoreTopic(topicId)`
 
 Common `MemoGrafterAgent` methods:
 
@@ -1468,6 +1539,10 @@ Common `MemoGrafterAgent` methods:
 - `setSessionTags(tags)`: replace tags on the current session and apply them to future ingested memories.
 - `getSessionTags()`: read the current agent's normalized session tags.
 - `clearSession()`: explicitly clear local history and stored session memory.
+- `forget(memoryId)`: soft-forget a memory node so it is excluded from future recall, grafting, absorption, and crawler maintenance.
+- `forgetMany(memoryIds)`: soft-forget several memory nodes and return the number changed.
+- `suppressTopic(topicId)`: hide a topic from active reads, recall, grafting, absorption, and crawler maintenance.
+- `restoreTopic(topicId)`: make a suppressed topic active again.
 - `recall(query, options?)`: retrieve structured memory by semantic query, optionally filtered by tags.
 - `graft(topicIds?)`: preview memory injection.
 - `graftByRelevance(query, options?)`: preview memory injection selected by semantic topic-node relevance.

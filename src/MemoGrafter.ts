@@ -17,6 +17,7 @@ import type {
   LLMAdapter,
   MemoGrafterConfig,
   Message,
+  TagFilterOptions,
   TopicNode,
   TopicSegment,
 } from "./types.js";
@@ -131,7 +132,7 @@ export class MemoGrafter {
     await this.ingestPipeline.runText(text, sessionId, pipelineOptions);
   }
 
-  async getTopics(sessionId: string, options: { tags?: string[]; tagMode?: "all" | "any" } = {}): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }> {
+  async getTopics(sessionId: string, options: TagFilterOptions = {}): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }> {
     const nodes = await this.store.getNodesBySession(sessionId, options);
     const segments = await this.store.getSegmentsBySession(sessionId);
     return { nodes, segments };
@@ -139,6 +140,30 @@ export class MemoGrafter {
 
   inject(sessionId: string, topicIds: string[]): Promise<InjectionResult> {
     return this.grafterPipeline.run(sessionId, topicIds);
+  }
+
+  async forget(memoryId: string): Promise<boolean> {
+    const changed = await this.store.forgetMemory(memoryId);
+    if (changed) await this.clearRecallCache();
+    return changed;
+  }
+
+  async forgetMany(memoryIds: string[]): Promise<number> {
+    const changed = await this.store.forgetMemories(memoryIds);
+    if (changed > 0) await this.clearRecallCache();
+    return changed;
+  }
+
+  async suppressTopic(topicId: string): Promise<boolean> {
+    const changed = await this.store.suppressTopic(topicId);
+    if (changed) await this.clearRecallCache();
+    return changed;
+  }
+
+  async restoreTopic(topicId: string): Promise<boolean> {
+    const changed = await this.store.restoreTopic(topicId);
+    if (changed) await this.clearRecallCache();
+    return changed;
   }
 
   async graftByRelevance(
@@ -229,5 +254,18 @@ export class MemoGrafter {
       ...(options.tags ? { tags: options.tags } : {}),
       sourceType: "document",
     };
+  }
+
+  private async clearRecallCache(): Promise<void> {
+    if (!this.recallCache) return;
+
+    try {
+      const keys = await this.recallCache.keys("mg:recall:*");
+      if (keys.length > 0) {
+        await this.recallCache.del(...keys);
+      }
+    } catch (error: unknown) {
+      console.warn("MemoGrafter recall cache invalidation warning:", error);
+    }
   }
 }

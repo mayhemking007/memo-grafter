@@ -35,6 +35,10 @@ export interface GraphStore {
   getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<MemoryEdge[]>;
   listMemoryNodesForMaintenance(): Promise<MemoryNode[]>;
+  forgetMemory(memoryNodeId: string): Promise<boolean>;
+  forgetMemories(memoryNodeIds: string[]): Promise<number>;
+  suppressTopic(topicNodeId: string): Promise<boolean>;
+  restoreTopic(topicNodeId: string): Promise<boolean>;
   markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number>;
   markMemoryNodeSuperseded(memoryNodeId: string, supersededBy: string): Promise<boolean>;
   markMemoryNodeDecayed(memoryNodeId: string): Promise<boolean>;
