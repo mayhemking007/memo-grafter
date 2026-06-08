@@ -21,6 +21,8 @@ interface TopicNodeRow {
   agent_color: string | null;
   fleet_id: string | null;
   agent_id: string | null;
+  suppressed: boolean | null;
+  suppressed_at: Date | null;
   created_at: Date;
 }
 
@@ -53,6 +55,8 @@ interface MemoryNodeRow {
   source_title: string | null;
   superseded_by: string | null;
   decayed: boolean;
+  forgotten: boolean | null;
+  forgotten_at: Date | null;
   has_conflict: boolean | null;
   agent_color: string | null;
   fleet_id: string | null;
@@ -157,6 +161,8 @@ export class PostgresGraphStore implements GraphStore {
         agent_color   TEXT,
         fleet_id      TEXT,
         agent_id      TEXT,
+        suppressed    BOOLEAN NOT NULL DEFAULT FALSE,
+        suppressed_at TIMESTAMPTZ,
         created_at    TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE (segment_id)
       )
@@ -192,6 +198,8 @@ export class PostgresGraphStore implements GraphStore {
         source_title  TEXT,
         superseded_by UUID REFERENCES mg_memory_nodes(id),
         decayed       BOOLEAN NOT NULL DEFAULT FALSE,
+        forgotten     BOOLEAN NOT NULL DEFAULT FALSE,
+        forgotten_at  TIMESTAMPTZ,
         has_conflict  BOOLEAN NOT NULL DEFAULT FALSE,
         agent_color   TEXT,
         fleet_id      TEXT,
@@ -212,6 +220,26 @@ export class PostgresGraphStore implements GraphStore {
     await this.sql`
       ALTER TABLE mg_memory_nodes
       ADD COLUMN IF NOT EXISTS has_conflict BOOLEAN NOT NULL DEFAULT FALSE
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_memory_nodes
+      ADD COLUMN IF NOT EXISTS forgotten BOOLEAN NOT NULL DEFAULT FALSE
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_memory_nodes
+      ADD COLUMN IF NOT EXISTS forgotten_at TIMESTAMPTZ
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_topic_nodes
+      ADD COLUMN IF NOT EXISTS suppressed BOOLEAN NOT NULL DEFAULT FALSE
+    `;
+
+    await this.sql`
+      ALTER TABLE mg_topic_nodes
+      ADD COLUMN IF NOT EXISTS suppressed_at TIMESTAMPTZ
     `;
 
     await this.sql`
@@ -440,6 +468,7 @@ export class PostgresGraphStore implements GraphStore {
       JOIN mg_topic_nodes n ON n.id = e.src_id
       WHERE n.session_id = ${sessionId}
         AND e.type = ${type}
+        AND n.suppressed = FALSE
     `;
 
     return rows.map((row) => ({
@@ -546,6 +575,7 @@ export class PostgresGraphStore implements GraphStore {
       SELECT COUNT(*)::int AS count
       FROM mg_topic_nodes
       WHERE session_id = ${sessionId}
+        AND suppressed = FALSE
     `;
 
     return rows[0]?.count ?? 0;
@@ -557,6 +587,7 @@ export class PostgresGraphStore implements GraphStore {
     const rows = await this.sql<TopicNodeRow[]>`
       SELECT * FROM mg_topic_nodes
       WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`session_id = ${sessionId}`}
+        ${options.includeSuppressed ? this.sql`` : this.sql`AND suppressed = FALSE`}
         ${this.topicTagsFilterSql(tags, options.tagMode)}
       ORDER BY session_id ASC, topic_order ASC, created_at ASC
     `;
@@ -568,6 +599,7 @@ export class PostgresGraphStore implements GraphStore {
     const rows = await this.sql<TopicNodeRow[]>`
       SELECT * FROM mg_topic_nodes
       WHERE session_id = ${sessionId}
+        AND suppressed = FALSE
       ORDER BY topic_order DESC, created_at DESC
       LIMIT 1
     `;
@@ -652,11 +684,15 @@ export class PostgresGraphStore implements GraphStore {
 
   async getMemoriesByTopic(topicNodeId: string): Promise<MemoryNode[]> {
     const rows = await this.sql<MemoryNodeRow[]>`
-      SELECT * FROM mg_memory_nodes
-      WHERE topic_node_id = ${topicNodeId}
-        AND decayed = false
-        AND superseded_by IS NULL
-      ORDER BY created_at ASC
+      SELECT memory.*
+      FROM mg_memory_nodes memory
+      JOIN mg_topic_nodes topic ON topic.id = memory.topic_node_id
+      WHERE memory.topic_node_id = ${topicNodeId}
+        AND memory.decayed = false
+        AND memory.superseded_by IS NULL
+        AND memory.forgotten = false
+        AND topic.suppressed = false
+      ORDER BY memory.created_at ASC
     `;
 
     return rows.map((row) => this.rowToMemoryNode(row));
@@ -688,11 +724,64 @@ export class PostgresGraphStore implements GraphStore {
 
   async listMemoryNodesForMaintenance(): Promise<MemoryNode[]> {
     const rows = await this.sql<MemoryNodeRow[]>`
-      SELECT * FROM mg_memory_nodes
-      ORDER BY session_id ASC, created_at ASC, id ASC
+      SELECT memory.*
+      FROM mg_memory_nodes memory
+      JOIN mg_topic_nodes topic ON topic.id = memory.topic_node_id
+      WHERE memory.forgotten = FALSE
+        AND topic.suppressed = FALSE
+      ORDER BY memory.session_id ASC, memory.created_at ASC, memory.id ASC
     `;
 
     return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  async forgetMemory(memoryNodeId: string): Promise<boolean> {
+    const changed = await this.forgetMemories([memoryNodeId]);
+    return changed > 0;
+  }
+
+  async forgetMemories(memoryNodeIds: string[]): Promise<number> {
+    if (memoryNodeIds.length === 0) return 0;
+
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_memory_nodes
+      SET
+        forgotten = TRUE,
+        forgotten_at = COALESCE(forgotten_at, NOW())
+      WHERE id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+        AND forgotten = FALSE
+      RETURNING id
+    `;
+
+    return rows.length;
+  }
+
+  async suppressTopic(topicNodeId: string): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_topic_nodes
+      SET
+        suppressed = TRUE,
+        suppressed_at = COALESCE(suppressed_at, NOW())
+      WHERE id = ${topicNodeId}
+        AND suppressed = FALSE
+      RETURNING id
+    `;
+
+    return rows.length > 0;
+  }
+
+  async restoreTopic(topicNodeId: string): Promise<boolean> {
+    const rows = await this.sql<{ id: string }[]>`
+      UPDATE mg_topic_nodes
+      SET
+        suppressed = FALSE,
+        suppressed_at = NULL
+      WHERE id = ${topicNodeId}
+        AND suppressed = TRUE
+      RETURNING id
+    `;
+
+    return rows.length > 0;
   }
 
   async markMemoryNodesConflicting(memoryNodeIds: string[]): Promise<number> {
@@ -786,13 +875,16 @@ export class PostgresGraphStore implements GraphStore {
     const tags = normalizeTags(options.tags);
     const searchTaggedSessions = options.scope === "tagged" && tags.length > 0;
     const rows = await this.sql<Array<MemoryNodeRow & { similarity: number }>>`
-      SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
-      FROM mg_memory_nodes
-      WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`session_id = ${sessionId}`}
-        AND decayed = false
-        AND superseded_by IS NULL
-        ${this.memoryTagsFilterSql(tags, options.tagMode)}
-        AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${minSimilarity}
+      SELECT memory.*, 1 - (memory.embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
+      FROM mg_memory_nodes memory
+      JOIN mg_topic_nodes topic ON topic.id = memory.topic_node_id
+      WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`memory.session_id = ${sessionId}`}
+        AND memory.decayed = false
+        AND memory.superseded_by IS NULL
+        AND memory.forgotten = false
+        AND topic.suppressed = false
+        ${this.memoryTagsFilterSql(tags, options.tagMode, "memory")}
+        AND 1 - (memory.embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${minSimilarity}
       ORDER BY similarity DESC
       LIMIT ${limit}
     `;
@@ -852,6 +944,7 @@ export class PostgresGraphStore implements GraphStore {
       SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
       FROM mg_topic_nodes
       WHERE session_id = ${sessionId}
+        AND suppressed = FALSE
         ${options.excludeNodeId ? this.sql`AND id != ${options.excludeNodeId}` : this.sql``}
         ${options.minSimilarity === undefined ? this.sql`` : this.sql`AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${options.minSimilarity}`}
       ORDER BY embedding <=> ${toVectorLiteral(embedding)}::vector ASC
@@ -870,6 +963,7 @@ export class PostgresGraphStore implements GraphStore {
       SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
       FROM mg_topic_nodes
       WHERE fleet_id = ${fleetId}
+        AND suppressed = FALSE
         ${options.agentColor ? this.sql`AND agent_color = ${options.agentColor}` : this.sql``}
         ${options.excludeNodeId ? this.sql`AND id != ${options.excludeNodeId}` : this.sql``}
         ${options.minSimilarity === undefined ? this.sql`` : this.sql`AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${options.minSimilarity}`}
@@ -885,6 +979,7 @@ export class PostgresGraphStore implements GraphStore {
       SELECT * FROM mg_topic_nodes
       WHERE fleet_id = ${fleetId}
         AND agent_color = ${agentColor}
+        AND suppressed = FALSE
       ORDER BY topic_order ASC, created_at ASC
     `;
 
@@ -975,6 +1070,7 @@ export class PostgresGraphStore implements GraphStore {
       FROM mg_topic_nodes
       WHERE session_id = ${sessionId}
         AND topic_order = ${topicOrder - 1}
+        AND suppressed = FALSE
       LIMIT 1
     `;
 
@@ -1026,6 +1122,7 @@ export class PostgresGraphStore implements GraphStore {
       SELECT * FROM mg_topic_nodes
       WHERE id = ANY(${this.sql.array(ids)})
         ${sessionId ? this.sql`AND session_id = ${sessionId}` : this.sql``}
+        AND suppressed = FALSE
       ORDER BY topic_order ASC, created_at ASC
     `;
 
@@ -1094,7 +1191,10 @@ export class PostgresGraphStore implements GraphStore {
     const nextMessageIndex = await this.getNextMessageIndex(targetSessionId);
     const nextTopicOrder = await this.getNextTopicOrder(targetSessionId);
 
-    for (const [index, node] of nodes.entries()) {
+    for (const node of nodes) {
+      if (node.suppressed) continue;
+
+      const index = copiedNodes.length;
       const messageIndex = nextMessageIndex + index;
       await this.saveMessagesAt(targetSessionId, messageIndex, [{
         role: "assistant",
@@ -1197,6 +1297,7 @@ export class PostgresGraphStore implements GraphStore {
         AND session_id = ${sourceNode.sessionId}
         AND decayed = FALSE
         AND superseded_by IS NULL
+        AND forgotten = FALSE
     `;
   }
 
@@ -1310,6 +1411,12 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_topic_nodes_active_lifecycle
+      ON mg_topic_nodes(session_id, suppressed)
+      WHERE suppressed = FALSE
+    `;
+
+    await this.sql`
       CREATE INDEX IF NOT EXISTS mg_topic_nodes_tags_idx
       ON mg_topic_nodes USING GIN(tags)
     `;
@@ -1362,6 +1469,12 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE INDEX IF NOT EXISTS idx_memory_nodes_active_lifecycle
+      ON mg_memory_nodes(session_id, forgotten, decayed)
+      WHERE forgotten = FALSE
+    `;
+
+    await this.sql`
       CREATE INDEX IF NOT EXISTS idx_memory_nodes_tags
       ON mg_memory_nodes USING GIN(tags)
     `;
@@ -1410,8 +1523,14 @@ export class PostgresGraphStore implements GraphStore {
       : this.sql`AND tags @> ${this.sql.array(tags)}::text[]`;
   }
 
-  private memoryTagsFilterSql(tags: string[], tagMode: TagFilterOptions["tagMode"] = "all") {
+  private memoryTagsFilterSql(tags: string[], tagMode: TagFilterOptions["tagMode"] = "all", tableAlias?: string) {
     if (tags.length === 0) return this.sql``;
+
+    if (tableAlias === "memory") {
+      return tagMode === "any"
+        ? this.sql`AND memory.tags && ${this.sql.array(tags)}::text[]`
+        : this.sql`AND memory.tags @> ${this.sql.array(tags)}::text[]`;
+    }
 
     return tagMode === "any"
       ? this.sql`AND tags && ${this.sql.array(tags)}::text[]`
@@ -1463,6 +1582,8 @@ export class PostgresGraphStore implements GraphStore {
       agentColor: row.agent_color,
       fleetId: row.fleet_id,
       agentId: row.agent_id,
+      suppressed: row.suppressed ?? false,
+      suppressedAt: row.suppressed_at,
       createdAt: row.created_at,
     };
   }
@@ -1487,6 +1608,8 @@ export class PostgresGraphStore implements GraphStore {
       sourceTitle: row.source_title,
       supersededBy: row.superseded_by,
       decayed: row.decayed,
+      forgotten: row.forgotten ?? false,
+      forgottenAt: row.forgotten_at,
       hasConflict: row.has_conflict ?? false,
       agentColor: row.agent_color,
       fleetId: row.fleet_id,

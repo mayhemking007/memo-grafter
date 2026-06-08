@@ -256,6 +256,69 @@ describe("RetrieverPipeline", () => {
     expect(result.facts.map((fact) => fact.id)).toEqual(["active"]);
   });
 
+  it("filters forgotten memories returned by custom stores", async () => {
+    const forgotten = makeScoredMemoryNode({
+      id: "forgotten",
+      memoryType: "fact",
+      subject: "user",
+      predicate: "preference",
+      value: "old value",
+      confidence: 1,
+      forgotten: true,
+    });
+    const active = makeScoredMemoryNode({
+      id: "active",
+      memoryType: "fact",
+      subject: "user",
+      predicate: "preference",
+      value: "current value",
+      confidence: 1,
+    });
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async () => [forgotten, active],
+        getTopicNode: async () => makeTopicNode({ label: "Prefs", summary: "Prefs.", topicOrder: 1 }),
+      }),
+      makeEmbedder(),
+      {},
+    );
+
+    const result = await pipeline.run("query", "session-1");
+
+    expect(result.facts.map((fact) => fact.id)).toEqual(["active"]);
+    expect(result.systemPrompt).not.toContain("old value");
+  });
+
+  it("drops blocks whose parent topic is suppressed", async () => {
+    const fact = makeScoredMemoryNode({
+      id: "fact-1",
+      memoryType: "fact",
+      subject: "user",
+      predicate: "preference",
+      value: "hidden topic fact",
+      confidence: 1,
+    });
+    const pipeline = new RetrieverPipeline(
+      makeStore({
+        searchMemories: async () => [fact],
+        getTopicNode: async () => makeTopicNode({
+          label: "Hidden",
+          summary: "Hidden.",
+          topicOrder: 1,
+          suppressed: true,
+        }),
+      }),
+      makeEmbedder(),
+      {},
+    );
+
+    const result = await pipeline.run("query", "session-1");
+
+    expect(result.facts).toEqual([]);
+    expect(result.nodes).toEqual([]);
+    expect(result.systemPrompt).not.toContain("hidden topic fact");
+  });
+
   it("returns early when all nodes are stale", async () => {
     const decayed = makeScoredMemoryNode({
       id: "decayed",

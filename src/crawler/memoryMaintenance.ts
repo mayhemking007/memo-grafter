@@ -43,7 +43,7 @@ function findCompetingMemoryGroups(memories: MemoryNode[]): MemoryConflictGroup[
   const byFactKey = new Map<string, Array<{ memory: MemoryNode; value: string }>>();
 
   for (const memory of memories) {
-    if (memory.decayed || memory.supersededBy != null) continue;
+    if (memory.decayed || memory.supersededBy != null || memory.forgotten) continue;
 
     const grouping = getConflictGrouping(memory);
     if (!grouping) continue;
@@ -138,10 +138,12 @@ export function compareNewestFirst(left: MemoryNode, right: MemoryNode): number 
 export function getSkippedMaintenanceCounts(memories: MemoryNode[]): {
   skippedDecayed: number;
   skippedSuperseded: number;
+  skippedForgotten: number;
 } {
   return {
     skippedDecayed: memories.filter((memory) => memory.decayed).length,
     skippedSuperseded: memories.filter((memory) => memory.supersededBy != null).length,
+    skippedForgotten: memories.filter((memory) => memory.forgotten).length,
   };
 }
 

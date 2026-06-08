@@ -17,10 +17,12 @@ if (!(await skipWithoutDatabase("core/database-init"))) {
   assert.deepEqual(rows.map((row) => row.table_name), [
     "mg_fleet_agents",
     "mg_fleets",
+    "mg_graft_registry",
     "mg_memory_edges",
     "mg_memory_nodes",
     "mg_message_buffer",
     "mg_segments",
+    "mg_session_ingest_state",
     "mg_topic_edges",
     "mg_topic_nodes",
   ]);

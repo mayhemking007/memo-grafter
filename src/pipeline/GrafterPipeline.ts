@@ -27,11 +27,13 @@ export class GrafterPipeline {
 
     const hopDepth = options.expansionStrategy === "none" ? 0 : options.hopDepth ?? this.config.hopDepth;
     const neighbourhood = await this.store.getNeighbours(topicIds, hopDepth, sessionId);
-    const nodes = neighbourhood.sort((a, b) =>
-      a.messageRange[0] - b.messageRange[0]
-      || a.messageRange[1] - b.messageRange[1]
-      || a.topicOrder - b.topicOrder
-    );
+    const nodes = neighbourhood
+      .filter((node) => !node.suppressed)
+      .sort((a, b) =>
+        a.messageRange[0] - b.messageRange[0]
+        || a.messageRange[1] - b.messageRange[1]
+        || a.topicOrder - b.topicOrder
+      );
     const fittedNodes = [...nodes];
     let systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
     let tokenCount = countApproxTokens(systemPrompt);
@@ -53,8 +55,11 @@ export class GrafterPipeline {
     if (nodes.length === 0) return "";
 
     const blocks: string[] = [];
-    const sessionMemories = await this.store.getMemoriesBySession(sessionId);
-    const memoryEdges = await this.store.getMemoryEdgesBySession(sessionId);
+    const sessionMemories = (await this.store.getMemoriesBySession(sessionId))
+      .filter((memory) => !memory.forgotten);
+    const visibleMemoryIds = new Set(sessionMemories.map((memory) => memory.id));
+    const memoryEdges = (await this.store.getMemoryEdgesBySession(sessionId))
+      .filter((edge) => visibleMemoryIds.has(edge.sourceId) && visibleMemoryIds.has(edge.targetId));
 
     for (const node of nodes) {
       const start = Math.max(0, node.messageRange[0] - this.config.bufferSize);

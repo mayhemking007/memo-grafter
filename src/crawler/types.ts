@@ -34,6 +34,7 @@ export interface CrawlerPassResult {
   skippedAlreadyDecayed?: number;
   skippedSuperseded?: number;
   skippedDecayed?: number;
+  skippedForgotten?: number;
   notes?: string[];
 }
 

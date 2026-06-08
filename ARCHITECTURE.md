@@ -4,7 +4,7 @@ This document describes the high-level architecture and core design of memo-graf
 
 ## System Overview
 
-MemoGrafter is a server-side TypeScript memory framework for chatbot applications. It records conversation turns, groups them into topic segments, extracts structured memory, stores topic and memory graphs, and later retrieves or grafts relevant memory into another prompt or session. Sessions and memory rows can also carry optional normalized tags for project, planning, week, domain, or worker-routing filters.
+MemoGrafter is a server-side TypeScript memory framework for chatbot applications. It records conversation turns, groups them into topic segments, extracts structured memory, stores topic and memory graphs, and later retrieves or grafts relevant memory into another prompt or session. Sessions and memory rows can also carry optional normalized tags for project, planning, week, domain, or worker-routing filters. Applications can also apply soft lifecycle state to explicitly forget memory nodes or suppress and restore topic nodes without physically deleting graph rows by default.
 
 The main runtime layers are:
 
@@ -43,7 +43,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 
 `MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. The existing drift detector runs across the chunks, and the extraction LLM, topic segmentation, memory extraction, and edge-building stages are reused.
 
-The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, `graftByRelevance()`, and `close()`, wait for pending ingestion to finish.
+The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced active graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, `graftByRelevance()`, lifecycle controls, and `close()`, wait for pending ingestion to finish.
 
 ## Ingestion Flow
 
@@ -81,6 +81,7 @@ Its responsibilities include:
 - providing high-level grafting and absorbing helpers;
 - providing targeted recall through `RetrieverPipeline`;
 - storing optional session tags and applying them to future ingested topic and memory rows;
+- exposing explicit memory lifecycle controls for forgetting memory nodes and suppressing or restoring topic nodes;
 - waiting for pending ingestion before reads that depend on memory state.
 
 The agent keeps public conversational history separate from its graph ingestion history. This allows raw text and later chat turns to share one incremental graph cursor while keeping `getHistory()` and invoke-time prompts conversational.
@@ -139,7 +140,7 @@ This pipeline is used by `MemoGrafter.inject()`, `MemoGrafterAgent.graft()`, and
 
 When selected topics contain crawler-maintained conflict or version metadata, graft prompt assembly keeps the original topic summary intact and adds deterministic maintenance notes plus active memory facts. This is important because topic summaries are historical segment summaries and may contain older facts. The prompt explicitly tells downstream LLMs to prefer active memory facts over contradictory historical summary details instead of rewriting stored summaries.
 
-Absorption copies selected topic nodes into the target session and records `grafted` edges back to their source nodes. The PostgreSQL store also copies active memory nodes attached to those topics so targeted recall can search the transferred facts. Copied memory rows get fresh IDs, preserve their embeddings, reset `superseded_by` to `NULL`, reset `decayed` to `FALSE`, and are copied only when the source memory is active.
+Absorption copies selected topic nodes into the target session and records `grafted` edges back to their source nodes. The PostgreSQL store also copies active memory nodes attached to those topics so targeted recall can search the transferred facts. Copied memory rows get fresh IDs, preserve their embeddings, reset `superseded_by` to `NULL`, reset `decayed` to `FALSE`, and are copied only when the source memory is active. Suppressed source topics and forgotten source memories are not copied.
 
 The same store-level absorption path inserts `mg_graft_registry` rows for copied topic nodes. Keeping registry writes in `PostgresGraphStore.absorbNodes()` means `MemoGrafterAgent`, direct graft ingestion, and fleet grafting all get provenance tracking without duplicating logic.
 
@@ -154,6 +155,7 @@ The interface covers:
 - segment, topic node, and topic edge persistence;
 - memory node insertion, memory lookup, and memory edge construction;
 - optional session and memory tag updates and tag-aware read filters;
+- explicit lifecycle state updates for forgotten memories and suppressed/restored topics;
 - session snapshot reads for topic edges, memory nodes, and memory edges;
 - memory maintenance reads and annotations for crawler passes;
 - session topic-node counts for invoke-time recall guards;
@@ -164,9 +166,26 @@ The interface covers:
 - fleet and agent metadata;
 - explicit session clearing.
 
-The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`. `mg_topic_nodes` and `mg_memory_nodes` both include `tags TEXT[] NOT NULL DEFAULT '{}'` plus GIN indexes for tag filters.
+The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`. `mg_topic_nodes` and `mg_memory_nodes` both include `tags TEXT[] NOT NULL DEFAULT '{}'` plus GIN indexes for tag filters. `mg_memory_nodes` also carries `forgotten BOOLEAN NOT NULL DEFAULT FALSE` and `forgotten_at`; `mg_topic_nodes` carries `suppressed BOOLEAN NOT NULL DEFAULT FALSE` and `suppressed_at`.
 
-`MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, active topic nodes, optional snapshot node wrappers with graft provenance, topic edges that touch the session's nodes, all memory nodes for the session, memory edges that touch those memories, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include decayed, conflicted, and superseded memory rows so callers such as visualizers can decide what to show.
+Most store reads used by recall, grafting, semantic seed selection, neighbourhood expansion, absorption, and maintenance are active reads. They exclude forgotten memories and suppressed topics at the storage boundary so callers do not need to duplicate lifecycle filtering.
+
+`MemoGrafterAgent.getGraphSnapshot()` is a read-side convenience over this storage boundary. It returns the current session ID, topic nodes, optional snapshot node wrappers with graft provenance, topic edges that touch the session's active nodes, all memory nodes for the session, memory edges that touch those memories, and an ISO capture timestamp. It does not include `mg_message_buffer` content, rendering metadata, layout information, or color decisions. Unlike targeted recall, snapshot memory reads intentionally include forgotten, decayed, conflicted, and superseded memory rows, and snapshot topic reads include suppressed topic rows, so callers such as visualizers can decide what to show.
+
+### Explicit Lifecycle Controls
+
+Explicit lifecycle controls are application-facing soft pruning operations:
+
+- `forget(memoryId)` marks a memory row as `forgotten = TRUE` and sets `forgotten_at`.
+- `forgetMany(memoryIds)` performs the same update in bulk and returns the changed-row count.
+- `suppressTopic(topicId)` marks a topic row as `suppressed = TRUE` and sets `suppressed_at`.
+- `restoreTopic(topicId)` clears topic suppression and its timestamp.
+
+Forgetting is intentionally one-way at the public API layer. MemoGrafter does not expose `restoreMemory()` because privacy and deletion workflows usually prefer conservative behavior. Storage implementations can still retain enough metadata for application-specific audit, hard-delete, or undo policies.
+
+Lifecycle controls are not physical deletes. They preserve graph rows and provenance while changing active participation. Forgotten memory nodes are excluded from targeted recall, invoke-time recall, graft prompt active facts and maintenance notes, absorption, memory edge construction, and crawler maintenance. Suppressed topic nodes are excluded from active topic reads, topic similarity search, fleet topic search, graph neighbourhood expansion, graft prompt assembly, absorption, and crawler maintenance until restored.
+
+When recall caching is enabled, successful lifecycle changes clear MemoGrafter recall cache entries. This prevents recently forgotten or suppressed content from being returned through a stale vector-search cache entry.
 
 ### MemoGrafterCrawler
 
@@ -174,9 +193,9 @@ The built-in `PostgresGraphStore` creates and manages the current schema, includ
 
 The built-in maintenance passes are deterministic:
 
-- `ConflictDetectionPass` groups active memories by session, normalized `subject`, and normalized `predicate`. A group conflicts when it contains different normalized `value` strings and the newest value does not carry an explicit update cue. Decayed memories and already superseded memories are skipped.
+- `ConflictDetectionPass` groups active memories by session, normalized `subject`, and normalized `predicate`. A group conflicts when it contains different normalized `value` strings and the newest value does not carry an explicit update cue. Decayed, forgotten, suppressed-topic, and already superseded memories are skipped.
 - `VersioningPass` uses a separate version classifier. It only accepts competing groups whose newest memory carries an explicit replacement or update cue such as `actually`, `now`, `changed to`, or `instead`, then marks older memories with `superseded_by` and creates version edges.
-- `DecayScoringPass` scores non-superseded active memories with confidence-weighted exponential recency decay. Memories whose score falls below the configured threshold are marked `decayed = TRUE`.
+- `DecayScoringPass` scores non-superseded active memories with confidence-weighted exponential recency decay. Forgotten memories and suppressed-topic memories are skipped. Memories whose score falls below the configured threshold are marked `decayed = TRUE`.
 
 Conflict grouping treats broad topic memories carefully when both the subject and predicate are generic, such as `user asked_about ...` or `conversation discussed ...`. Most broad topic rows are skipped because they describe what was discussed rather than mutually exclusive fact slots. Recognized travel destination plan rows are partitioned into a deterministic `travel-trip-plan` bucket and compared by destination, so `Goa trip plan` can conflict with `Vietnam trip plan`, while unrelated topics like `how to cook rajma chawal` or non-exclusive Vietnam subtopics do not join that conflict group. Plain disagreements remain active conflicts; they are not superseded merely because one memory is newer.
 
@@ -202,11 +221,11 @@ The crawler does not delete or prune existing conflict edges. If an older versio
 
 Targeted recall is handled by `RetrieverPipeline`, which is used by `MemoGrafterAgent.recall()`.
 
-The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed or superseded memories, combines each fact's similarity and confidence into a confidence-weighted retrieval score, groups facts by parent topic node, ranks those topic blocks by best fact retrieval score, and formats a token-budgeted system prompt.
+The recall path embeds the query, searches active memory nodes by vector similarity, filters decayed, superseded, forgotten, or suppressed-topic memories, combines each fact's similarity and confidence into a confidence-weighted retrieval score, groups facts by parent topic node, ranks those topic blocks by best fact retrieval score, and formats a token-budgeted system prompt.
 
 Recall can be tag-aware. With no tag options, recall stays scoped to the current session. With `tags`, the default scope is `session-and-tags`, which filters current-session memories by tag. With `scope: "tagged"`, recall can search active memories across sessions that match the supplied tags. Tag matching supports `tagMode: "all"` with PostgreSQL `@>` semantics and `tagMode: "any"` with `&&` semantics. Tags are normalized by trimming, lowercasing, deduplicating, and sorting before storage or retrieval.
 
-When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, recall scope, tag mode, normalized tag list, and a short hash of the embedding. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store.
+When `cache` config is provided, `MemoGrafter` owns one shared Redis client for recall caching. `RetrieverPipeline` uses that client only around the raw memory vector search, caching the `store.searchMemories()` result before defensive stale-memory filtering and prompt assembly. Cache keys include the session ID, `limit`, `minSimilarity`, recall scope, tag mode, normalized tag list, and a short hash of the embedding. TTL is clamped to 60-120 seconds, defaulting to 90 seconds. Redis errors are logged as warnings and retrieval falls back to the store. Successful lifecycle changes clear recall cache keys so stale cached search results do not reintroduce forgotten or suppressed memory.
 
 `MemoGrafterAgent.invoke()` also uses this path before each LLM call when the session has at least one topic node. It uses the current user message as the recall query, calls `recall()` with `inject.recallLimit` and `inject.recallMinSimilarity` defaults of `6` and `0.55`, injects the returned `systemPrompt` as a single prepended system message when facts are found, and keeps only the last `inject.recentWindowSize` raw messages. If the session has no topic nodes, recall returns no facts, or recall fails, the agent proceeds with raw history only and does not fail the foreground `invoke()` call.
 
@@ -218,7 +237,7 @@ This read-side path is separate from grafting:
 - semantic grafting selects topic-node seeds by query similarity before using the same graft assembly path;
 - absorbing copies selected topic nodes and their active atomic memories into another session.
 
-Crawler versioning and decay feed this path through existing lifecycle fields. Once an older memory has `superseded_by` set, or a stale memory has `decayed = TRUE`, targeted recall and absorption treat it as inactive without needing a separate conflict-resolution step.
+Crawler versioning, decay, and explicit lifecycle controls feed this path through lifecycle fields. Once an older memory has `superseded_by` set, a stale memory has `decayed = TRUE`, a memory has `forgotten = TRUE`, or a topic has `suppressed = TRUE`, targeted recall and absorption treat it as inactive without needing a separate conflict-resolution step.
 
 ## Data And Graph Lifecycle
 
@@ -242,6 +261,7 @@ The lifecycle for a normal conversation is:
 7. Memory edges may link semantically related memories within a topic.
 8. Grafted topic nodes are copied into a target session, registered in `mg_graft_registry`, linked to their source with `grafted` edges, and accompanied by copies of active memory nodes when those memories exist.
 9. Optional crawler passes can annotate active memory nodes with `has_conflict`, set `superseded_by` on older conflicting facts, mark stale active facts as `decayed`, and add `conflicts` or `updates` edges in `mg_memory_edges`.
+10. Applications can explicitly mark individual memory nodes as forgotten or suppress entire topic nodes. Those rows remain in the graph for audit/snapshot reads, but active recall, grafting, absorption, and crawler operations ignore them.
 
 During normal ingestion, existing graph state is not cleared. New topic nodes and memory nodes are appended after the stored ingest cursor, and new edges can connect them to prior native or grafted nodes. `clearSession()` is an explicit destructive reset for callers that intentionally want to remove stored session memory.
 
@@ -253,7 +273,7 @@ During normal ingestion, existing graph state is not cleared. New topic nodes an
 - **Incremental graph growth:** ingestion processes only new message ranges and preserves existing graph state by default; explicit `clearSession()` is the reset path.
 - **Separate topic and memory layers:** topic nodes preserve conversational structure, while memory nodes support precise fact-level recall.
 - **Optional tag filters:** tags are additive metadata on topic and memory rows. Untagged sessions keep existing behavior, while tagged recall can support project-scoped, planning-scoped, or future worker-routed retrieval.
-- **Non-destructive maintenance:** crawler passes annotate memory lifecycle state and memory edges without deleting graph data or rewriting historical topic summaries.
+- **Non-destructive maintenance and pruning:** crawler passes and application lifecycle controls annotate memory state and topic state without deleting graph data or rewriting historical topic summaries.
 - **Invoke-time recall:** `MemoGrafterAgent.invoke()` recalls relevant active memories before answering whenever the session has graph content, while still falling back to raw history if recall is unavailable.
 - **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context and includes maintenance notes when active memory facts supersede contradictory summary details.
 - **Semantic graft selection is additive:** `graftByRelevance()` uses topic-node vector search to choose graft seeds by natural-language query, then delegates to the existing graft assembly path. Existing `graft()` and `inject()` behavior remains unchanged.

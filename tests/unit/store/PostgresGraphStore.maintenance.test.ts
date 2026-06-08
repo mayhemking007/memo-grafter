@@ -82,6 +82,72 @@ describe("PostgresGraphStore maintenance methods", () => {
     expect(changed.calls[0]?.values).toContain(0.45);
   });
 
+  it("soft-forgets a memory without deleting it", async () => {
+    const changed = createStoreWithSql([[{ id: "memory-1" }]]);
+    const unchanged = createStoreWithSql([[]]);
+
+    await expect(changed.store.forgetMemory("memory-1")).resolves.toBe(true);
+    await expect(unchanged.store.forgetMemory("memory-1")).resolves.toBe(false);
+
+    expect(changed.calls[0]?.text).toContain("SET");
+    expect(changed.calls[0]?.text).toContain("forgotten = TRUE");
+    expect(changed.calls[0]?.text).toContain("forgotten_at = COALESCE");
+    expect(changed.calls[0]?.text).not.toContain("DELETE");
+  });
+
+  it("soft-forgets memories in bulk and returns the changed count", async () => {
+    const { store, calls } = createStoreWithSql([[{ id: "memory-a" }, { id: "memory-b" }]]);
+
+    await expect(store.forgetMemories(["memory-a", "memory-b"])).resolves.toBe(2);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toContain("forgotten = TRUE");
+    expect(calls[0]?.values).toContainEqual(["memory-a", "memory-b"]);
+  });
+
+  it("does not execute SQL for empty bulk forget requests", async () => {
+    const { store, calls } = createStoreWithSql([]);
+
+    await expect(store.forgetMemories([])).resolves.toBe(0);
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("suppresses and restores topics as soft lifecycle state", async () => {
+    const suppressed = createStoreWithSql([[{ id: "topic-1" }]]);
+    const restored = createStoreWithSql([[{ id: "topic-1" }]]);
+
+    await expect(suppressed.store.suppressTopic("topic-1")).resolves.toBe(true);
+    await expect(restored.store.restoreTopic("topic-1")).resolves.toBe(true);
+
+    expect(suppressed.calls[0]?.text).toContain("suppressed = TRUE");
+    expect(suppressed.calls[0]?.text).toContain("suppressed_at = COALESCE");
+    expect(suppressed.calls[0]?.text).not.toContain("DELETE");
+    expect(restored.calls[0]?.text).toContain("suppressed = FALSE");
+    expect(restored.calls[0]?.text).toContain("suppressed_at = NULL");
+  });
+
+  it("excludes forgotten memories and suppressed topics from memory search", async () => {
+    const { store, calls } = createStoreWithSql([[]]);
+
+    await expect(store.searchMemories([0.1, 0.2], "session-1", 5, 0.5)).resolves.toEqual([]);
+
+    const sqlText = calls.map((call) => call.text).join("\n");
+    expect(sqlText).toContain("JOIN mg_topic_nodes topic");
+    expect(sqlText).toContain("memory.forgotten = false");
+    expect(sqlText).toContain("topic.suppressed = false");
+  });
+
+  it("excludes forgotten memories and suppressed topics from maintenance scans", async () => {
+    const { store, calls } = createStoreWithSql([[]]);
+
+    await expect(store.listMemoryNodesForMaintenance()).resolves.toEqual([]);
+
+    expect(calls[0]?.text).toContain("JOIN mg_topic_nodes topic");
+    expect(calls[0]?.text).toContain("memory.forgotten = FALSE");
+    expect(calls[0]?.text).toContain("topic.suppressed = FALSE");
+  });
+
   it("does not insert a duplicate memory edge", async () => {
     const { store, calls } = createStoreWithSql([[{ id: "edge-1" }]]);
 

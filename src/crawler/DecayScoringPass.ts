@@ -45,10 +45,16 @@ export class DecayScoringPass implements CrawlerPass {
     let nodesDecayed = 0;
     let skippedAlreadyDecayed = 0;
     let skippedSuperseded = 0;
+    let skippedForgotten = 0;
     let minDecayScore: number | undefined;
     let maxDecayScore: number | undefined;
 
     for (const memory of memories) {
+      if (memory.forgotten) {
+        skippedForgotten += 1;
+        continue;
+      }
+
       if (memory.supersededBy != null) {
         skippedSuperseded += 1;
         continue;
@@ -83,6 +89,7 @@ export class DecayScoringPass implements CrawlerPass {
       nodesDecayed,
       skippedAlreadyDecayed,
       skippedSuperseded,
+      skippedForgotten,
       ...(minDecayScore !== undefined ? { minDecayScore } : {}),
       ...(maxDecayScore !== undefined ? { maxDecayScore } : {}),
     };

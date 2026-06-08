@@ -110,7 +110,7 @@ export class MemoGrafterAgent {
 
   async getGraphSnapshot(): Promise<GraphSnapshot> {
     await this.pendingIngest;
-    const { nodes } = await this.core.getTopics(this.sessionId);
+    const { nodes } = await this.core.getTopics(this.sessionId, { includeSuppressed: true });
     const edges = await this.core.store.getEdgesBySession(this.sessionId);
     const memories = await this.core.store.getMemoriesBySession(this.sessionId);
     const memoryEdges = await this.core.store.getMemoryEdgesBySession(this.sessionId);
@@ -169,6 +169,26 @@ export class MemoGrafterAgent {
     await this.core.store.deleteNode(nodeId, this.sessionId);
   }
 
+  async forget(memoryId: string): Promise<boolean> {
+    await this.pendingIngest;
+    return this.core.forget(memoryId);
+  }
+
+  async forgetMany(memoryIds: string[]): Promise<number> {
+    await this.pendingIngest;
+    return this.core.forgetMany(memoryIds);
+  }
+
+  async suppressTopic(topicId: string): Promise<boolean> {
+    await this.pendingIngest;
+    return this.core.suppressTopic(topicId);
+  }
+
+  async restoreTopic(topicId: string): Promise<boolean> {
+    await this.pendingIngest;
+    return this.core.restoreTopic(topicId);
+  }
+
   async clearSession(): Promise<void> {
     await this.pendingIngest;
     await this.core.store.clearSession(this.sessionId);
@@ -212,7 +232,12 @@ export class MemoGrafterAgent {
 
   async absorbFromAgent(sourceAgent: MemoGrafterAgent, options: AbsorbFromAgentOptions = {}): Promise<TopicNode[]> {
     const nodes = await sourceAgent.core.selectNodesForAbsorb(sourceAgent.getSessionId(), options);
-    return this.core.absorbNodes(nodes, this.sessionId);
+    const registry = await this.core.store.getGraftRegistry(this.sessionId);
+    const alreadyAbsorbedSourceIds = new Set(registry.map((entry) => entry.sourceNodeId));
+    return this.core.absorbNodes(
+      nodes.filter((node) => !alreadyAbsorbedSourceIds.has(node.id)),
+      this.sessionId,
+    );
   }
 
   private enqueueBackgroundIngest(): void {
