@@ -29,6 +29,48 @@ function createStoreWithSql(results: unknown[][]): {
   return { store, calls };
 }
 
+function makeMemoryRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    id: "11111111-1111-1111-1111-111111111111",
+    segment_id: "segment-1",
+    topic_node_id: "topic-1",
+    agent_id: null,
+    session_id: "session-1",
+    memory_type: "fact",
+    source_type: "conversation",
+    subject: "user",
+    predicate: "location",
+    value: "Delhi",
+    confidence: 1,
+    embedding: [0.1, 0.2],
+    tags: [],
+    source: null,
+    source_url: null,
+    source_title: null,
+    superseded_by: null,
+    decayed: false,
+    forgotten: false,
+    forgotten_at: null,
+    has_conflict: false,
+    agent_color: null,
+    fleet_id: null,
+    created_at: new Date("2026-01-01T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function makeMemoryEdgeRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    id: "edge-1",
+    source_id: "22222222-2222-2222-2222-222222222222",
+    target_id: "11111111-1111-1111-1111-111111111111",
+    edge_type: "updates",
+    weight: 1,
+    created_at: new Date("2026-01-02T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
 describe("PostgresGraphStore maintenance methods", () => {
   it("does not execute SQL when marking an empty conflict set", async () => {
     const { store, calls } = createStoreWithSql([]);
@@ -200,5 +242,103 @@ describe("PostgresGraphStore maintenance methods", () => {
 
     expect(calls[0]?.text).toContain(" OR ");
     expect(calls[0]?.values).toEqual(["conflicts", "memory-a", "memory-b", "memory-b", "memory-a"]);
+  });
+
+  it("builds chronological memory history from supersession and maintenance edges", async () => {
+    const older = makeMemoryRow({
+      id: "11111111-1111-1111-1111-111111111111",
+      value: "Delhi",
+      superseded_by: "22222222-2222-2222-2222-222222222222",
+      has_conflict: true,
+      created_at: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const newer = makeMemoryRow({
+      id: "22222222-2222-2222-2222-222222222222",
+      value: "Bangalore",
+      created_at: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const updateEdge = makeMemoryEdgeRow();
+    const conflictEdge = makeMemoryEdgeRow({
+      id: "edge-2",
+      source_id: "11111111-1111-1111-1111-111111111111",
+      target_id: "22222222-2222-2222-2222-222222222222",
+      edge_type: "conflicts",
+    });
+    const { store, calls } = createStoreWithSql([
+      [newer],
+      [older, newer],
+      [updateEdge, conflictEdge],
+      [updateEdge, conflictEdge],
+    ]);
+
+    const history = await store.getMemoryHistoryById("22222222-2222-2222-2222-222222222222");
+
+    expect(history.anchorMemoryId).toBe("22222222-2222-2222-2222-222222222222");
+    expect(history.currentMemory?.id).toBe("22222222-2222-2222-2222-222222222222");
+    expect(history.entries.map((entry) => [entry.memory.id, entry.status])).toEqual([
+      ["11111111-1111-1111-1111-111111111111", "superseded"],
+      ["22222222-2222-2222-2222-222222222222", "conflicting"],
+    ]);
+    expect(history.entries[1]?.supersedes).toContain("11111111-1111-1111-1111-111111111111");
+    expect(history.entries[0]?.conflictsWith).toContain("22222222-2222-2222-2222-222222222222");
+    expect(calls.map((call) => call.text).join("\n")).toContain("regexp_replace");
+  });
+
+  it("looks up complete memory history by normalized subject and predicate", async () => {
+    const forgotten = makeMemoryRow({
+      id: "33333333-3333-3333-3333-333333333333",
+      value: "Pune",
+      forgotten: true,
+      forgotten_at: new Date("2026-01-03T00:00:00.000Z"),
+      created_at: new Date("2026-01-03T00:00:00.000Z"),
+    });
+    const { store, calls } = createStoreWithSql([
+      [forgotten],
+      [],
+    ]);
+
+    const history = await store.getMemoryHistoryByFact(" User ", " Location ", { sessionId: "session-1" });
+
+    expect(history.subject).toBe(" User ");
+    expect(history.predicate).toBe(" Location ");
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0]?.status).toBe("forgotten");
+    expect(history.currentMemory).toBeNull();
+    expect(calls[0]?.values).toEqual(["user", "location", "session-1"]);
+  });
+
+  it("returns a structural memory diff with update and conflict relationships", async () => {
+    const from = makeMemoryRow({
+      id: "11111111-1111-1111-1111-111111111111",
+      value: "Delhi",
+      superseded_by: "22222222-2222-2222-2222-222222222222",
+      created_at: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const to = makeMemoryRow({
+      id: "22222222-2222-2222-2222-222222222222",
+      value: "Bangalore",
+      created_at: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const updateEdge = makeMemoryEdgeRow();
+    const conflictEdge = makeMemoryEdgeRow({
+      id: "edge-2",
+      edge_type: "conflicts",
+    });
+    const { store } = createStoreWithSql([
+      [from],
+      [to],
+      [updateEdge, conflictEdge],
+    ]);
+
+    const diff = await store.getMemoryDiff(
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+    );
+
+    expect(diff.changedFields.map((field) => field.field)).toContain("value");
+    expect(diff.relationship.supersededBy).toBe(true);
+    expect(diff.relationship.conflicts).toBe(true);
+    expect(diff.relationship.updateEdges).toHaveLength(1);
+    expect(diff.relationship.conflictEdges).toHaveLength(1);
   });
 });

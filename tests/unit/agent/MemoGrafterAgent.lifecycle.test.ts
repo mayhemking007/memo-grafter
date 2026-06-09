@@ -20,13 +20,35 @@ function createAgent() {
       order.push("restoreTopic");
       return true;
     }),
+    getMemoryHistory: vi.fn(async () => {
+      order.push("getMemoryHistory");
+      return { entries: [], edges: [], currentMemory: null };
+    }),
+    getMemoryDiff: vi.fn(async () => {
+      order.push("getMemoryDiff");
+      return {
+        from: {},
+        to: {},
+        fields: [],
+        changedFields: [],
+        relationship: {
+          supersedes: false,
+          supersededBy: false,
+          conflicts: false,
+          updateEdges: [],
+          conflictEdges: [],
+        },
+      };
+    }),
   };
   const agent = Object.create(MemoGrafterAgent.prototype) as MemoGrafterAgent;
   const internals = agent as unknown as {
     core: typeof core;
     pendingIngest: Promise<void>;
+    sessionId: string;
   };
   internals.core = core;
+  internals.sessionId = "session-1";
   internals.pendingIngest = Promise.resolve().then(() => {
     order.push("pending");
   });
@@ -54,5 +76,18 @@ describe("MemoGrafterAgent lifecycle APIs", () => {
     expect(core.forgetMany).toHaveBeenCalledWith(["memory-a", "memory-b"]);
     expect(core.suppressTopic).toHaveBeenCalledWith("topic-1");
     expect(core.restoreTopic).toHaveBeenCalledWith("topic-1");
+  });
+
+  it("scopes memory history lookups to the agent session", async () => {
+    const { agent, core } = createAgent();
+    const sessionId = agent.getSessionId();
+
+    await agent.getMemoryHistory("memory-1");
+    await agent.getMemoryHistory("user", "location");
+    await agent.getMemoryDiff("memory-a", "memory-b");
+
+    expect(core.getMemoryHistory).toHaveBeenCalledWith("memory-1", { sessionId });
+    expect(core.getMemoryHistory).toHaveBeenCalledWith("user", "location", { sessionId });
+    expect(core.getMemoryDiff).toHaveBeenCalledWith("memory-a", "memory-b");
   });
 });

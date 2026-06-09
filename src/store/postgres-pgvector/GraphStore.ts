@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
-import type { GraftRegistryEntry, MemoryEdge, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
+import type { GraftRegistryEntry, MemoryDiff, MemoryDiffField, MemoryEdge, MemoryHistoryEntry, MemoryHistoryOptions, MemoryHistoryResult, MemoryHistoryStatus, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../types.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { normalizeTags } from "../../utils/tags.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
@@ -722,6 +722,105 @@ export class PostgresGraphStore implements GraphStore {
     return rows.map((row) => this.rowToMemoryEdge(row));
   }
 
+  async getMemoryHistoryById(
+    memoryNodeId: string,
+    options: MemoryHistoryOptions = {},
+  ): Promise<MemoryHistoryResult> {
+    const anchor = await this.getMemoryNodeById(memoryNodeId, options.sessionId);
+    if (!anchor) {
+      return {
+        anchorMemoryId: memoryNodeId,
+        ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        entries: [],
+        edges: [],
+        currentMemory: null,
+      };
+    }
+
+    const memories = await this.getMemoryNodesByFactKey(anchor.subject, anchor.predicate, {
+      sessionId: options.sessionId ?? anchor.sessionId,
+    });
+    const byId = new Map<string, MemoryNode | null>(memories.map((memory) => [memory.id, memory]));
+    byId.set(anchor.id, anchor);
+
+    const firstPassEdges = await this.getMemoryEdgesForMemoryIds([...byId.keys()]);
+    for (const id of this.getConnectedMemoryIds(firstPassEdges)) {
+      if (!byId.has(id)) {
+        byId.set(id, null);
+      }
+    }
+
+    const missingIds = [...byId.entries()]
+      .filter(([, memory]) => memory == null)
+      .map(([id]) => id);
+    for (const memory of await this.getMemoryNodesByIds(missingIds, options.sessionId ?? anchor.sessionId)) {
+      byId.set(memory.id, memory);
+    }
+
+    const historyMemories = [...byId.values()].filter((memory): memory is MemoryNode => memory != null);
+    const edges = await this.getMemoryEdgesForMemoryIds(historyMemories.map((memory) => memory.id));
+
+    return this.buildMemoryHistoryResult(historyMemories, edges, {
+      anchorMemoryId: memoryNodeId,
+      subject: anchor.subject,
+      predicate: anchor.predicate,
+      sessionId: options.sessionId ?? anchor.sessionId,
+    });
+  }
+
+  async getMemoryHistoryByFact(
+    subject: string,
+    predicate: string,
+    options: MemoryHistoryOptions = {},
+  ): Promise<MemoryHistoryResult> {
+    const memories = await this.getMemoryNodesByFactKey(subject, predicate, options);
+    const edges = await this.getMemoryEdgesForMemoryIds(memories.map((memory) => memory.id));
+
+    return this.buildMemoryHistoryResult(memories, edges, {
+      subject,
+      predicate,
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    });
+  }
+
+  async getMemoryDiff(fromMemoryId: string, toMemoryId: string): Promise<MemoryDiff> {
+    const [from, to] = await Promise.all([
+      this.getMemoryNodeById(fromMemoryId),
+      this.getMemoryNodeById(toMemoryId),
+    ]);
+
+    if (!from) {
+      throw new Error(`Memory ${fromMemoryId} was not found.`);
+    }
+
+    if (!to) {
+      throw new Error(`Memory ${toMemoryId} was not found.`);
+    }
+
+    const edges = (await this.getMemoryEdgesForMemoryIds([from.id, to.id]))
+      .filter((edge) =>
+        (edge.sourceId === from.id && edge.targetId === to.id)
+        || (edge.sourceId === to.id && edge.targetId === from.id)
+      );
+    const updateEdges = edges.filter((edge) => edge.edgeType === "updates");
+    const conflictEdges = edges.filter((edge) => edge.edgeType === "conflicts");
+    const fields = this.diffMemoryFields(from, to);
+
+    return {
+      from,
+      to,
+      fields,
+      changedFields: fields.filter((field) => field.changed),
+      relationship: {
+        supersedes: to.supersededBy === from.id || updateEdges.some((edge) => edge.sourceId === from.id && edge.targetId === to.id),
+        supersededBy: from.supersededBy === to.id || updateEdges.some((edge) => edge.sourceId === to.id && edge.targetId === from.id),
+        conflicts: conflictEdges.length > 0,
+        updateEdges,
+        conflictEdges,
+      },
+    };
+  }
+
   async listMemoryNodesForMaintenance(): Promise<MemoryNode[]> {
     const rows = await this.sql<MemoryNodeRow[]>`
       SELECT memory.*
@@ -1299,6 +1398,224 @@ export class PostgresGraphStore implements GraphStore {
         AND superseded_by IS NULL
         AND forgotten = FALSE
     `;
+  }
+
+  private async getMemoryNodeById(memoryNodeId: string, sessionId?: string): Promise<MemoryNode | null> {
+    if (sessionId) {
+      const rows = await this.sql<MemoryNodeRow[]>`
+        SELECT *
+        FROM mg_memory_nodes
+        WHERE id = ${memoryNodeId}::uuid
+          AND session_id = ${sessionId}
+        LIMIT 1
+      `;
+
+      return rows[0] ? this.rowToMemoryNode(rows[0]) : null;
+    }
+
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT *
+      FROM mg_memory_nodes
+      WHERE id = ${memoryNodeId}::uuid
+      LIMIT 1
+    `;
+
+    return rows[0] ? this.rowToMemoryNode(rows[0]) : null;
+  }
+
+  private async getMemoryNodesByIds(memoryNodeIds: string[], sessionId?: string): Promise<MemoryNode[]> {
+    if (memoryNodeIds.length === 0) return [];
+
+    if (sessionId) {
+      const rows = await this.sql<MemoryNodeRow[]>`
+        SELECT *
+        FROM mg_memory_nodes
+        WHERE id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+          AND session_id = ${sessionId}
+        ORDER BY created_at ASC, id ASC
+      `;
+
+      return rows.map((row) => this.rowToMemoryNode(row));
+    }
+
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT *
+      FROM mg_memory_nodes
+      WHERE id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+      ORDER BY created_at ASC, id ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  private async getMemoryNodesByFactKey(
+    subject: string,
+    predicate: string,
+    options: MemoryHistoryOptions = {},
+  ): Promise<MemoryNode[]> {
+    const normalizedSubject = this.normalizeMemoryHistoryPart(subject);
+    const normalizedPredicate = this.normalizeMemoryHistoryPart(predicate);
+
+    if (options.sessionId) {
+      const rows = await this.sql<MemoryNodeRow[]>`
+        SELECT *
+        FROM mg_memory_nodes
+        WHERE lower(regexp_replace(trim(subject), '[[:space:]]+', ' ', 'g')) = ${normalizedSubject}
+          AND lower(regexp_replace(trim(predicate), '[[:space:]]+', ' ', 'g')) = ${normalizedPredicate}
+          AND session_id = ${options.sessionId}
+        ORDER BY created_at ASC, id ASC
+      `;
+
+      return rows.map((row) => this.rowToMemoryNode(row));
+    }
+
+    const rows = await this.sql<MemoryNodeRow[]>`
+      SELECT *
+      FROM mg_memory_nodes
+      WHERE lower(regexp_replace(trim(subject), '[[:space:]]+', ' ', 'g')) = ${normalizedSubject}
+        AND lower(regexp_replace(trim(predicate), '[[:space:]]+', ' ', 'g')) = ${normalizedPredicate}
+      ORDER BY created_at ASC, id ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryNode(row));
+  }
+
+  private async getMemoryEdgesForMemoryIds(memoryNodeIds: string[]): Promise<MemoryEdge[]> {
+    if (memoryNodeIds.length === 0) return [];
+
+    const rows = await this.sql<MemoryEdgeRow[]>`
+      SELECT DISTINCT *
+      FROM mg_memory_edges
+      WHERE source_id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+         OR target_id = ANY(${this.sql.array(memoryNodeIds)}::uuid[])
+      ORDER BY created_at ASC, id ASC
+    `;
+
+    return rows.map((row) => this.rowToMemoryEdge(row));
+  }
+
+  private buildMemoryHistoryResult(
+    memories: MemoryNode[],
+    edges: MemoryEdge[],
+    metadata: {
+      anchorMemoryId?: string;
+      subject?: string;
+      predicate?: string;
+      sessionId?: string;
+    },
+  ): MemoryHistoryResult {
+    const memoriesById = new Map(memories.map((memory) => [memory.id, memory]));
+    const visibleEdges = edges.filter((edge) => memoriesById.has(edge.sourceId) && memoriesById.has(edge.targetId));
+    const sortedMemories = [...memories].sort((left, right) =>
+      left.createdAt.getTime() - right.createdAt.getTime()
+      || left.id.localeCompare(right.id)
+    );
+    const entries: MemoryHistoryEntry[] = sortedMemories.map((memory, index) => {
+      const updateEdges = visibleEdges.filter((edge) =>
+        edge.edgeType === "updates"
+        && (edge.sourceId === memory.id || edge.targetId === memory.id)
+      );
+      const conflictEdges = visibleEdges.filter((edge) =>
+        edge.edgeType === "conflicts"
+        && (edge.sourceId === memory.id || edge.targetId === memory.id)
+      );
+      const supersedes = [
+        ...sortedMemories
+          .filter((candidate) => candidate.supersededBy === memory.id)
+          .map((candidate) => candidate.id),
+        ...updateEdges
+          .filter((edge) => edge.sourceId === memory.id)
+          .map((edge) => edge.targetId),
+      ];
+      const conflictsWith = conflictEdges.map((edge) =>
+        edge.sourceId === memory.id ? edge.targetId : edge.sourceId
+      );
+
+      return {
+        memory,
+        versionIndex: index,
+        status: this.resolveMemoryHistoryStatus(memory, conflictEdges),
+        supersedes: [...new Set(supersedes)],
+        supersededBy: memory.supersededBy,
+        conflictsWith: [...new Set(conflictsWith)],
+        updateEdges,
+        conflictEdges,
+        createdAt: memory.createdAt,
+      };
+    });
+
+    return {
+      ...metadata,
+      entries,
+      edges: visibleEdges,
+      currentMemory: this.resolveCurrentMemory(sortedMemories),
+    };
+  }
+
+  private resolveMemoryHistoryStatus(memory: MemoryNode, conflictEdges: MemoryEdge[]): MemoryHistoryStatus {
+    if (memory.forgotten) return "forgotten";
+    if (memory.decayed) return "decayed";
+    if (memory.supersededBy != null) return "superseded";
+    if (memory.hasConflict || conflictEdges.length > 0) return "conflicting";
+    return "active";
+  }
+
+  private resolveCurrentMemory(memories: MemoryNode[]): MemoryNode | null {
+    return [...memories]
+      .filter((memory) => !memory.forgotten && !memory.decayed && memory.supersededBy == null)
+      .sort((left, right) =>
+        right.createdAt.getTime() - left.createdAt.getTime()
+        || right.id.localeCompare(left.id)
+      )[0] ?? null;
+  }
+
+  private getConnectedMemoryIds(edges: MemoryEdge[]): string[] {
+    return [...new Set(edges.flatMap((edge) => [edge.sourceId, edge.targetId]))];
+  }
+
+  private diffMemoryFields(from: MemoryNode, to: MemoryNode): MemoryDiffField[] {
+    const fields: Array<keyof MemoryNode> = [
+      "sessionId",
+      "topicNodeId",
+      "agentId",
+      "memoryType",
+      "sourceType",
+      "subject",
+      "predicate",
+      "value",
+      "confidence",
+      "tags",
+      "source",
+      "sourceUrl",
+      "sourceTitle",
+      "supersededBy",
+      "decayed",
+      "forgotten",
+      "forgottenAt",
+      "hasConflict",
+      "agentColor",
+      "fleetId",
+      "createdAt",
+    ];
+
+    return fields.map((field) => ({
+      field,
+      from: from[field],
+      to: to[field],
+      changed: !this.memoryDiffValuesEqual(from[field], to[field]),
+    }));
+  }
+
+  private memoryDiffValuesEqual(left: unknown, right: unknown): boolean {
+    if (left instanceof Date && right instanceof Date) {
+      return left.getTime() === right.getTime();
+    }
+
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  }
+
+  private normalizeMemoryHistoryPart(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, " ");
   }
 
   private async deleteEdgesByNodeIds(nodeIds: string[]): Promise<void> {

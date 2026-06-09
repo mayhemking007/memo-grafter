@@ -156,6 +156,7 @@ The interface covers:
 - memory node insertion, memory lookup, and memory edge construction;
 - optional session and memory tag updates and tag-aware read filters;
 - explicit lifecycle state updates for forgotten memories and suppressed/restored topics;
+- memory history and diff reads derived from memory rows and maintenance edges;
 - session snapshot reads for topic edges, memory nodes, and memory edges;
 - memory maintenance reads and annotations for crawler passes;
 - session topic-node counts for invoke-time recall guards;
@@ -186,6 +187,24 @@ Forgetting is intentionally one-way at the public API layer. MemoGrafter does no
 Lifecycle controls are not physical deletes. They preserve graph rows and provenance while changing active participation. Forgotten memory nodes are excluded from targeted recall, invoke-time recall, graft prompt active facts and maintenance notes, absorption, memory edge construction, and crawler maintenance. Suppressed topic nodes are excluded from active topic reads, topic similarity search, fleet topic search, graph neighbourhood expansion, graft prompt assembly, absorption, and crawler maintenance until restored.
 
 When recall caching is enabled, successful lifecycle changes clear MemoGrafter recall cache entries. This prevents recently forgotten or suppressed content from being returned through a stale vector-search cache entry.
+
+### Memory History Reads
+
+Memory history APIs are read-only audit helpers layered on the existing graph schema. They do not introduce a separate event store.
+
+The store derives history from:
+
+- `mg_memory_nodes` rows matching a memory's normalized `subject` and `predicate`;
+- `superseded_by` pointers on memory rows;
+- `mg_memory_edges` rows with `edge_type = 'updates'`;
+- `mg_memory_edges` rows with `edge_type = 'conflicts'`;
+- lifecycle metadata such as `decayed`, `forgotten`, and `has_conflict`.
+
+`getMemoryHistory(memoryId)` anchors the lookup at a memory row, loads memories in the same session with the same normalized fact key, and folds in directly connected update/conflict edge endpoints. `getMemoryHistory(subject, predicate)` loads the complete fact-key lineage for the requested scope. `MemoGrafterAgent` passes its current session ID by default; direct `MemoGrafter` callers can provide a `sessionId` option.
+
+History reads intentionally include memory rows that active retrieval ignores, including superseded, decayed, forgotten, and suppressed-topic memories. This lets audit and governance tools answer what the system believed before an update and why a current fact replaced or conflicts with earlier data.
+
+`getMemoryDiff(fromMemoryId, toMemoryId)` performs a deterministic structural comparison. It compares stored memory fields and reports whether the two rows are connected by `superseded_by`, `updates`, or `conflicts` metadata. It does not call an LLM and does not synthesize natural-language explanations.
 
 ### MemoGrafterCrawler
 

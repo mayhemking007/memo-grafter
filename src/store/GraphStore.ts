@@ -1,6 +1,9 @@
 import type {
   GraftRegistryEntry,
   MemoryEdge,
+  MemoryDiff,
+  MemoryHistoryOptions,
+  MemoryHistoryResult,
   MemoryNode,
   MemoryNodeInsert,
   Message,
@@ -34,6 +37,9 @@ export interface GraphStore {
   getEdgesBySession(sessionId: string): Promise<TopicEdge[]>;
   getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<MemoryEdge[]>;
+  getMemoryHistoryById(memoryNodeId: string, options?: MemoryHistoryOptions): Promise<MemoryHistoryResult>;
+  getMemoryHistoryByFact(subject: string, predicate: string, options?: MemoryHistoryOptions): Promise<MemoryHistoryResult>;
+  getMemoryDiff(fromMemoryId: string, toMemoryId: string): Promise<MemoryDiff>;
   listMemoryNodesForMaintenance(): Promise<MemoryNode[]>;
   forgetMemory(memoryNodeId: string): Promise<boolean>;
   forgetMemories(memoryNodeIds: string[]): Promise<number>;
