@@ -24,13 +24,36 @@ function createMemo(changes: {
     forgetMemories: vi.fn(async () => changes.forgetMemories ?? 2),
     suppressTopic: vi.fn(async () => changes.suppressTopic ?? true),
     restoreTopic: vi.fn(async () => changes.restoreTopic ?? true),
+    getMemoryHistoryById: vi.fn(async () => ({ entries: [], edges: [], currentMemory: null })),
+    getMemoryHistoryByFact: vi.fn(async () => ({ entries: [], edges: [], currentMemory: null })),
+    getMemoryDiff: vi.fn(async () => ({
+      from: {},
+      to: {},
+      fields: [],
+      changedFields: [],
+      relationship: {
+        supersedes: false,
+        supersededBy: false,
+        conflicts: false,
+        updateEdges: [],
+        conflictEdges: [],
+      },
+    })),
   };
   const cache = {
     keys: vi.fn(async () => ["mg:recall:session-1:key"]),
     del: vi.fn(async () => 1),
   };
   const internals = memo as unknown as {
-    store: Pick<GraphStore, "forgetMemory" | "forgetMemories" | "suppressTopic" | "restoreTopic">;
+    store: Pick<GraphStore,
+      | "forgetMemory"
+      | "forgetMemories"
+      | "suppressTopic"
+      | "restoreTopic"
+      | "getMemoryHistoryById"
+      | "getMemoryHistoryByFact"
+      | "getMemoryDiff"
+    >;
     recallCache: typeof cache;
   };
   internals.store = store;
@@ -85,5 +108,17 @@ describe("MemoGrafter lifecycle APIs", () => {
 
     expect(cache.keys).not.toHaveBeenCalled();
     expect(cache.del).not.toHaveBeenCalled();
+  });
+
+  it("routes memory history and diff APIs to the store", async () => {
+    const { memo, store } = createMemo();
+
+    await memo.getMemoryHistory("memory-1", { sessionId: "session-1" });
+    await memo.getMemoryHistory("user", "location", { sessionId: "session-1" });
+    await memo.getMemoryDiff("memory-a", "memory-b");
+
+    expect(store.getMemoryHistoryById).toHaveBeenCalledWith("memory-1", { sessionId: "session-1" });
+    expect(store.getMemoryHistoryByFact).toHaveBeenCalledWith("user", "location", { sessionId: "session-1" });
+    expect(store.getMemoryDiff).toHaveBeenCalledWith("memory-a", "memory-b");
   });
 });

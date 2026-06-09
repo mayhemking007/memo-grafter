@@ -15,6 +15,9 @@ import type {
   IngestTextOptions,
   InjectionResult,
   LLMAdapter,
+  MemoryDiff,
+  MemoryHistoryOptions,
+  MemoryHistoryResult,
   MemoGrafterConfig,
   Message,
   TagFilterOptions,
@@ -164,6 +167,24 @@ export class MemoGrafter {
     const changed = await this.store.restoreTopic(topicId);
     if (changed) await this.clearRecallCache();
     return changed;
+  }
+
+  getMemoryHistory(memoryId: string, options?: MemoryHistoryOptions): Promise<MemoryHistoryResult>;
+  getMemoryHistory(subject: string, predicate: string, options?: MemoryHistoryOptions): Promise<MemoryHistoryResult>;
+  getMemoryHistory(
+    memoryIdOrSubject: string,
+    predicateOrOptions?: string | MemoryHistoryOptions,
+    options: MemoryHistoryOptions = {},
+  ): Promise<MemoryHistoryResult> {
+    if (typeof predicateOrOptions === "string") {
+      return this.store.getMemoryHistoryByFact(memoryIdOrSubject, predicateOrOptions, options);
+    }
+
+    return this.store.getMemoryHistoryById(memoryIdOrSubject, predicateOrOptions ?? {});
+  }
+
+  getMemoryDiff(fromMemoryId: string, toMemoryId: string): Promise<MemoryDiff> {
+    return this.store.getMemoryDiff(fromMemoryId, toMemoryId);
   }
 
   async graftByRelevance(

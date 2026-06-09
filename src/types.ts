@@ -84,6 +84,55 @@ export interface MemoryEdge {
   createdAt: Date;
 }
 
+export type MemoryHistoryStatus = "active" | "superseded" | "conflicting" | "decayed" | "forgotten";
+
+export interface MemoryHistoryEntry {
+  memory: MemoryNode;
+  versionIndex: number;
+  status: MemoryHistoryStatus;
+  supersedes: string[];
+  supersededBy: string | null;
+  conflictsWith: string[];
+  updateEdges: MemoryEdge[];
+  conflictEdges: MemoryEdge[];
+  createdAt: Date;
+}
+
+export interface MemoryHistoryResult {
+  anchorMemoryId?: string;
+  subject?: string;
+  predicate?: string;
+  sessionId?: string;
+  entries: MemoryHistoryEntry[];
+  edges: MemoryEdge[];
+  currentMemory: MemoryNode | null;
+}
+
+export interface MemoryHistoryOptions {
+  sessionId?: string;
+}
+
+export interface MemoryDiffField {
+  field: keyof MemoryNode;
+  from: unknown;
+  to: unknown;
+  changed: boolean;
+}
+
+export interface MemoryDiff {
+  from: MemoryNode;
+  to: MemoryNode;
+  fields: MemoryDiffField[];
+  changedFields: MemoryDiffField[];
+  relationship: {
+    supersedes: boolean;
+    supersededBy: boolean;
+    conflicts: boolean;
+    updateEdges: MemoryEdge[];
+    conflictEdges: MemoryEdge[];
+  };
+}
+
 export interface ExtractedMemory {
   memoryType: MemoryType;
   subject: string;

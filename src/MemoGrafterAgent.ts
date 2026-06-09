@@ -8,6 +8,8 @@ import type {
   GraphSnapshot,
   InjectionResult,
   IngestTextOptions,
+  MemoryDiff,
+  MemoryHistoryResult,
   MemoGrafterConfig,
   Message,
   RetrievalResult,
@@ -187,6 +189,22 @@ export class MemoGrafterAgent {
   async restoreTopic(topicId: string): Promise<boolean> {
     await this.pendingIngest;
     return this.core.restoreTopic(topicId);
+  }
+
+  async getMemoryHistory(memoryId: string): Promise<MemoryHistoryResult>;
+  async getMemoryHistory(subject: string, predicate: string): Promise<MemoryHistoryResult>;
+  async getMemoryHistory(memoryIdOrSubject: string, predicate?: string): Promise<MemoryHistoryResult> {
+    await this.pendingIngest;
+    if (predicate) {
+      return this.core.getMemoryHistory(memoryIdOrSubject, predicate, { sessionId: this.sessionId });
+    }
+
+    return this.core.getMemoryHistory(memoryIdOrSubject, { sessionId: this.sessionId });
+  }
+
+  async getMemoryDiff(fromMemoryId: string, toMemoryId: string): Promise<MemoryDiff> {
+    await this.pendingIngest;
+    return this.core.getMemoryDiff(fromMemoryId, toMemoryId);
   }
 
   async clearSession(): Promise<void> {

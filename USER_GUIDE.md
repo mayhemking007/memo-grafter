@@ -391,6 +391,64 @@ await memo.suppressTopic(topicId);
 await memo.restoreTopic(topicId);
 ```
 
+### Memory History And Diff
+
+Use memory history APIs when your application needs audit trails, explainability, or debugging for facts that changed over time.
+
+Look up history from a specific memory node:
+
+```ts
+const history = await agent.getMemoryHistory(memoryId);
+
+for (const entry of history.entries) {
+  console.log(entry.versionIndex);
+  console.log(entry.status);
+  console.log(entry.memory.value);
+  console.log(entry.supersededBy);
+  console.log(entry.supersedes);
+  console.log(entry.conflictsWith);
+}
+
+console.log(history.currentMemory);
+```
+
+Look up history by fact key:
+
+```ts
+const history = await agent.getMemoryHistory("user", "location");
+```
+
+`MemoGrafterAgent` scopes history lookups to the current session. If you manage sessions yourself with `MemoGrafter`, pass the session explicitly:
+
+```ts
+const history = await memo.getMemoryHistory("user", "location", {
+  sessionId,
+});
+```
+
+Compare two memory versions:
+
+```ts
+const diff = await agent.getMemoryDiff(oldMemoryId, newMemoryId);
+
+console.log(diff.changedFields);
+console.log(diff.relationship.supersededBy);
+console.log(diff.relationship.updateEdges);
+console.log(diff.relationship.conflictEdges);
+```
+
+History results are read-only and derived from existing memory rows plus `supersededBy`, `updates`, and `conflicts` metadata. They intentionally include superseded, decayed, forgotten, and suppressed-topic memories, even though those rows are excluded from normal recall and grafting.
+
+`MemoryHistoryEntry.status` is one of:
+
+- `"active"`: not superseded, decayed, forgotten, or conflicting.
+- `"superseded"`: the memory has `supersededBy` set.
+- `"conflicting"`: the memory has `hasConflict` or a `conflicts` edge.
+- `"decayed"`: crawler decay marked the memory stale.
+- `"forgotten"`: an application explicitly forgot the memory.
+
+`getMemoryDiff()` is structural. It compares stored fields such as `value`, `confidence`, lifecycle flags, tags, source metadata, and timestamps. It does not call an LLM or generate prose explanations.
+
 ### Session Tags
 
 Use session tags when you want to organize memory by project, planning area, week, domain, or worker route.
@@ -1096,6 +1154,12 @@ Run the memory lifecycle smoke with a real PostgreSQL database and `OPENAI_API_K
 npx tsx --env-file=.env ./tests/manual/graft/memory-lifecycle-smoke.ts
 ```
 
+Run the memory history smoke with a real PostgreSQL database:
+
+```powershell
+npx tsx --env-file=.env ./tests/manual/graft/memory-history-smoke.ts
+```
+
 Use the forward-slash path in PowerShell. An unquoted backslash path can be collapsed before `tsx` receives it.
 
 The smoke creates two tagged sessions, writes one memory into each, verifies current-session tag filtering with `getActiveNodes()`, and verifies cross-session project recall with `recall(..., { scope: "tagged" })`. If you run it repeatedly against the same database, tagged recall can return rows from previous smoke runs because those historical sessions are still present.
@@ -1524,6 +1588,9 @@ Useful `GraphStore` inspection methods:
 - `forgetMemories(memoryIds)`
 - `suppressTopic(topicId)`
 - `restoreTopic(topicId)`
+- `getMemoryHistoryById(memoryId, options?)`
+- `getMemoryHistoryByFact(subject, predicate, options?)`
+- `getMemoryDiff(fromMemoryId, toMemoryId)`
 
 Common `MemoGrafterAgent` methods:
 
@@ -1543,6 +1610,9 @@ Common `MemoGrafterAgent` methods:
 - `forgetMany(memoryIds)`: soft-forget several memory nodes and return the number changed.
 - `suppressTopic(topicId)`: hide a topic from active reads, recall, grafting, absorption, and crawler maintenance.
 - `restoreTopic(topicId)`: make a suppressed topic active again.
+- `getMemoryHistory(memoryId)`: inspect the current session lineage for a specific memory.
+- `getMemoryHistory(subject, predicate)`: inspect the current session lineage for a fact key.
+- `getMemoryDiff(fromMemoryId, toMemoryId)`: compare two memory versions and their maintenance relationship.
 - `recall(query, options?)`: retrieve structured memory by semantic query, optionally filtered by tags.
 - `graft(topicIds?)`: preview memory injection.
 - `graftByRelevance(query, options?)`: preview memory injection selected by semantic topic-node relevance.
