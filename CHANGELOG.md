@@ -99,3 +99,11 @@ All notable changes to this project will be documented here.
 - Added `graftByRelevance()` for semantic selective grafting without requiring explicit topic node IDs.
 - Added configurable graft selection controls including relevance-based seed node discovery, similarity filtering, and graph expansion options.
 - Added streaming support to `OpenAIAdapter` with optional token callbacks for real-time response generation.
+
+## [0.2.8] - 2026-06-09
+
+### Added
+
+- Added `getMemoryHistory()` API to inspect memory evolution, supersession chains, and historical fact updates.
+- Added manual memory pruning APIs for explicit memory removal and suppression.
+- Added graph-level support for reviewing active, superseded, and historical memory states.
