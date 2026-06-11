@@ -20,6 +20,7 @@ export type {
   DriftSensitivity,
   EmbedAdapter,
   ExtractedMemory,
+  FleetMemoryMode,
   GraftOrigin,
   GraftByRelevanceOptions,
   GraftExpansionStrategy,
@@ -60,9 +61,13 @@ export type {
   ConductorGraftOptions,
   FleetAbsorbOptions,
   FleetAgentInfo,
+  FleetGraftByRelevanceOptions,
   FleetGraph,
+  FleetMemoryOptions,
+  FleetRetrievalOptions,
   FleetWorker,
   MemoGrafterFleetOptions,
+  SharedMemorySnapshot,
   WorkerAgentConfig,
 } from "./fleet/types.js";
 export type {

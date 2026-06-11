@@ -1,10 +1,16 @@
 import type {
   AbsorbFromAgentOptions,
   GraftByRelevanceOptions,
+  FleetMemoryMode,
   InjectionResult,
+  IngestTextOptions,
+  MemoryNode,
   MemoGrafterConfig,
   Message,
+  RetrievalResult,
+  RetrieverConfig,
   TopicNode,
+  TopicSegment,
 } from "../types.js";
 
 export interface FleetGraph {
@@ -22,12 +28,34 @@ export interface FleetAgentInfo {
 export interface MemoGrafterFleetOptions {
   id?: string;
   name?: string;
+  defaultWorkerMemory?: FleetMemoryMode;
 }
 
 export interface WorkerAgentConfig {
   color: string;
   sessionId?: string;
   id?: string;
+  memory?: FleetMemoryMode;
+}
+
+export interface FleetMemoryOptions extends IngestTextOptions {
+  tags?: string[];
+  replace?: boolean;
+}
+
+export interface SharedMemorySnapshot {
+  sessionId: string;
+  nodes: TopicNode[];
+  segments: TopicSegment[];
+  memories: MemoryNode[];
+}
+
+export interface FleetRetrievalOptions extends RetrieverConfig {
+  memory?: FleetMemoryMode;
+}
+
+export interface FleetGraftByRelevanceOptions extends GraftByRelevanceOptions {
+  memory?: FleetMemoryMode;
 }
 
 export interface ConductorGraftOptions {
@@ -47,7 +75,8 @@ export interface FleetWorker {
   getHistory(): Message[];
   getActiveNodes(): Promise<TopicNode[]>;
   graft(topicIds?: string[]): Promise<InjectionResult>;
-  graftByRelevance(query: string, options?: GraftByRelevanceOptions): Promise<InjectionResult>;
+  graftByRelevance(query: string, options?: FleetGraftByRelevanceOptions): Promise<InjectionResult>;
+  recall(query: string, options?: FleetRetrievalOptions): Promise<RetrievalResult>;
 }
 
 export type { MemoGrafterConfig };

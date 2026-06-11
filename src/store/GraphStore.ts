@@ -71,11 +71,23 @@ export interface GraphStore {
     minSimilarity: number,
     options?: TagFilterOptions,
   ): Promise<(MemoryNode & { similarity: number })[]>;
+  searchMemoriesAcrossSessions(
+    embedding: number[],
+    sessionIds: string[],
+    limit: number,
+    minSimilarity: number,
+    options?: TagFilterOptions,
+  ): Promise<(MemoryNode & { similarity: number })[]>;
   buildMemoryEdges(topicNodeId: string, sessionId: string, threshold: number): Promise<void>;
   getTopKSimilar(nodeId: string, embedding: number[], sessionId: string, k: number): Promise<TopicNode[]>;
   getSimilarNodes(
     embedding: number[],
     sessionId: string,
+    options?: { k?: number; excludeNodeId?: string; minSimilarity?: number },
+  ): Promise<TopicNode[]>;
+  getSimilarNodesAcrossSessions(
+    embedding: number[],
+    sessionIds: string[],
     options?: { k?: number; excludeNodeId?: string; minSimilarity?: number },
   ): Promise<TopicNode[]>;
   getSimilarNodesAcrossFleet(
