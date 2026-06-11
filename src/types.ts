@@ -199,6 +199,7 @@ export interface RetrieverConfig {
   tags?: string[];
   tagMode?: "all" | "any";
   scope?: "session" | "session-and-tags" | "tagged";
+  sessionIds?: string[];
   scoring?: {
     /** Default 0.7. Weight applied to semantic similarity when ranking retrieved facts. */
     similarityWeight?: number;
@@ -214,6 +215,7 @@ export interface TagFilterOptions {
   tags?: string[];
   tagMode?: "all" | "any";
   scope?: "session" | "session-and-tags" | "tagged";
+  sessionIds?: string[];
   includeSuppressed?: boolean;
   includeForgotten?: boolean;
 }
@@ -252,12 +254,14 @@ export interface AbsorbFromAgentOptions {
 }
 
 export type GraftExpansionStrategy = "none" | "graph";
+export type FleetMemoryMode = "local" | "fleet" | "both";
 
 export interface GraftByRelevanceOptions {
   topK?: number;
   minSimilarity?: number;
   hopDepth?: number;
   expansionStrategy?: GraftExpansionStrategy;
+  sessionIds?: string[];
 }
 
 export interface LLMAdapter {

@@ -971,6 +971,10 @@ export class PostgresGraphStore implements GraphStore {
     minSimilarity: number,
     options: TagFilterOptions = {},
   ): Promise<(MemoryNode & { similarity: number })[]> {
+    if (options.sessionIds && options.sessionIds.length > 0) {
+      return this.searchMemoriesAcrossSessions(embedding, options.sessionIds, limit, minSimilarity, options);
+    }
+
     const tags = normalizeTags(options.tags);
     const searchTaggedSessions = options.scope === "tagged" && tags.length > 0;
     const rows = await this.sql<Array<MemoryNodeRow & { similarity: number }>>`
@@ -978,6 +982,37 @@ export class PostgresGraphStore implements GraphStore {
       FROM mg_memory_nodes memory
       JOIN mg_topic_nodes topic ON topic.id = memory.topic_node_id
       WHERE ${searchTaggedSessions ? this.sql`TRUE` : this.sql`memory.session_id = ${sessionId}`}
+        AND memory.decayed = false
+        AND memory.superseded_by IS NULL
+        AND memory.forgotten = false
+        AND topic.suppressed = false
+        ${this.memoryTagsFilterSql(tags, options.tagMode, "memory")}
+        AND 1 - (memory.embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${minSimilarity}
+      ORDER BY similarity DESC
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      ...this.rowToMemoryNode(row),
+      similarity: row.similarity,
+    }));
+  }
+
+  async searchMemoriesAcrossSessions(
+    embedding: number[],
+    sessionIds: string[],
+    limit: number,
+    minSimilarity: number,
+    options: TagFilterOptions = {},
+  ): Promise<(MemoryNode & { similarity: number })[]> {
+    if (sessionIds.length === 0) return [];
+
+    const tags = normalizeTags(options.tags);
+    const rows = await this.sql<Array<MemoryNodeRow & { similarity: number }>>`
+      SELECT memory.*, 1 - (memory.embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
+      FROM mg_memory_nodes memory
+      JOIN mg_topic_nodes topic ON topic.id = memory.topic_node_id
+      WHERE memory.session_id = ANY(${this.sql.array(sessionIds)})
         AND memory.decayed = false
         AND memory.superseded_by IS NULL
         AND memory.forgotten = false
@@ -1043,6 +1078,27 @@ export class PostgresGraphStore implements GraphStore {
       SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
       FROM mg_topic_nodes
       WHERE session_id = ${sessionId}
+        AND suppressed = FALSE
+        ${options.excludeNodeId ? this.sql`AND id != ${options.excludeNodeId}` : this.sql``}
+        ${options.minSimilarity === undefined ? this.sql`` : this.sql`AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${options.minSimilarity}`}
+      ORDER BY embedding <=> ${toVectorLiteral(embedding)}::vector ASC
+      LIMIT ${options.k ?? 5}
+    `;
+
+    return rows.map((row) => this.rowToNode(row));
+  }
+
+  async getSimilarNodesAcrossSessions(
+    embedding: number[],
+    sessionIds: string[],
+    options: { k?: number; excludeNodeId?: string; minSimilarity?: number } = {},
+  ): Promise<TopicNode[]> {
+    if (sessionIds.length === 0) return [];
+
+    const rows = await this.sql<TopicNodeRow[]>`
+      SELECT *, 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) AS similarity
+      FROM mg_topic_nodes
+      WHERE session_id = ANY(${this.sql.array(sessionIds)})
         AND suppressed = FALSE
         ${options.excludeNodeId ? this.sql`AND id != ${options.excludeNodeId}` : this.sql``}
         ${options.minSimilarity === undefined ? this.sql`` : this.sql`AND 1 - (embedding <=> ${toVectorLiteral(embedding)}::vector) >= ${options.minSimilarity}`}
@@ -1139,6 +1195,15 @@ export class PostgresGraphStore implements GraphStore {
   }): Promise<void> {
     await this.sql`
       UPDATE mg_topic_nodes
+      SET
+        fleet_id = ${metadata.fleetId},
+        agent_id = ${metadata.agentId},
+        agent_color = ${metadata.agentColor}
+      WHERE session_id = ${sessionId}
+    `;
+
+    await this.sql`
+      UPDATE mg_memory_nodes
       SET
         fleet_id = ${metadata.fleetId},
         agent_id = ${metadata.agentId},

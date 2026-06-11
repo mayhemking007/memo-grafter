@@ -1364,6 +1364,63 @@ await fleet.close();
 
 The worker color `conductor` is reserved.
 
+### Shared fleet memory
+
+Fleet memory is a shared parent scope for every worker in a fleet. Use it for
+common knowledge such as product docs, company policies, operating procedures,
+or global application context.
+
+```ts
+await fleet.ingestToFleet(
+  "Refund policy: customers can request a refund within 30 days.",
+  {
+    tags: ["policy"],
+    source: "support-handbook",
+  }
+);
+
+const shared = await fleet.getSharedMemory();
+console.log(shared.memories);
+
+const recall = await fleet.recallFromFleet("refund policy");
+console.log(recall.facts);
+```
+
+Workers keep their own session memory. When a worker should also inherit fleet
+knowledge, configure its memory mode:
+
+```ts
+const support = await fleet.createWorker({
+  color: "support",
+  memory: "both",
+});
+
+await support.invoke("What is the refund window?");
+```
+
+Worker retrieval and relevance grafting can also choose the scope per call:
+
+```ts
+await support.recall("refund policy", {
+  memory: "fleet",
+});
+
+await support.graftByRelevance("refund policy", {
+  memory: "both",
+  minSimilarity: 0.55,
+});
+```
+
+Memory modes:
+
+- `"local"`: only the worker session memory.
+- `"fleet"`: only the shared fleet memory.
+- `"both"`: worker session memory plus shared fleet memory.
+
+The default worker mode is `"local"` for compatibility. You can set
+`defaultWorkerMemory: "both"` when creating the fleet if all workers should
+inherit shared fleet memory unless overridden.
+
 Prompt-guided fleet grafting:
 
 ```ts

@@ -193,10 +193,19 @@ export class MemoGrafter {
     options: GraftByRelevanceOptions = {},
   ): Promise<InjectionResult> {
     const embedding = await this.embedder.embed(query);
-    const seedNodes = await this.store.getSimilarNodes(embedding, sessionId, {
-      k: options.topK ?? this.graphTopK,
-      minSimilarity: options.minSimilarity ?? 0.6,
-    });
+    const configuredSessionIds = options.sessionIds?.filter(Boolean) ?? [];
+    const sessionIds = this.resolveSessionIds(sessionId, configuredSessionIds);
+    const useConfiguredSessions = configuredSessionIds.length > 0
+      && (sessionIds.length > 1 || sessionIds[0] !== sessionId);
+    const seedNodes = useConfiguredSessions
+      ? await this.store.getSimilarNodesAcrossSessions(embedding, sessionIds, {
+        k: options.topK ?? this.graphTopK,
+        minSimilarity: options.minSimilarity ?? 0.6,
+      })
+      : await this.store.getSimilarNodes(embedding, sessionId, {
+        k: options.topK ?? this.graphTopK,
+        minSimilarity: options.minSimilarity ?? 0.6,
+      });
 
     if (seedNodes.length === 0) {
       return { systemPrompt: "", nodes: [], tokenCount: 0 };
@@ -208,6 +217,7 @@ export class MemoGrafter {
       {
         hopDepth: options.hopDepth ?? this.graphHopDepth,
         expansionStrategy: options.expansionStrategy ?? "graph",
+        ...(configuredSessionIds.length > 0 ? { sessionIds } : {}),
       },
     );
   }
@@ -288,5 +298,10 @@ export class MemoGrafter {
     } catch (error: unknown) {
       console.warn("MemoGrafter recall cache invalidation warning:", error);
     }
+  }
+
+  private resolveSessionIds(sessionId: string, configured?: string[]): string[] {
+    const sessionIds = configured && configured.length > 0 ? configured : [sessionId];
+    return [...new Set(sessionIds)];
   }
 }

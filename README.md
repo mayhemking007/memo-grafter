@@ -74,6 +74,26 @@ console.log(recall.facts);
 await agent.close();
 ```
 
+## Shared Fleet Memory
+
+Fleets can store common knowledge once and make it available to workers without
+copying it into each worker session.
+
+```ts
+const fleet = new MemoGrafterFleet(config, {
+  id: "support-fleet",
+  defaultWorkerMemory: "both",
+});
+
+await fleet.initialize();
+await fleet.ingestToFleet("Refund policy: customers can request a refund within 30 days.");
+
+const support = await fleet.createWorker({ color: "support" });
+const recall = await support.recall("refund policy", { memory: "both" });
+
+console.log(recall.facts);
+```
+
 ## Learn More
 
 - [USER_GUIDE.md](https://github.com/mayhemking007/memo-grafter/blob/main/USER_GUIDE.md) covers setup, configuration, adapters, queue mode, fleet APIs, examples, and troubleshooting.

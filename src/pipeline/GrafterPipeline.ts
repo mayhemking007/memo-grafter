@@ -6,6 +6,7 @@ import { countApproxTokens } from "../utils/text/tokenCount.js";
 export interface GrafterPipelineRunOptions {
   hopDepth?: number;
   expansionStrategy?: GraftExpansionStrategy;
+  sessionIds?: string[];
 }
 
 export class GrafterPipeline {
@@ -26,21 +27,31 @@ export class GrafterPipeline {
     }
 
     const hopDepth = options.expansionStrategy === "none" ? 0 : options.hopDepth ?? this.config.hopDepth;
-    const neighbourhood = await this.store.getNeighbours(topicIds, hopDepth, sessionId);
+    const sessionIds = this.resolveSessionIds(sessionId, options.sessionIds);
+    const useConfiguredSessions = sessionIds.length > 1 || sessionIds[0] !== sessionId;
+    const neighbourhood = await this.store.getNeighbours(
+      topicIds,
+      hopDepth,
+      useConfiguredSessions ? undefined : sessionId,
+    );
+    const allowedSessions = new Set(sessionIds);
     const nodes = neighbourhood
+      .filter((node) => allowedSessions.has(node.sessionId))
       .filter((node) => !node.suppressed)
       .sort((a, b) =>
+        a.sessionId.localeCompare(b.sessionId)
+        ||
         a.messageRange[0] - b.messageRange[0]
         || a.messageRange[1] - b.messageRange[1]
         || a.topicOrder - b.topicOrder
       );
     const fittedNodes = [...nodes];
-    let systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
+    let systemPrompt = await this.assemblePrompt(fittedNodes);
     let tokenCount = countApproxTokens(systemPrompt);
 
     while (tokenCount > this.config.tokenBudget && fittedNodes.length > 0) {
       fittedNodes.pop();
-      systemPrompt = await this.assemblePrompt(sessionId, fittedNodes);
+      systemPrompt = await this.assemblePrompt(fittedNodes);
       tokenCount = countApproxTokens(systemPrompt);
     }
 
@@ -51,17 +62,30 @@ export class GrafterPipeline {
     };
   }
 
-  private async assemblePrompt(sessionId: string, nodes: TopicNode[]): Promise<string> {
+  private async assemblePrompt(nodes: TopicNode[]): Promise<string> {
     if (nodes.length === 0) return "";
 
     const blocks: string[] = [];
-    const sessionMemories = (await this.store.getMemoriesBySession(sessionId))
-      .filter((memory) => !memory.forgotten);
-    const visibleMemoryIds = new Set(sessionMemories.map((memory) => memory.id));
-    const memoryEdges = (await this.store.getMemoryEdgesBySession(sessionId))
-      .filter((edge) => visibleMemoryIds.has(edge.sourceId) && visibleMemoryIds.has(edge.targetId));
+    const memoryBySession = new Map<string, MemoryNode[]>();
+    const edgeBySession = new Map<string, MemoryEdge[]>();
 
     for (const node of nodes) {
+      const sessionId = node.sessionId;
+      let sessionMemories = memoryBySession.get(sessionId);
+      if (!sessionMemories) {
+        sessionMemories = (await this.store.getMemoriesBySession(sessionId))
+          .filter((memory) => !memory.forgotten);
+        memoryBySession.set(sessionId, sessionMemories);
+      }
+
+      let memoryEdges = edgeBySession.get(sessionId);
+      if (!memoryEdges) {
+        const visibleMemoryIds = new Set(sessionMemories.map((memory) => memory.id));
+        memoryEdges = (await this.store.getMemoryEdgesBySession(sessionId))
+          .filter((edge) => visibleMemoryIds.has(edge.sourceId) && visibleMemoryIds.has(edge.targetId));
+        edgeBySession.set(sessionId, memoryEdges);
+      }
+
       const start = Math.max(0, node.messageRange[0] - this.config.bufferSize);
       const end = node.messageRange[1] + this.config.bufferSize;
       const messages = await this.store.getBufferMessages(sessionId, start, end);
@@ -76,6 +100,10 @@ export class GrafterPipeline {
     return buildMemoryInjectionPrompt(blocks);
   }
 
+  private resolveSessionIds(sessionId: string, configured?: string[]): string[] {
+    const sessionIds = configured && configured.length > 0 ? configured : [sessionId];
+    return [...new Set(sessionIds)];
+  }
 }
 
 function buildMaintenancePromptContext(

@@ -47,38 +47,76 @@ export class FakeLLMAdapter implements LLMAdapter {
   private extractMemory(prompt: string): string {
     const text = prompt.toLowerCase();
     if (text.includes("japan")) {
-      return [
-        "LABEL: Japan Travel",
-        "USER_INTENT: The user wanted help planning a Japan trip.",
-        "OUTCOME: The assistant provided Japan travel guidance.",
-        "OPEN: None",
-      ].join("\n");
+      return JSON.stringify({
+        label: "Japan Travel",
+        user_intent: "The user wanted help planning a Japan trip.",
+        outcome: "The assistant provided Japan travel guidance.",
+        open: null,
+        memories: [{
+          memory_type: "fact",
+          subject: "Japan trip",
+          predicate: "preference",
+          value: "The user is planning Japan travel and cares about Japan guidance.",
+          confidence: 0.9,
+        }],
+      });
     }
 
     if (text.includes("cover letter")) {
-      return [
-        "LABEL: Cover Letter",
-        "USER_INTENT: The user wanted help writing a software cover letter.",
-        "OUTCOME: The assistant provided cover letter guidance.",
-        "OPEN: None",
-      ].join("\n");
+      return JSON.stringify({
+        label: "Cover Letter",
+        user_intent: "The user wanted help writing a software cover letter.",
+        outcome: "The assistant provided cover letter guidance.",
+        open: null,
+        memories: [{
+          memory_type: "fact",
+          subject: "Cover letter",
+          predicate: "goal",
+          value: "The user wants help writing a software cover letter.",
+          confidence: 0.9,
+        }],
+      });
     }
 
     if (text.includes("butter chicken")) {
-      return [
-        "LABEL: Butter Chicken",
-        "USER_INTENT: The user wanted cooking substitutions.",
-        "OUTCOME: The assistant suggested recipe alternatives.",
-        "OPEN: None",
-      ].join("\n");
+      return JSON.stringify({
+        label: "Butter Chicken",
+        user_intent: "The user wanted cooking substitutions.",
+        outcome: "The assistant suggested recipe alternatives.",
+        open: null,
+        memories: [{
+          memory_type: "fact",
+          subject: "Butter chicken",
+          predicate: "preference",
+          value: "The user wants butter chicken substitutions.",
+          confidence: 0.9,
+        }],
+      });
     }
 
-    return [
-      "LABEL: General Topic",
-      "USER_INTENT: The user wanted general assistance.",
-      "OUTCOME: The assistant provided a response.",
-      "OPEN: None",
-    ].join("\n");
+    if (text.includes("refund") || text.includes("policy")) {
+      return JSON.stringify({
+        label: "Refund Policy",
+        user_intent: "The user provided shared refund policy knowledge.",
+        outcome: "The assistant stored the shared refund policy.",
+        open: null,
+        memories: [{
+          memory_type: "fact",
+          subject: "Refund policy",
+          predicate: "window",
+          value: "Customers can request a refund within 30 days.",
+          confidence: 0.95,
+        }],
+      });
+    }
+
+    return JSON.stringify({
+      label: "General Topic",
+      user_intent: "The user wanted general assistance.",
+      outcome: "The assistant provided a response.",
+      open: null,
+      memories: [],
+    });
   }
 }
 
@@ -87,7 +125,9 @@ export class FakeEmbedAdapter implements EmbedAdapter {
     const vector = new Array<number>(1536).fill(0);
     const normalized = text.toLowerCase();
 
-    if (normalized.includes("japan") || normalized.includes("travel")) {
+    if (normalized.includes("refund") || normalized.includes("policy")) {
+      vector[4] = 1;
+    } else if (normalized.includes("japan") || normalized.includes("travel")) {
       vector[0] = 1;
     } else if (normalized.includes("cover") || normalized.includes("letter")) {
       vector[1] = 1;

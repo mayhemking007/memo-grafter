@@ -47,12 +47,16 @@ export class RetrieverPipeline {
     const scope = this.config.scope === "tagged" && tags.length > 0
       ? "tagged"
       : this.config.scope ?? (tags.length > 0 ? "session-and-tags" : "session");
+    const configuredSessionIds = this.config.sessionIds?.filter(Boolean) ?? [];
+    const sessionIds = this.resolveSessionIds(sessionId);
+    const hasConfiguredSessionIds = configuredSessionIds.length > 0;
 
     const embedding = await this.embedder.embed(query);
     const searchedFacts = await this.searchMemories(embedding, sessionId, limit, minSimilarity, {
       tags,
       tagMode,
       scope,
+      ...(hasConfiguredSessionIds ? { sessionIds } : {}),
     });
     const activeFacts = searchedFacts
       .filter((fact) => fact.decayed === false && fact.supersededBy == null && !fact.forgotten)
@@ -68,7 +72,12 @@ export class RetrieverPipeline {
       };
     }
 
-    const rankedBlocks = (await this.buildBlocks(activeFacts, sessionId, scope))
+    const rankedBlocks = (await this.buildBlocks(
+      activeFacts,
+      sessionId,
+      scope,
+      hasConfiguredSessionIds && (sessionIds.length > 1 || sessionIds[0] !== sessionId),
+    ))
       .sort((a, b) => b.score - a.score);
     const includedBlocks: string[] = [];
     const facts: ScoredMemoryNode[] = [];
@@ -102,7 +111,12 @@ export class RetrieverPipeline {
     sessionId: string,
     limit: number,
     minSimilarity: number,
-    options: { tags?: string[]; tagMode?: "all" | "any"; scope?: "session" | "session-and-tags" | "tagged" },
+    options: {
+      tags?: string[];
+      tagMode?: "all" | "any";
+      scope?: "session" | "session-and-tags" | "tagged";
+      sessionIds?: string[];
+    },
   ): Promise<ScoredMemoryNode[]> {
     if (!this.config.cache || !this.cacheRedis) {
       return this.store.searchMemories(
@@ -121,6 +135,7 @@ export class RetrieverPipeline {
       limit,
       minSimilarity,
       options.scope ?? "session",
+      (this.config.sessionIds ?? []).join(","),
       options.tagMode ?? "all",
       (options.tags ?? []).join(","),
       this.hashEmbedding(embedding),
@@ -164,6 +179,7 @@ export class RetrieverPipeline {
     facts: RankedMemoryNode[],
     sessionId: string,
     scope: "session" | "session-and-tags" | "tagged",
+    useFactSession: boolean,
   ): Promise<RetrievedBlock[]> {
     const factsByTopic = new Map<string, RankedMemoryNode[]>();
 
@@ -176,7 +192,7 @@ export class RetrieverPipeline {
     const blocks: RetrievedBlock[] = [];
 
     for (const [topicNodeId, topicFacts] of factsByTopic) {
-      const parentSessionId = scope === "tagged" ? topicFacts[0]?.sessionId : sessionId;
+      const parentSessionId = scope === "tagged" || useFactSession ? topicFacts[0]?.sessionId : sessionId;
       const parentNode = await this.store.getTopicNode(topicNodeId, parentSessionId);
 
       if (!parentNode || parentNode.suppressed) {
@@ -212,5 +228,11 @@ export class RetrieverPipeline {
   private clampScore(value: number): number {
     if (!Number.isFinite(value)) return 0;
     return Math.min(Math.max(value, 0), 1);
+  }
+
+  private resolveSessionIds(sessionId: string): string[] {
+    const configured = this.config.sessionIds?.filter(Boolean) ?? [];
+    if (configured.length === 0) return [sessionId];
+    return [...new Set(configured)];
   }
 }
