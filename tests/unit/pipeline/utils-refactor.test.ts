@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DriftSegment } from "../../../src/pipeline/TopicDriftDetector.js";
-import type { Message, TopicNode } from "../../../src/types.js";
+import type { DriftSegment } from "../../../src/ingestion/conversation/TopicDriftDetector.js";
+import type { Message, TopicNode } from "../../../src/core/types.js";
 import {
   resetDriftThresholdWarningForTests,
   resolveDriftThreshold,

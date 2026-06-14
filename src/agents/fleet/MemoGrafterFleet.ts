@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { MemoGrafter } from "../MemoGrafter.js";
-import { RetrieverPipeline } from "../pipeline/RetrieverPipeline.js";
-import type { FleetMemoryMode, MemoGrafterConfig } from "../types.js";
+import { MemoGrafter } from "../../core/MemoGrafter.js";
+import { RetrieverPipeline } from "../../retrieval/RetrieverPipeline.js";
+import type { FleetMemoryMode, MemoGrafterConfig } from "../../core/types.js";
 import { ConductorAgent } from "./ConductorAgent.js";
 import { FleetStore } from "./FleetStore.js";
 import type {

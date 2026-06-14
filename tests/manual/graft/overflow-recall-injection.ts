@@ -15,6 +15,9 @@ type AgentInternals = {
   core: {
     enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
     getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }>;
+    store: {
+      getSessionNodeCount(sessionId: string): Promise<number>;
+    };
   };
   recall(query: string, options?: RetrieverConfig): Promise<RetrievalResult>;
 };
@@ -42,6 +45,8 @@ function createAgent(llm: CapturingLLMAdapter): MemoGrafterAgent {
     inject: {
       tokenBudget: 20,
       recentWindowSize: 2,
+      recallLimit: 5,
+      recallMinSimilarity: 0.65,
     },
   };
 
@@ -50,7 +55,31 @@ function createAgent(llm: CapturingLLMAdapter): MemoGrafterAgent {
 
 function retrievalResult(systemPrompt: string): RetrievalResult {
   return {
-    facts: [],
+    facts: [
+      {
+        id: "overflow-recall-memory",
+        segmentId: "overflow-recall-segment",
+        topicNodeId: "overflow-recall-topic",
+        agentId: null,
+        sessionId: "overflow-recall-session",
+        memoryType: "fact",
+        sourceType: "conversation",
+        subject: "user",
+        predicate: "prefers",
+        value: "compact recall blocks",
+        confidence: 1,
+        embedding: [0.1, 0.2, 0.3],
+        sourceUrl: null,
+        sourceTitle: null,
+        supersededBy: null,
+        decayed: false,
+        hasConflict: false,
+        agentColor: null,
+        fleetId: null,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        similarity: 1,
+      },
+    ],
     nodes: [],
     systemPrompt,
     tokenCount: Math.ceil(systemPrompt.length / 4),
@@ -63,6 +92,7 @@ const privateAgent = agent as unknown as AgentInternals;
 const recallCalls: Array<{ query: string; options: RetrieverConfig }> = [];
 
 privateAgent.core.enqueueIngest = async () => undefined;
+privateAgent.core.store.getSessionNodeCount = async () => 1;
 privateAgent.core.getTopics = async () => {
   throw new Error("getTopics should not be called during overflow recall injection");
 };
@@ -76,15 +106,17 @@ await agent.invoke("Ask a follow-up that should keep only the recent window. " +
 
 const lastCall = llm.calls.at(-1);
 assert.ok(lastCall, "LLM should have been called");
-assert.equal(lastCall.messages.length, 3);
+assert.equal(lastCall.messages.length, 4);
 assert.deepEqual(lastCall.messages[0], {
   role: "system",
   content: "PINNED MEMORY: user prefers compact recall blocks",
 });
-assert.equal(lastCall.messages[1]?.role, "assistant");
-assert.equal(lastCall.messages[1]?.content, "Smoke response 1");
-assert.equal(lastCall.messages[2]?.role, "user");
-assert.match(lastCall.messages[2]?.content ?? "", /^Ask a follow-up/);
+assert.equal(lastCall.messages[1]?.role, "user");
+assert.match(lastCall.messages[1]?.content ?? "", /^Seed the conversation/);
+assert.equal(lastCall.messages[2]?.role, "assistant");
+assert.equal(lastCall.messages[2]?.content, "Smoke response 1");
+assert.equal(lastCall.messages[3]?.role, "user");
+assert.match(lastCall.messages[3]?.content ?? "", /^Ask a follow-up/);
 assert.equal(recallCalls.length, 2);
 assert.deepEqual(recallCalls.at(-1)?.options, { limit: 5, minSimilarity: 0.65 });
 

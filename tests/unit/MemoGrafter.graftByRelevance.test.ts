@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MemoGrafter } from "../../src/MemoGrafter.js";
+import { MemoGrafter } from "../../src/core/MemoGrafter.js";
 import type { EmbedAdapter, GraphStore, LLMAdapter, TopicNode } from "../../src/index.js";
 
 function makeTopicNode(id = "topic-1"): TopicNode {

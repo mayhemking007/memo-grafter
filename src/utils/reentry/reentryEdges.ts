@@ -1,4 +1,4 @@
-import type { Message, TopicEdge, TopicNode } from "../../types.js";
+import type { Message, TopicEdge, TopicNode } from "../../core/types.js";
 import { lexicalOverlap } from "../text/terms.js";
 import { segmentUserEmbeddings, maxPairwiseSimilarity } from "./reentrySimilarity.js";
 import { segmentHasReentryCue, segmentMeaningfulTerms } from "./reentryText.js";

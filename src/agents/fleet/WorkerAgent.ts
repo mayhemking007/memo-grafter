@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { MemoGrafter } from "../MemoGrafter.js";
-import { RetrieverPipeline } from "../pipeline/RetrieverPipeline.js";
+import type { MemoGrafter } from "../../core/MemoGrafter.js";
+import { RetrieverPipeline } from "../../retrieval/RetrieverPipeline.js";
 import type {
   FleetMemoryMode,
   InjectionResult,
@@ -8,7 +8,7 @@ import type {
   RetrievalResult,
   TopicNode,
   TopicSegment,
-} from "../types.js";
+} from "../../core/types.js";
 import type { FleetGraftByRelevanceOptions, FleetRetrievalOptions, WorkerAgentConfig } from "./types.js";
 
 export class WorkerAgent {

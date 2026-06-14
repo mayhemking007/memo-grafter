@@ -1,11 +1,11 @@
 import { Redis } from "ioredis";
-import { GrafterPipeline } from "./pipeline/GrafterPipeline.js";
-import { IngestPipeline } from "./pipeline/IngestPipeline.js";
-import { IngestQueue } from "./queue/IngestQueue.js";
-import { PostgresGraphStore } from "./store/index.js";
-import { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
-import type { MemoGrafterFleetOptions } from "./fleet/types.js";
-import type { GraphStore } from "./store/index.js";
+import { GrafterPipeline } from "../retrieval/GrafterPipeline.js";
+import { IngestPipeline } from "../ingestion/conversation/IngestPipeline.js";
+import { IngestQueue } from "../ingestion/IngestQueue.js";
+import { PostgresGraphStore } from "../store/index.js";
+import { MemoGrafterFleet } from "../agents/fleet/MemoGrafterFleet.js";
+import type { MemoGrafterFleetOptions } from "../agents/fleet/types.js";
+import type { GraphStore } from "../store/index.js";
 import type {
   AbsorbFromAgentOptions,
   EmbedAdapter,

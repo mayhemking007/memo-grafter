@@ -1,4 +1,4 @@
-import type { GraphStore } from "../store/index.js";
+import type { GraphStore } from "../../store/index.js";
 import type {
   DriftSensitivity,
   EmbedAdapter,
@@ -7,13 +7,13 @@ import type {
   MemoGrafterDriftConfig,
   Message,
   TopicNode,
-} from "../types.js";
-import { resolveAdaptiveDriftThreshold } from "../utils/drift/adaptiveDriftSensitivity.js";
-import { cosineSimilarity } from "../utils/drift/cosineSimilarity.js";
-import { resolveDriftThreshold } from "../utils/drift/driftThreshold.js";
-import { normalizeText } from "../utils/text/normalizeText.js";
-import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
-import { edgePairKey, findCurrentRunReentryEdges } from "../utils/reentry/reentryEdges.js";
+} from "../../core/types.js";
+import { resolveAdaptiveDriftThreshold } from "../../utils/drift/adaptiveDriftSensitivity.js";
+import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
+import { resolveDriftThreshold } from "../../utils/drift/driftThreshold.js";
+import { normalizeText } from "../../utils/text/normalizeText.js";
+import { splitTextForIngestion } from "../../utils/text/splitTextForIngestion.js";
+import { edgePairKey, findCurrentRunReentryEdges } from "../../utils/reentry/reentryEdges.js";
 import { SegmentProcessor } from "./SegmentProcessor.js";
 import { type DriftSegment, TopicDriftDetector } from "./TopicDriftDetector.js";
 

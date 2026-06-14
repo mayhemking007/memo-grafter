@@ -1,4 +1,4 @@
-import type { MemoryNode } from "../types.js";
+import type { MemoryNode } from "../core/types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

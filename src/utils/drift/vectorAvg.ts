@@ -1,4 +1,4 @@
-﻿export const avg = (vector: number[][]): number[] => {
+export const avg = (vector: number[][]): number[] => {
   const len = vector[0]!.length;
   const result = new Array<number>(len).fill(0);
 

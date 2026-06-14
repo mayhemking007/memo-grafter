@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
 import type {
   EmbedAdapter,
   IngestTextOptions,
   LLMAdapter,
   MemoGrafterConfig,
   Message,
-} from "../../../src/types.js";
+} from "../../../src/core/types.js";
 
 type AgentCore = {
   llm: LLMAdapter;

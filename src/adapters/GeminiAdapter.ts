@@ -1,5 +1,5 @@
 import { GoogleGenAI, type Content } from "@google/genai";
-import type { EmbedAdapter, LLMAdapter, Message } from "../types.js";
+import type { EmbedAdapter, LLMAdapter, Message } from "../core/types.js";
 
 const createGeminiClient = (): GoogleGenAI =>
   new GoogleGenAI(

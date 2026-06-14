@@ -3,7 +3,7 @@ import {
   buildFactRetrievalPrompt,
   formatFactBlock,
 } from "../../../src/prompts/factRetrievalPrompt.js";
-import type { MemoryNode, TopicNode } from "../../../src/types.js";
+import type { MemoryNode, TopicNode } from "../../../src/core/types.js";
 
 function makeMemoryNode(
   overrides: Partial<MemoryNode> &

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GrafterPipeline } from "../../../src/pipeline/GrafterPipeline.js";
-import type { MemoryEdge, MemoryNode, Message, TopicNode } from "../../../src/types.js";
+import { GrafterPipeline } from "../../../src/retrieval/GrafterPipeline.js";
+import type { MemoryEdge, MemoryNode, Message, TopicNode } from "../../../src/core/types.js";
 
 function makeTopicNode(overrides: Partial<TopicNode> = {}): TopicNode {
   return {

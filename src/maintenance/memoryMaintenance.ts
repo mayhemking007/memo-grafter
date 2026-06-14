@@ -1,4 +1,4 @@
-import type { MemoryNode } from "../types.js";
+import type { MemoryNode } from "../core/types.js";
 
 export interface MemoryConflictGroup {
   key: string;

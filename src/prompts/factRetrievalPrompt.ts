@@ -1,4 +1,4 @@
-import type { MemoryNode, TopicNode } from "../types.js";
+import type { MemoryNode, TopicNode } from "../core/types.js";
 
 const FACT_RETRIEVAL_SUBHEADER =
   "The following facts were retrieved from prior conversation memory. " +

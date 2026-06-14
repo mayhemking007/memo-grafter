@@ -1,4 +1,4 @@
-import type { DriftSensitivity } from "../../types.js";
+import type { DriftSensitivity } from "../../core/types.js";
 
 let thresholdWarningLogged = false;
 

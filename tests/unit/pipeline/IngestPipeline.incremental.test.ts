@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IngestPipeline } from "../../../src/pipeline/IngestPipeline.js";
+import { IngestPipeline } from "../../../src/ingestion/conversation/IngestPipeline.js";
 import type { GraphStore } from "../../../src/store/index.js";
 import type {
   DriftSensitivity,
@@ -12,7 +12,7 @@ import type {
   TopicEdge,
   TopicNode,
   TopicSegment,
-} from "../../../src/types.js";
+} from "../../../src/core/types.js";
 
 class FakeLLMAdapter implements LLMAdapter {
   async complete(): Promise<string> {

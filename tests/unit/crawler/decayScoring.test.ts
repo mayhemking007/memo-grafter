@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMemoryDecayScore } from "../../../src/crawler/decayScoring.js";
+import { computeMemoryDecayScore } from "../../../src/maintenance/decayScoring.js";
 
 describe("computeMemoryDecayScore", () => {
   const now = new Date("2026-01-31T00:00:00.000Z");

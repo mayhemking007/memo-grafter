@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PostgresGraphStore } from "../../../src/store/index.js";
-import type { MemoryEdge } from "../../../src/types.js";
+import type { MemoryEdge } from "../../../src/core/types.js";
 
 type SqlCall = {
   text: string;

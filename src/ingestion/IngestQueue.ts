@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Queue, Worker, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
-import type { IngestPipeline } from "../pipeline/IngestPipeline.js";
-import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../types.js";
+import type { IngestPipeline } from "./conversation/IngestPipeline.js";
+import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../core/types.js";
 
 type IngestJobData = {
   kind: "messages";

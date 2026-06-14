@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
 import type {
   EmbedAdapter,
   LLMAdapter,
@@ -8,7 +8,7 @@ import type {
   Message,
   RetrievalResult,
   RetrieverConfig,
-} from "../../../src/types.js";
+} from "../../../src/core/types.js";
 
 type AgentInternals = {
   core: {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
-import { RetrieverPipeline } from "../../../src/pipeline/RetrieverPipeline.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
+import { RetrieverPipeline } from "../../../src/retrieval/RetrieverPipeline.js";
 import type { GraphStore } from "../../../src/store/index.js";
 import type {
   EmbedAdapter,
@@ -11,7 +11,7 @@ import type {
   RetrievalResult,
   RetrieverConfig,
   TopicNode,
-} from "../../../src/types.js";
+} from "../../../src/core/types.js";
 
 type ScoredMemoryNode = MemoryNode & { similarity: number };
 type SearchMemoriesCall = {

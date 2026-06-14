@@ -12,7 +12,7 @@ import type {
   TopicEdge,
   TopicNode,
   TopicSegment,
-} from "../types.js";
+} from "../core/types.js";
 
 export interface FleetAgentRecord {
   id: string;

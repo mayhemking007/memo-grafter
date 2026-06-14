@@ -1,4 +1,4 @@
-import type { Message } from "../../types.js";
+import type { Message } from "../../core/types.js";
 import { isShortMessage } from "../text/tokenCount.js";
 import { contentTerms } from "../text/terms.js";
 import { hasReentryCue } from "./reentryCues.js";

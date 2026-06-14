@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { GrafterPipeline } from "../../../src/pipeline/GrafterPipeline.js";
-import type { Message, TopicNode } from "../../../src/types.js";
+import { GrafterPipeline } from "../../../src/retrieval/GrafterPipeline.js";
+import type { Message, TopicNode } from "../../../src/core/types.js";
 
 function makeTopicNode(id = "topic-1"): TopicNode {
   return {

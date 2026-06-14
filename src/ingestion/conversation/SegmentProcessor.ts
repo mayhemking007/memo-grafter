@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { buildSegmentExtractionPrompt } from "../prompts/segmentExtractionPrompt.js";
-import type { GraphStore } from "../store/index.js";
+import { buildSegmentExtractionPrompt } from "../../prompts/segmentExtractionPrompt.js";
+import type { GraphStore } from "../../store/index.js";
 import type {
   EmbedAdapter,
   ExtractedMemory,
@@ -11,13 +11,13 @@ import type {
   SegmentExtractionResult,
   TopicNode,
   TopicSegment,
-} from "../types.js";
-import { normalizeTags } from "../utils/tags.js";
+} from "../../core/types.js";
+import { normalizeTags } from "../../utils/tags.js";
 import {
   buildSegmentSummary,
   formatMemoryEmbeddingText,
   parseSegmentExtraction,
-} from "../utils/extraction/segmentExtraction.js";
+} from "../../utils/extraction/segmentExtraction.js";
 import type { DriftSegment } from "./TopicDriftDetector.js";
 
 export class SegmentProcessor {

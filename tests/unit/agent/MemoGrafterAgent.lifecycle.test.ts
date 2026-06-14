@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
 
 function createAgent() {
   const order: string[] = [];
