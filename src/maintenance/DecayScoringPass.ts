@@ -1,4 +1,3 @@
-import type { MemoryNode } from "../core/types.js";
 import { computeMemoryDecayScore } from "./decayScoring.js";
 import type { CrawlerPass, CrawlerPassContext, CrawlerPassResult } from "./types.js";
 

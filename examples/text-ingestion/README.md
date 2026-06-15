@@ -15,5 +15,6 @@ Use `replace: true` when each call contains the complete current document, such 
 Run from the repository root after configuring `DATABASE_URL` and `OPENAI_API_KEY`:
 
 ```bash
+npx memo-grafter migrate
 npx tsx --env-file=.env examples/text-ingestion/src/index.ts
 ```

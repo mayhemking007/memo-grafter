@@ -13,6 +13,7 @@ import type {
   TopicNode,
   TopicSegment,
 } from "../core/types.js";
+import type { MigrationReport } from "../schema/index.js";
 
 export interface FleetAgentRecord {
   id: string;
@@ -24,6 +25,8 @@ export interface FleetAgentRecord {
 
 export interface GraphStore {
   initialize(): Promise<void>;
+  migrate(): Promise<MigrationReport>;
+  verifySchema(): Promise<void>;
   saveMessages(sessionId: string, messages: Message[]): Promise<void>;
   saveMessagesAt(sessionId: string, startIndex: number, messages: Message[]): Promise<void>;
   getMessagesBySession(sessionId: string, startIndex?: number, endIndex?: number): Promise<Message[]>;

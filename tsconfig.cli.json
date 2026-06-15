@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "rootDir": "./cli",
+    "outDir": "./dist/cli",
+    "module": "nodenext",
+    "target": "esnext",
+    "types": ["node"],
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  },
+  "include": ["cli"],
+  "exclude": ["node_modules", "dist"]
+}

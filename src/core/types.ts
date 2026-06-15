@@ -73,7 +73,7 @@ export interface MemoryNode {
   createdAt: Date;
 }
 
-export interface MemoryNodeInsert extends Omit<MemoryNode, "createdAt"> {}
+export type MemoryNodeInsert = Omit<MemoryNode, "createdAt">;
 
 export interface MemoryEdge {
   id: string;

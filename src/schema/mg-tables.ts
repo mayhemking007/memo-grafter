@@ -1,1 +1,183 @@
-export {};
+import { mgExtension, mgIndex, mgTable } from "./builders.js";
+
+export const memoGrafterExtensions = [
+  mgExtension({
+    name: "vector",
+    description: "pgvector support for topic and memory embeddings.",
+  }),
+  mgExtension({
+    name: "pgcrypto",
+    description: "UUID generation for MemoGrafter memory and registry rows.",
+  }),
+] as const;
+
+export const memoGrafterTables = [
+  mgTable({
+    name: "mg_message_buffer",
+    description: "Ordered raw messages for each MemoGrafter session.",
+    columns: [
+      { name: "session_id", type: "text", primaryKey: true },
+      { name: "message_index", type: "int", primaryKey: true },
+      { name: "role", type: "text" },
+      { name: "content", type: "text" },
+    ],
+  }),
+  mgTable({
+    name: "mg_segments",
+    description: "Topic segment ranges detected during ingestion.",
+    columns: [
+      { name: "id", type: "text", primaryKey: true },
+      { name: "session_id", type: "text" },
+      { name: "start_index", type: "int" },
+      { name: "end_index", type: "int" },
+      { name: "topic_order", type: "int" },
+      { name: "drift_score", type: "float" },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+    constraints: ["UNIQUE (session_id, start_index, end_index)"],
+  }),
+  mgTable({
+    name: "mg_topic_nodes",
+    description: "Topic-level graph nodes with summaries and embeddings.",
+    columns: [
+      { name: "id", type: "text", primaryKey: true },
+      { name: "session_id", type: "text" },
+      { name: "segment_id", type: "text", references: "mg_segments(id)" },
+      { name: "label", type: "text", nullable: true },
+      { name: "summary", type: "text", nullable: true },
+      { name: "embedding", type: "vector", nullable: true },
+      { name: "tags", type: "text[]", default: "'{}'" },
+      { name: "source", type: "text", nullable: true },
+      { name: "message_range", type: "int", nullable: true },
+      { name: "topic_order", type: "int", default: "0" },
+      { name: "drift_score", type: "float", default: "0" },
+      { name: "agent_color", type: "text", nullable: true },
+      { name: "fleet_id", type: "text", nullable: true },
+      { name: "agent_id", type: "text", nullable: true },
+      { name: "suppressed", type: "boolean", default: "false" },
+      { name: "suppressed_at", type: "timestamptz", nullable: true },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+    constraints: ["UNIQUE (segment_id)"],
+  }),
+  mgTable({
+    name: "mg_topic_edges",
+    description: "Temporal, semantic, reentry, and graft edges between topic nodes.",
+    columns: [
+      { name: "src_id", type: "text", primaryKey: true },
+      { name: "dst_id", type: "text", primaryKey: true },
+      { name: "weight", type: "float" },
+      { name: "type", type: "text" },
+    ],
+  }),
+  mgTable({
+    name: "mg_memory_nodes",
+    description: "Structured memory facts extracted from topic segments.",
+    columns: [
+      { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+      { name: "segment_id", type: "text", references: "mg_segments(id)" },
+      { name: "topic_node_id", type: "text", references: "mg_topic_nodes(id)" },
+      { name: "agent_id", type: "text", nullable: true },
+      { name: "session_id", type: "text" },
+      { name: "memory_type", type: "text", check: "fact|insight|question|task|reference" },
+      { name: "source_type", type: "text", default: "conversation", check: "conversation|note|document|code" },
+      { name: "subject", type: "text" },
+      { name: "predicate", type: "text" },
+      { name: "value", type: "text" },
+      { name: "confidence", type: "float", default: "1.0" },
+      { name: "embedding", type: "vector", nullable: true },
+      { name: "tags", type: "text[]", default: "'{}'" },
+      { name: "source", type: "text", nullable: true },
+      { name: "source_url", type: "text", nullable: true },
+      { name: "source_title", type: "text", nullable: true },
+      { name: "superseded_by", type: "uuid", nullable: true, references: "mg_memory_nodes(id)" },
+      { name: "decayed", type: "boolean", default: "false" },
+      { name: "forgotten", type: "boolean", default: "false" },
+      { name: "forgotten_at", type: "timestamptz", nullable: true },
+      { name: "has_conflict", type: "boolean", default: "false" },
+      { name: "agent_color", type: "text", nullable: true },
+      { name: "fleet_id", type: "text", nullable: true },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+  mgTable({
+    name: "mg_memory_edges",
+    description: "Semantic, conflict, update, and related edges between memory facts.",
+    columns: [
+      { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+      { name: "source_id", type: "uuid", references: "mg_memory_nodes(id)" },
+      { name: "target_id", type: "uuid", references: "mg_memory_nodes(id)" },
+      { name: "edge_type", type: "text", check: "semantic|conflicts|updates|related" },
+      { name: "weight", type: "float", nullable: true },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+  mgTable({
+    name: "mg_fleets",
+    description: "Fleet metadata for multi-agent memory groups.",
+    columns: [
+      { name: "id", type: "text", primaryKey: true },
+      { name: "name", type: "text", nullable: true },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+  mgTable({
+    name: "mg_fleet_agents",
+    description: "Registered worker agents within fleets.",
+    columns: [
+      { name: "id", type: "text", primaryKey: true },
+      { name: "fleet_id", type: "text", references: "mg_fleets(id)" },
+      { name: "session_id", type: "text" },
+      { name: "agent_color", type: "text" },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+    ],
+    constraints: ["UNIQUE (fleet_id, agent_color)"],
+  }),
+  mgTable({
+    name: "mg_session_ingest_state",
+    description: "Incremental ingestion checkpoints by session.",
+    columns: [
+      { name: "session_id", type: "text", primaryKey: true },
+      { name: "last_ingested_message_index", type: "int", default: "-1" },
+      { name: "updated_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+  mgTable({
+    name: "mg_graft_registry",
+    description: "Tracks copied/grafted topic node origins.",
+    columns: [
+      { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+      { name: "session_id", type: "text" },
+      { name: "node_id", type: "text", references: "mg_topic_nodes(id)" },
+      { name: "source_session_id", type: "text" },
+      { name: "source_node_id", type: "text" },
+      { name: "grafted_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+] as const;
+
+export const memoGrafterIndexes = [
+  mgIndex({ name: "mg_message_buffer_session_idx", table: "mg_message_buffer", description: "Message lookup by session and index." }),
+  mgIndex({ name: "mg_segments_session_idx", table: "mg_segments", description: "Segment lookup by session and topic order." }),
+  mgIndex({ name: "mg_nodes_session_idx", table: "mg_topic_nodes", description: "Topic lookup by session and topic order." }),
+  mgIndex({ name: "idx_topic_nodes_active_lifecycle", table: "mg_topic_nodes", description: "Active topic lifecycle lookup." }),
+  mgIndex({ name: "mg_topic_nodes_tags_idx", table: "mg_topic_nodes", description: "Topic tag lookup." }),
+  mgIndex({ name: "mg_nodes_fleet_idx", table: "mg_topic_nodes", description: "Fleet topic lookup by color." }),
+  mgIndex({ name: "mg_fleet_agents_fleet_idx", table: "mg_fleet_agents", description: "Fleet agent lookup by color." }),
+  mgIndex({ name: "mg_session_ingest_state_updated_idx", table: "mg_session_ingest_state", description: "Ingest state freshness lookup." }),
+  mgIndex({ name: "idx_graft_registry_session", table: "mg_graft_registry", description: "Graft registry lookup by session." }),
+  mgIndex({ name: "idx_graft_registry_node_unique", table: "mg_graft_registry", description: "Unique graft registry node ownership." }),
+  mgIndex({ name: "mg_nodes_embedding_idx", table: "mg_topic_nodes", description: "Topic vector similarity search." }),
+  mgIndex({ name: "idx_memory_nodes_topic", table: "mg_memory_nodes", description: "Memory lookup by topic node." }),
+  mgIndex({ name: "idx_memory_nodes_segment", table: "mg_memory_nodes", description: "Memory lookup by segment." }),
+  mgIndex({ name: "idx_memory_nodes_session", table: "mg_memory_nodes", description: "Memory lookup by session." }),
+  mgIndex({ name: "idx_memory_nodes_active_lifecycle", table: "mg_memory_nodes", description: "Active memory lifecycle lookup." }),
+  mgIndex({ name: "idx_memory_nodes_tags", table: "mg_memory_nodes", description: "Memory tag lookup." }),
+  mgIndex({ name: "idx_memory_nodes_embedding", table: "mg_memory_nodes", description: "Memory vector similarity search." }),
+  mgIndex({ name: "idx_memory_edges_source", table: "mg_memory_edges", description: "Memory edge lookup by source." }),
+  mgIndex({ name: "idx_memory_edges_target", table: "mg_memory_edges", description: "Memory edge lookup by target." }),
+] as const;
+
+export const memoGrafterTableNames = memoGrafterTables.map((table) => table.name);
+export const memoGrafterIndexNames = memoGrafterIndexes.map((index) => index.name);
+export const memoGrafterExtensionNames = memoGrafterExtensions.map((extension) => extension.name);

@@ -53,6 +53,12 @@ OPENAI_API_KEY=sk-...
 
 `DATABASE_URL` must point to a PostgreSQL database where `pgvector` is available.
 
+Run the MemoGrafter migration before starting the demo:
+
+```bash
+npx memo-grafter migrate
+```
+
 ## How To Run
 
 Run the TypeScript demo directly:

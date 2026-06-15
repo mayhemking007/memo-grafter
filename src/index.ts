@@ -81,3 +81,4 @@ export type {
   DecayScoringPassOptions,
 } from "./maintenance/index.js";
 export type { FleetAgentRecord, GraphStore } from "./store/index.js";
+export type { MigrationReport, MigrationReportItem, MigrationItemStatus } from "./schema/index.js";

@@ -1,0 +1,15 @@
+{
+  "name": "memo-grafter-cli-schema-workflow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "tsx --env-file=.env src/index.ts"
+  },
+  "dependencies": {
+    "memo-grafter": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.0.0"
+  }
+}
