@@ -1,4 +1,4 @@
-import type { Message } from "../../types.js";
+import type { Message } from "../../core/types.js";
 import { cosineSimilarity } from "../drift/cosineSimilarity.js";
 import { isMeaningfulReentryMessage } from "./reentryText.js";
 import type { ReentrySegmentRange } from "./types.js";

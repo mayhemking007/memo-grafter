@@ -6,7 +6,7 @@ import {
   VersioningPass,
   type CrawlerMaintenanceStore,
 } from "../../../src/index.js";
-import type { MemoryEdge, MemoryNode } from "../../../src/types.js";
+import type { MemoryEdge, MemoryNode } from "../../../src/core/types.js";
 
 class InMemoryMaintenanceStore implements CrawlerMaintenanceStore {
   readonly memories: MemoryNode[];

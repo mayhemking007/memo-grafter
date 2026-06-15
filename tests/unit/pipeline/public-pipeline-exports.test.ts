@@ -8,13 +8,13 @@ import {
   RetrieverPipeline,
   VersioningPass,
 } from "../../../src/index.js";
-import { ConflictDetectionPass as DirectConflictDetectionPass } from "../../../src/crawler/ConflictDetectionPass.js";
-import { DecayScoringPass as DirectDecayScoringPass } from "../../../src/crawler/DecayScoringPass.js";
-import { MemoGrafterCrawler as DirectMemoGrafterCrawler } from "../../../src/crawler/MemoGrafterCrawler.js";
-import { VersioningPass as DirectVersioningPass } from "../../../src/crawler/VersioningPass.js";
-import { GrafterPipeline as DirectGrafterPipeline } from "../../../src/pipeline/GrafterPipeline.js";
-import { IngestPipeline as DirectIngestPipeline } from "../../../src/pipeline/IngestPipeline.js";
-import { RetrieverPipeline as DirectRetrieverPipeline } from "../../../src/pipeline/RetrieverPipeline.js";
+import { ConflictDetectionPass as DirectConflictDetectionPass } from "../../../src/maintenance/ConflictDetectionPass.js";
+import { DecayScoringPass as DirectDecayScoringPass } from "../../../src/maintenance/DecayScoringPass.js";
+import { MemoGrafterCrawler as DirectMemoGrafterCrawler } from "../../../src/maintenance/MemoGrafterCrawler.js";
+import { VersioningPass as DirectVersioningPass } from "../../../src/maintenance/VersioningPass.js";
+import { GrafterPipeline as DirectGrafterPipeline } from "../../../src/retrieval/GrafterPipeline.js";
+import { IngestPipeline as DirectIngestPipeline } from "../../../src/ingestion/conversation/IngestPipeline.js";
+import { RetrieverPipeline as DirectRetrieverPipeline } from "../../../src/retrieval/RetrieverPipeline.js";
 
 describe("public pipeline exports", () => {
   it("exports pipeline classes from the package entrypoint", () => {

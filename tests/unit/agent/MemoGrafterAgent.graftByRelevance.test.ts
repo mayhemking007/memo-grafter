@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
 import type { EmbedAdapter, InjectionResult, LLMAdapter } from "../../../src/index.js";
 
 describe("MemoGrafterAgent.graftByRelevance", () => {

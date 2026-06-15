@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam } from "@anthropic-ai/sdk/resources/messages";
-import type { LLMAdapter, Message } from "../types.js";
+import type { LLMAdapter, Message } from "../core/types.js";
 
 export class AnthropicLLMAdapter implements LLMAdapter {
   private readonly client = new Anthropic();

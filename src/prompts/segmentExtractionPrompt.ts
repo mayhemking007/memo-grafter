@@ -1,4 +1,4 @@
-import type { Message } from "../types.js";
+import type { Message } from "../core/types.js";
 import { normalizeText } from "../utils/text/normalizeText.js";
 
 export function buildSegmentExtractionPrompt(messages: Message[], labelHint?: string): string {

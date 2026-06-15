@@ -1,4 +1,4 @@
-import type { MemoryEdge, MemoryNode } from "../types.js";
+import type { MemoryEdge, MemoryNode } from "../core/types.js";
 
 export interface CrawlerConfig {
   intervalMs?: number;

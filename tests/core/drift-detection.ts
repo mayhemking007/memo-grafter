@@ -1,5 +1,5 @@
 import { assert } from "../setup.js";
-import { TopicDriftDetector } from "../../src/pipeline/TopicDriftDetector.js";
+import { TopicDriftDetector } from "../../src/ingestion/conversation/TopicDriftDetector.js";
 
 const messages = [
   { role: "user" as const, content: "Japan itinerary" },

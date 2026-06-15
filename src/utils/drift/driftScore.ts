@@ -1,4 +1,4 @@
-import type { Message } from "../../types.js";
+import type { Message } from "../../core/types.js";
 import { countApproxTokens } from "../text/tokenCount.js";
 import { cosineSimilarity } from "./cosineSimilarity.js";
 import { structuralMultiplier } from "./driftMarkers.js";

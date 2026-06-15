@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { MemoGrafter } from "./MemoGrafter.js";
-import { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
+import { MemoGrafter } from "../core/MemoGrafter.js";
+import { RetrieverPipeline } from "../retrieval/RetrieverPipeline.js";
 import type {
   AbsorbFromAgentOptions,
   GraftByRelevanceOptions,
@@ -17,9 +17,9 @@ import type {
   TagFilterOptions,
   TopicNode,
   TopicSegment,
-} from "./types.js";
-import { normalizeTags } from "./utils/tags.js";
-import { splitTextForIngestion } from "./utils/text/splitTextForIngestion.js";
+} from "../core/types.js";
+import { normalizeTags } from "../utils/tags.js";
+import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
 
 export class MemoGrafterAgent {
   private readonly core: MemoGrafter;

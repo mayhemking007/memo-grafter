@@ -1,4 +1,4 @@
-import type { TopicSegment } from "../../types.js";
+import type { TopicSegment } from "../../core/types.js";
 
 export interface AdaptiveDriftSensitivityConfig {
   enabled?: boolean;

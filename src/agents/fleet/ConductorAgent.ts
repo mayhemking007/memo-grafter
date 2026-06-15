@@ -1,5 +1,5 @@
-import type { MemoGrafter } from "../MemoGrafter.js";
-import type { TopicNode } from "../types.js";
+import type { MemoGrafter } from "../../core/MemoGrafter.js";
+import type { TopicNode } from "../../core/types.js";
 import type { ConductorGraftOptions } from "./types.js";
 import { WorkerAgent } from "./WorkerAgent.js";
 

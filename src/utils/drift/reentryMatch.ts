@@ -1,4 +1,4 @@
-import type { TopicNode } from "../../types.js";
+import type { TopicNode } from "../../core/types.js";
 import { cosineSimilarity } from "./cosineSimilarity.js";
 
 export function findReentryNodeId(

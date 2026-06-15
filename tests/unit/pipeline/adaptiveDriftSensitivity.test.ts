@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TopicSegment } from "../../../src/types.js";
+import type { TopicSegment } from "../../../src/core/types.js";
 import { resolveAdaptiveDriftThreshold } from "../../../src/utils/drift/adaptiveDriftSensitivity.js";
 
 function makeSegment(index: number, length: number): TopicSegment {

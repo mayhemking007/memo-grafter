@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import type { EmbedAdapter, LLMAdapter, Message } from "../types.js";
+import type { EmbedAdapter, LLMAdapter, Message } from "../core/types.js";
 
 export interface OpenAILLMAdapterOptions {
   streaming?: boolean;

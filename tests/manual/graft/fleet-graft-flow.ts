@@ -4,7 +4,7 @@ import {
   OpenAILLMAdapter,
   type TopicNode,
 } from "../../../src/index.js";
-import type { WorkerAgent } from "../../../src/fleet/WorkerAgent.js";
+import type { WorkerAgent } from "../../../src/agents/fleet/WorkerAgent.js";
 
 const fleet = new MemoGrafterFleet({
   db: { connectionString: requiredEnv("DATABASE_URL") },

@@ -11,7 +11,7 @@ import type {
   RetrievalResult,
   RetrieverConfig,
   TopicNode,
-} from "../types.js";
+} from "../core/types.js";
 import { countApproxTokens } from "../utils/text/tokenCount.js";
 import { normalizeTags } from "../utils/tags.js";
 

@@ -1,4 +1,4 @@
-import type { Message } from "../types.js";
+import type { Message } from "../core/types.js";
 
 export function buildIntentShiftPrompt(recentMessages: Message[], currentMessage: Message): string {
   const recent = recentMessages.map((message) => `[${message.role}]: ${message.content}`).join("\n");

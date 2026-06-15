@@ -2,7 +2,7 @@ import type {
   ExtractedMemory,
   MemoryType,
   SegmentExtractionResult,
-} from "../../types.js";
+} from "../../core/types.js";
 
 export function parseSegmentExtraction(raw: string): SegmentExtractionResult {
   try {

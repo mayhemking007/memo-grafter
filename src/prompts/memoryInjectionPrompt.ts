@@ -1,4 +1,4 @@
-import type { MemoryNode, Message, TopicNode } from "../types.js";
+import type { MemoryNode, Message, TopicNode } from "../core/types.js";
 
 export function buildMemoryInjectionPrompt(blocks: string[]): string {
   return [

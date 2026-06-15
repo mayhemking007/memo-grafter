@@ -1,6 +1,6 @@
 import { buildMemoryInjectionPrompt, formatMemoryNode } from "../prompts/memoryInjectionPrompt.js";
 import type { GraphStore } from "../store/index.js";
-import type { GraftExpansionStrategy, InjectionResult, MemoryEdge, MemoryNode, TopicNode } from "../types.js";
+import type { GraftExpansionStrategy, InjectionResult, MemoryEdge, MemoryNode, TopicNode } from "../core/types.js";
 import { countApproxTokens } from "../utils/text/tokenCount.js";
 
 export interface GrafterPipelineRunOptions {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoGrafterAgent } from "../../../src/MemoGrafterAgent.js";
+import { MemoGrafterAgent } from "../../../src/agents/MemoGrafterAgent.js";
 import type {
   EmbedAdapter,
   GraftRegistryEntry,
@@ -11,7 +11,7 @@ import type {
   TopicEdge,
   TopicNode,
   TopicSegment,
-} from "../../../src/types.js";
+} from "../../../src/core/types.js";
 
 type SnapshotCore = {
   getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }>;

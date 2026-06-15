@@ -1,15 +1,15 @@
-export { MemoGrafterAgent } from "./MemoGrafterAgent.js";
-export { MemoGrafter } from "./MemoGrafter.js";
-export { ConflictDetectionPass, DecayScoringPass, MemoGrafterCrawler, VersioningPass } from "./crawler/index.js";
-export { ConductorAgent } from "./fleet/ConductorAgent.js";
-export { MemoGrafterFleet } from "./fleet/MemoGrafterFleet.js";
-export { WorkerAgent } from "./fleet/WorkerAgent.js";
+export { MemoGrafterAgent } from "./agents/MemoGrafterAgent.js";
+export { MemoGrafter } from "./core/MemoGrafter.js";
+export { ConflictDetectionPass, DecayScoringPass, MemoGrafterCrawler, VersioningPass } from "./maintenance/index.js";
+export { ConductorAgent } from "./agents/fleet/ConductorAgent.js";
+export { MemoGrafterFleet } from "./agents/fleet/MemoGrafterFleet.js";
+export { WorkerAgent } from "./agents/fleet/WorkerAgent.js";
 export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
 export { GeminiEmbedAdapter, GeminiLLMAdapter } from "./adapters/GeminiAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
-export { GrafterPipeline } from "./pipeline/GrafterPipeline.js";
-export { IngestPipeline } from "./pipeline/IngestPipeline.js";
-export { RetrieverPipeline } from "./pipeline/RetrieverPipeline.js";
+export { GrafterPipeline } from "./retrieval/GrafterPipeline.js";
+export { IngestPipeline } from "./ingestion/conversation/IngestPipeline.js";
+export { RetrieverPipeline } from "./retrieval/RetrieverPipeline.js";
 export { PostgresGraphStore } from "./store/index.js";
 export type {
   OpenAILLMAdapterOptions,
@@ -56,7 +56,7 @@ export type {
   TopicEdge,
   TopicNode,
   TopicSegment,
-} from "./types.js";
+} from "./core/types.js";
 export type {
   ConductorGraftOptions,
   FleetAbsorbOptions,
@@ -69,7 +69,7 @@ export type {
   MemoGrafterFleetOptions,
   SharedMemorySnapshot,
   WorkerAgentConfig,
-} from "./fleet/types.js";
+} from "./agents/fleet/types.js";
 export type {
   CrawlerConfig,
   CrawlerMaintenanceStore,
@@ -79,5 +79,5 @@ export type {
   CrawlerPassResult,
   CrawlerReport,
   DecayScoringPassOptions,
-} from "./crawler/index.js";
+} from "./maintenance/index.js";
 export type { FleetAgentRecord, GraphStore } from "./store/index.js";

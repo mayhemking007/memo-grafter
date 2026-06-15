@@ -1,8 +1,8 @@
-import type { DriftMode, LLMAdapter, Message, TopicNode } from "../types.js";
-import { buildIntentShiftPrompt } from "../prompts/intentShiftPrompt.js";
-import { computeDriftScore } from "../utils/drift/driftScore.js";
-import { findReentryNodeId } from "../utils/drift/reentryMatch.js";
-import { avg } from "../utils/drift/vectorAvg.js";
+import type { DriftMode, LLMAdapter, Message, TopicNode } from "../../core/types.js";
+import { buildIntentShiftPrompt } from "../../prompts/intentShiftPrompt.js";
+import { computeDriftScore } from "../../utils/drift/driftScore.js";
+import { findReentryNodeId } from "../../utils/drift/reentryMatch.js";
+import { avg } from "../../utils/drift/vectorAvg.js";
 
 export interface DriftSegment {
   start: number;

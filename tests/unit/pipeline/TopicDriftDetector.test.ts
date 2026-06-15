@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { IngestPipeline } from "../../../src/pipeline/IngestPipeline.js";
-import { TopicDriftDetector } from "../../../src/pipeline/TopicDriftDetector.js";
+import { IngestPipeline } from "../../../src/ingestion/conversation/IngestPipeline.js";
+import { TopicDriftDetector } from "../../../src/ingestion/conversation/TopicDriftDetector.js";
 import type { GraphStore } from "../../../src/store/index.js";
-import type { EmbedAdapter, LLMAdapter, Message, TopicEdge, TopicNode, TopicSegment } from "../../../src/types.js";
+import type { EmbedAdapter, LLMAdapter, Message, TopicEdge, TopicNode, TopicSegment } from "../../../src/core/types.js";
 import {
   resetDriftThresholdWarningForTests,
   resolveDriftThreshold,

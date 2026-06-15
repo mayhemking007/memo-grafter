@@ -11,7 +11,7 @@ import type {
   RetrieverConfig,
   TopicNode,
   TopicSegment,
-} from "../types.js";
+} from "../../core/types.js";
 
 export interface FleetGraph {
   id: string;

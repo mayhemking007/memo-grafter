@@ -1,1 +1,1 @@
-﻿export type { EmbedAdapter, LLMAdapter } from "../types.js";
+export type { EmbedAdapter, LLMAdapter } from "../core/types.js";

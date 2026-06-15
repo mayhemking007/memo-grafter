@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildFactRetrievalPrompt, formatFactBlock } from "../../../src/prompts/factRetrievalPrompt.js";
-import { RetrieverPipeline } from "../../../src/pipeline/RetrieverPipeline.js";
+import { RetrieverPipeline } from "../../../src/retrieval/RetrieverPipeline.js";
 import type { GraphStore } from "../../../src/store/index.js";
-import type { EmbedAdapter, MemoryNode, TopicNode } from "../../../src/types.js";
+import type { EmbedAdapter, MemoryNode, TopicNode } from "../../../src/core/types.js";
 import { countApproxTokens } from "../../../src/utils/text/tokenCount.js";
 
 type ScoredMemoryNode = MemoryNode & { similarity: number };
