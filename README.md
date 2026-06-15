@@ -38,9 +38,13 @@ MemoGrafter stores conversation turns, tracks which messages have already been i
 
 ```bash
 npm install memo-grafter
+npx memo-grafter init
+npx memo-grafter migrate
 ```
 
 MemoGrafter runs server-side on Node.js. The built-in storage backend uses PostgreSQL with `pgvector`.
+
+`init` creates local project files under `src/memo-grafter/` (`mg-schema.ts`, `schema.ts`, and `mg.config.ts`) without touching your database. `migrate` creates or updates MemoGrafter-owned `mg_*` tables. Application tables remain managed by your existing tool, such as Prisma, Drizzle, or SQL migrations.
 
 ## Minimal Example
 

@@ -69,13 +69,20 @@ REDIS_URL=redis://localhost:6379
 
 `REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
 
-Enable `pgvector` in PostgreSQL:
+Initialize MemoGrafter project files and migrate the MemoGrafter tables:
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+```bash
+npx memo-grafter init
+npx memo-grafter migrate
 ```
 
-The built-in `PostgresGraphStore` creates its own tables during `initialize()`.
+`memo-grafter init` creates local project files only:
+
+- `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
+- `src/memo-grafter/schema.ts`: user-owned schema composition file. It is created only if missing and is never overwritten.
+- `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config.
+
+`memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate app tables from `schema.ts`; keep using Prisma, Drizzle, raw SQL, or another migration tool for application tables.
 
 Current v1 tables:
 
@@ -93,6 +100,13 @@ Current v1 tables:
 `mg_topic_nodes` and `mg_memory_nodes` include optional `tags TEXT[]` columns. Tags default to an empty array, so existing untagged sessions continue to work normally.
 
 ## Quick Start
+
+Run the setup commands once for your app:
+
+```bash
+npx memo-grafter init
+npx memo-grafter migrate
+```
 
 Create `src/index.ts`:
 
@@ -1288,6 +1302,7 @@ import {
 } from "memo-grafter";
 
 const store = new PostgresGraphStore(process.env.DATABASE_URL!);
+await store.migrate(); // Or run `npx memo-grafter migrate` before app startup.
 await store.initialize();
 
 const embedder = new OpenAIEmbedAdapter("text-embedding-3-small");
@@ -1651,7 +1666,7 @@ Useful `GraphStore` inspection methods:
 
 Common `MemoGrafterAgent` methods:
 
-- `initialize()`: initialize storage.
+- `initialize()`: verify that MemoGrafter storage has already been migrated.
 - `invoke(message)`: send a user message and receive an assistant response.
 - `ingestText(text, options?)`: ingest raw text without generating an assistant response.
 - `getHistory()`: read local chat history.

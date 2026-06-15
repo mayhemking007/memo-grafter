@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
 import type { GraftRegistryEntry, MemoryDiff, MemoryDiffField, MemoryEdge, MemoryHistoryEntry, MemoryHistoryOptions, MemoryHistoryResult, MemoryHistoryStatus, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../core/types.js";
+import { memoGrafterExtensionNames, memoGrafterIndexNames, memoGrafterTableNames, type MigrationReport } from "../../schema/index.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { normalizeTags } from "../../utils/tags.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
@@ -115,10 +116,41 @@ export class PostgresGraphStore implements GraphStore {
       max: 10,
       idle_timeout: 30,
       connect_timeout: 10,
+      onnotice: () => undefined,
     });
   }
 
   async initialize(): Promise<void> {
+    await this.verifySchema();
+  }
+
+  async verifySchema(): Promise<void> {
+    const [extensions, tables] = await Promise.all([
+      this.getExistingExtensions(memoGrafterExtensionNames),
+      this.getExistingTables(memoGrafterTableNames),
+    ]);
+    const missingExtensions = memoGrafterExtensionNames.filter((name) => !extensions.has(name));
+    const missingTables = memoGrafterTableNames.filter((name) => !tables.has(name));
+
+    if (missingExtensions.length === 0 && missingTables.length === 0) {
+      return;
+    }
+
+    const missing = [
+      ...missingExtensions.map((name) => `extension ${name}`),
+      ...missingTables.map((name) => `table ${name}`),
+    ].join(", ");
+    throw new Error(
+      `MemoGrafter database schema is not initialized. Missing ${missing}. `
+      + "Run: npx memo-grafter migrate --db <connection-string>",
+    );
+  }
+
+  async migrate(): Promise<MigrationReport> {
+    const existingExtensions = await this.getExistingExtensions(memoGrafterExtensionNames);
+    const existingTables = await this.getExistingTables(memoGrafterTableNames);
+    const existingIndexes = await this.getExistingIndexes(memoGrafterIndexNames);
+
     await this.sql`CREATE EXTENSION IF NOT EXISTS vector`;
     await this.sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`;
 
@@ -303,6 +335,21 @@ export class PostgresGraphStore implements GraphStore {
 
     await this.migrateExistingNodeTable();
     await this.createIndexes();
+
+    return {
+      extensions: memoGrafterExtensionNames.map((name) => ({
+        name,
+        status: existingExtensions.has(name) ? "exists" : "created",
+      })),
+      tables: memoGrafterTableNames.map((name) => ({
+        name,
+        status: existingTables.has(name) ? "exists" : "created",
+      })),
+      indexes: memoGrafterIndexNames.map((name) => ({
+        name,
+        status: existingIndexes.has(name) ? "exists" : "created",
+      })),
+    };
   }
 
   async saveMessages(sessionId: string, messages: Message[]): Promise<void> {
@@ -1741,6 +1788,44 @@ export class PostgresGraphStore implements GraphStore {
 
   async close(): Promise<void> {
     await this.sql.end();
+  }
+
+  private async getExistingExtensions(extensionNames: readonly string[]): Promise<Set<string>> {
+    if (extensionNames.length === 0) return new Set();
+
+    const rows = await this.sql<{ extname: string }[]>`
+      SELECT extname
+      FROM pg_extension
+    `;
+    const expected = new Set(extensionNames);
+
+    return new Set(rows.map((row) => row.extname).filter((name) => expected.has(name)));
+  }
+
+  private async getExistingTables(tableNames: readonly string[]): Promise<Set<string>> {
+    if (tableNames.length === 0) return new Set();
+
+    const rows = await this.sql<{ table_name: string }[]>`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+    `;
+    const expected = new Set(tableNames);
+
+    return new Set(rows.map((row) => row.table_name).filter((name) => expected.has(name)));
+  }
+
+  private async getExistingIndexes(indexNames: readonly string[]): Promise<Set<string>> {
+    if (indexNames.length === 0) return new Set();
+
+    const rows = await this.sql<{ indexname: string }[]>`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+    `;
+    const expected = new Set(indexNames);
+
+    return new Set(rows.map((row) => row.indexname).filter((name) => expected.has(name)));
   }
 
   private async migrateExistingNodeTable(): Promise<void> {

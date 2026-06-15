@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import postgres from "postgres";
-import { MemoGrafter, MemoGrafterAgent, MemoGrafterFleet, type EmbedAdapter, type LLMAdapter, type MemoGrafterConfig } from "../src/index.js";
+import { MemoGrafter, MemoGrafterAgent, MemoGrafterFleet, PostgresGraphStore, type EmbedAdapter, type LLMAdapter, type MemoGrafterConfig } from "../src/index.js";
 
 export { assert };
 
@@ -8,6 +8,7 @@ export const databaseUrl = process.env.DATABASE_URL;
 
 let databaseAvailable: boolean | undefined;
 let databaseSkipReason = "DATABASE_URL is not reachable.";
+let schemaMigrated = false;
 
 export async function skipWithoutDatabase(testName: string): Promise<boolean> {
   if (!databaseUrl) {
@@ -171,6 +172,9 @@ export async function cleanupDatabase(): Promise<void> {
   if (!databaseUrl) return;
 
   const sql = postgres(databaseUrl);
+  await sql`DELETE FROM mg_memory_edges`;
+  await sql`DELETE FROM mg_memory_nodes`;
+  await sql`DELETE FROM mg_graft_registry`;
   await sql`DELETE FROM mg_topic_edges`;
   await sql`DELETE FROM mg_topic_nodes`;
   await sql`DELETE FROM mg_segments`;
@@ -181,7 +185,20 @@ export async function cleanupDatabase(): Promise<void> {
   await sql.end();
 }
 
+export async function migrateMemoGrafterSchema(): Promise<void> {
+  if (!databaseUrl || schemaMigrated) return;
+
+  const store = new PostgresGraphStore(databaseUrl);
+  try {
+    await store.migrate();
+    schemaMigrated = true;
+  } finally {
+    await store.close();
+  }
+}
+
 export async function createInitializedAgent(overrides: Partial<MemoGrafterConfig> = {}): Promise<MemoGrafterAgent> {
+  await migrateMemoGrafterSchema();
   const agent = new MemoGrafterAgent(createConfig(overrides));
   await agent.initialize();
   await cleanupDatabase();
@@ -189,6 +206,7 @@ export async function createInitializedAgent(overrides: Partial<MemoGrafterConfi
 }
 
 export async function createInitializedMemo(overrides: Partial<MemoGrafterConfig> = {}): Promise<MemoGrafter> {
+  await migrateMemoGrafterSchema();
   const memo = new MemoGrafter(createConfig(overrides));
   await memo.initialize();
   await cleanupDatabase();
@@ -196,6 +214,7 @@ export async function createInitializedMemo(overrides: Partial<MemoGrafterConfig
 }
 
 export async function createInitializedFleet(): Promise<MemoGrafterFleet> {
+  await migrateMemoGrafterSchema();
   const fleet = new MemoGrafterFleet(createConfig(), { id: `fleet-${Date.now()}`, name: "test fleet" });
   await fleet.initialize();
   await cleanupDatabase();
