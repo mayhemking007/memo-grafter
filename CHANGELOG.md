@@ -107,3 +107,20 @@ All notable changes to this project will be documented here.
 - Added `getMemoryHistory()` API to inspect memory evolution, supersession chains, and historical fact updates.
 - Added manual memory pruning APIs for explicit memory removal and suppression.
 - Added graph-level support for reviewing active, superseded, and historical memory states.
+
+## [0.3.0] - 2026-06-16
+
+### Added
+
+- Added `agent.remember()` API for direct memory injection without requiring conversational ingestion.
+- Added CLI foundation with `npx memo-grafter init` and `npx memo-grafter migrate` commands for project setup and schema management.
+- Added shared fleet-level memory accessible across worker agents within a fleet.
+
+### Changed
+
+- Reorganized the source tree into dedicated `core`, `ingestion`, `retrieval`, `maintenance`, and `agents` modules.
+- Refactored graph snapshot infrastructure to support upcoming browser-based session exploration and graph inspection tooling.
+
+### Internal
+
+- Improved project structure and module boundaries to support future CLI, fleet, and visualization capabilities.
