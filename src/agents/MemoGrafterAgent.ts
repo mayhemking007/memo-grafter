@@ -8,13 +8,16 @@ import type {
   GraphSnapshot,
   InjectionResult,
   IngestTextOptions,
+  MemoryEdge,
   MemoryDiff,
   MemoryHistoryResult,
+  MemoryNode,
   MemoGrafterConfig,
   Message,
   RetrievalResult,
   RetrieverConfig,
   TagFilterOptions,
+  TopicEdge,
   TopicNode,
   TopicSegment,
 } from "../core/types.js";
@@ -118,15 +121,23 @@ export class MemoGrafterAgent {
     const memoryEdges = await this.core.store.getMemoryEdgesBySession(this.sessionId);
     const registry = await this.core.store.getGraftRegistry(this.sessionId);
     const registryByNodeId = new Map(registry.map((entry) => [entry.nodeId, entry]));
+    const sortedNodes = [...nodes].sort(compareTopicNodesForSnapshot);
+    const sortedEdges = [...edges].sort(compareTopicEdgesForSnapshot);
+    const sortedMemories = [...memories].sort(compareMemoryNodesForSnapshot);
+    const sortedMemoryEdges = [...memoryEdges].sort(compareMemoryEdgesForSnapshot);
 
     return {
       sessionId: this.sessionId,
-      nodes,
-      snapshotNodes: nodes.map((node) => {
+      nodes: sortedNodes,
+      snapshotNodes: sortedNodes.map((node) => {
         const graftEntry = registryByNodeId.get(node.id);
 
         return {
           node,
+          lifecycle: {
+            suppressed: node.suppressed ?? false,
+            suppressedAt: node.suppressedAt ?? null,
+          },
           ...(graftEntry
             ? {
               graftOrigin: {
@@ -138,9 +149,19 @@ export class MemoGrafterAgent {
             : {}),
         };
       }),
-      edges,
-      memories,
-      memoryEdges,
+      edges: sortedEdges,
+      memories: sortedMemories,
+      snapshotMemories: sortedMemories.map((memory) => ({
+        memory,
+        lifecycle: {
+          forgotten: memory.forgotten ?? false,
+          forgottenAt: memory.forgottenAt ?? null,
+          decayed: memory.decayed,
+          supersededBy: memory.supersededBy,
+          hasConflict: memory.hasConflict ?? false,
+        },
+      })),
+      memoryEdges: sortedMemoryEdges,
       capturedAt: new Date().toISOString(),
     };
   }
@@ -293,4 +314,33 @@ export class MemoGrafterAgent {
   close(): Promise<void> {
     return this.pendingIngest.then(() => this.core.close());
   }
+}
+
+function compareTopicNodesForSnapshot(left: TopicNode, right: TopicNode): number {
+  return left.topicOrder - right.topicOrder
+    || left.messageRange[0] - right.messageRange[0]
+    || left.messageRange[1] - right.messageRange[1]
+    || left.createdAt.getTime() - right.createdAt.getTime()
+    || left.id.localeCompare(right.id);
+}
+
+function compareTopicEdgesForSnapshot(left: TopicEdge, right: TopicEdge): number {
+  return left.srcId.localeCompare(right.srcId)
+    || left.dstId.localeCompare(right.dstId)
+    || left.type.localeCompare(right.type)
+    || left.weight - right.weight;
+}
+
+function compareMemoryNodesForSnapshot(left: MemoryNode, right: MemoryNode): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || left.topicNodeId.localeCompare(right.topicNodeId)
+    || left.id.localeCompare(right.id);
+}
+
+function compareMemoryEdgesForSnapshot(left: MemoryEdge, right: MemoryEdge): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || left.sourceId.localeCompare(right.sourceId)
+    || left.targetId.localeCompare(right.targetId)
+    || left.edgeType.localeCompare(right.edgeType)
+    || left.id.localeCompare(right.id);
 }

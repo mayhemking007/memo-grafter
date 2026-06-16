@@ -173,16 +173,32 @@ export interface GraftOrigin {
 
 export interface GraphSnapshotNode {
   node: TopicNode;
+  lifecycle: {
+    suppressed: boolean;
+    suppressedAt: Date | null;
+  };
   graftOrigin?: GraftOrigin;
+}
+
+export interface GraphSnapshotMemory {
+  memory: MemoryNode;
+  lifecycle: {
+    forgotten: boolean;
+    forgottenAt: Date | null;
+    decayed: boolean;
+    supersededBy: string | null;
+    hasConflict: boolean;
+  };
 }
 
 export interface GraphSnapshot {
   sessionId: string;
   nodes: TopicNode[];
-  snapshotNodes?: GraphSnapshotNode[];
+  snapshotNodes: GraphSnapshotNode[];
   edges: TopicEdge[];
   memories: MemoryNode[];
-  memoryEdges?: MemoryEdge[];
+  snapshotMemories: GraphSnapshotMemory[];
+  memoryEdges: MemoryEdge[];
   capturedAt: string;
 }
 
