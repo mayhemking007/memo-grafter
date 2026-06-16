@@ -565,6 +565,7 @@ console.log(snapshot.nodes);
 console.log(snapshot.snapshotNodes);
 console.log(snapshot.edges);
 console.log(snapshot.memories);
+console.log(snapshot.snapshotMemories);
 console.log(snapshot.memoryEdges);
 console.log(snapshot.capturedAt);
 ```
@@ -572,14 +573,26 @@ console.log(snapshot.capturedAt);
 `getGraphSnapshot()` returns a `GraphSnapshot`:
 
 - `sessionId`: current agent session ID.
-- `nodes`: active topic nodes for the session.
-- `snapshotNodes`: topic nodes wrapped with provenance metadata when a node came from a graft, including suppressed topics for audit views.
+- `nodes`: topic nodes for the session, including suppressed nodes for audit views.
+- `snapshotNodes`: topic nodes wrapped with lifecycle metadata and optional graft provenance.
 - `edges`: topic edges where either endpoint belongs to a session topic node.
 - `memories`: all memory nodes for the session, including forgotten, decayed, conflicted, or superseded rows.
+- `snapshotMemories`: memory nodes wrapped with lifecycle metadata.
 - `memoryEdges`: memory-level edges such as `semantic`, `conflicts`, `updates`, and `related`.
 - `capturedAt`: ISO timestamp for when the snapshot was produced.
 
-Each `snapshotNodes` entry contains the topic `node` and an optional `graftOrigin` with `sourceSessionId`, `sourceNodeId`, and `graftedAt`. The plain `nodes` array remains available for callers that only need the topic nodes.
+Each `snapshotNodes` entry contains:
+
+- `node`: the topic node.
+- `lifecycle`: `{ suppressed, suppressedAt }`.
+- `graftOrigin`: optional `{ sourceSessionId, sourceNodeId, graftedAt }` when the node came from a graft.
+
+Each `snapshotMemories` entry contains:
+
+- `memory`: the memory node.
+- `lifecycle`: `{ forgotten, forgottenAt, decayed, supersededBy, hasConflict }`.
+
+The `nodes`, `edges`, `memories`, and `memoryEdges` arrays remain available for backward-compatible callers that already read the raw graph rows directly. Snapshot arrays are sorted deterministically so graph UIs can use them as a stable primary data source.
 
 This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
 
@@ -1671,7 +1684,7 @@ Common `MemoGrafterAgent` methods:
 - `ingestText(text, options?)`: ingest raw text without generating an assistant response.
 - `getHistory()`: read local chat history.
 - `getSessionId()`: read the current session ID.
-- `getGraphSnapshot()`: read nodes, edges, memories, session ID, and capture timestamp for visualization or inspection.
+- `getGraphSnapshot()`: read a stable graph snapshot with raw topic and memory rows, graph edges, lifecycle metadata, graft metadata, session ID, and capture timestamp for visualization or inspection.
 - `getGraftRegistry()`: inspect provenance for grafted nodes in the current session.
 - `getActiveNodes(options?)`: inspect topic nodes, optionally filtered by tags.
 - `getActiveSegments()`: inspect topic segments.

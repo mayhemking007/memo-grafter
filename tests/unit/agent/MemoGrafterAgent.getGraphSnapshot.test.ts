@@ -125,11 +125,15 @@ function makeGraftRegistryEntry(overrides: Partial<GraftRegistryEntry> = {}): Gr
 }
 
 describe("MemoGrafterAgent.getGraphSnapshot", () => {
-  it("waits for pending ingest and returns nodes, edges, memories, and capture metadata", async () => {
+  it("waits for pending ingest and returns stable graph UI snapshot fields", async () => {
     const agent = createAgent();
     const privateAgent = internals(agent);
     const sessionId = agent.getSessionId();
-    const node = makeTopicNode({ sessionId });
+    const node = makeTopicNode({
+      sessionId,
+      suppressed: true,
+      suppressedAt: new Date("2026-01-06T00:00:00.000Z"),
+    });
     const edge: TopicEdge = {
       srcId: "external-topic",
       dstId: node.id,
@@ -213,17 +217,115 @@ describe("MemoGrafterAgent.getGraphSnapshot", () => {
     });
     expect(snapshot.snapshotNodes).toEqual([{
       node,
+      lifecycle: {
+        suppressed: true,
+        suppressedAt: new Date("2026-01-06T00:00:00.000Z"),
+      },
       graftOrigin: {
         sourceSessionId: "source-session",
         sourceNodeId: "source-topic",
         graftedAt: new Date("2026-01-02T00:00:00.000Z"),
       },
     }]);
+    expect(snapshot.snapshotMemories).toEqual(memories.map((memory) => ({
+      memory,
+      lifecycle: {
+        forgotten: memory.forgotten ?? false,
+        forgottenAt: memory.forgottenAt ?? null,
+        decayed: memory.decayed,
+        supersededBy: memory.supersededBy,
+        hasConflict: memory.hasConflict ?? false,
+      },
+    })));
     expect(new Date(snapshot.capturedAt).toISOString()).toBe(snapshot.capturedAt);
     expect(snapshot.memories.some((memory) => memory.decayed)).toBe(true);
     expect(snapshot.memories.some((memory) => memory.supersededBy !== null)).toBe(true);
     expect(snapshot.memories.some((memory) => memory.hasConflict)).toBe(true);
     expect(snapshot.memoryEdges).toEqual([memoryEdge]);
+  });
+
+  it("sorts snapshot collections deterministically without dropping legacy arrays", async () => {
+    const agent = createAgent();
+    const privateAgent = internals(agent);
+    const sessionId = agent.getSessionId();
+    const laterNode = makeTopicNode({
+      id: "topic-2",
+      sessionId,
+      segmentId: "segment-2",
+      topicOrder: 2,
+      messageRange: [2, 3],
+    });
+    const earlierNode = makeTopicNode({
+      id: "topic-1",
+      sessionId,
+      segmentId: "segment-1",
+      topicOrder: 1,
+      messageRange: [0, 1],
+    });
+    const laterMemory = makeMemoryNode({
+      id: "memory-2",
+      sessionId,
+      topicNodeId: laterNode.id,
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const earlierMemory = makeMemoryNode({
+      id: "memory-1",
+      sessionId,
+      topicNodeId: earlierNode.id,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      forgotten: true,
+      forgottenAt: new Date("2026-01-03T00:00:00.000Z"),
+    });
+    const laterEdge: TopicEdge = {
+      srcId: laterNode.id,
+      dstId: earlierNode.id,
+      weight: 1,
+      type: "temporal",
+    };
+    const earlierEdge: TopicEdge = {
+      srcId: earlierNode.id,
+      dstId: laterNode.id,
+      weight: 0.5,
+      type: "semantic",
+    };
+    const laterMemoryEdge: MemoryEdge = {
+      id: "memory-edge-2",
+      sourceId: laterMemory.id,
+      targetId: earlierMemory.id,
+      edgeType: "conflicts",
+      weight: 1,
+      createdAt: new Date("2026-01-05T00:00:00.000Z"),
+    };
+    const earlierMemoryEdge: MemoryEdge = {
+      id: "memory-edge-1",
+      sourceId: earlierMemory.id,
+      targetId: laterMemory.id,
+      edgeType: "updates",
+      weight: 1,
+      createdAt: new Date("2026-01-04T00:00:00.000Z"),
+    };
+
+    privateAgent.core.getTopics = async () => ({
+      nodes: [laterNode, earlierNode],
+      segments: [makeSegment({ sessionId })],
+    });
+    privateAgent.core.store.getEdgesBySession = async () => [laterEdge, earlierEdge];
+    privateAgent.core.store.getMemoriesBySession = async () => [laterMemory, earlierMemory];
+    privateAgent.core.store.getMemoryEdgesBySession = async () => [laterMemoryEdge, earlierMemoryEdge];
+    privateAgent.core.store.getGraftRegistry = async () => [];
+
+    const snapshot = await agent.getGraphSnapshot();
+
+    expect(snapshot.nodes.map((node) => node.id)).toEqual(["topic-1", "topic-2"]);
+    expect(snapshot.snapshotNodes.map((entry) => entry.node.id)).toEqual(["topic-1", "topic-2"]);
+    expect(snapshot.edges).toEqual([earlierEdge, laterEdge]);
+    expect(snapshot.memories.map((memory) => memory.id)).toEqual(["memory-1", "memory-2"]);
+    expect(snapshot.snapshotMemories.map((entry) => entry.memory.id)).toEqual(["memory-1", "memory-2"]);
+    expect(snapshot.snapshotMemories[0]?.lifecycle).toMatchObject({
+      forgotten: true,
+      forgottenAt: new Date("2026-01-03T00:00:00.000Z"),
+    });
+    expect(snapshot.memoryEdges).toEqual([earlierMemoryEdge, laterMemoryEdge]);
   });
 
   it("returns graft registry entries and removes only registered grafts", async () => {

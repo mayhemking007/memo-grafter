@@ -26,6 +26,7 @@ export type {
   GraftExpansionStrategy,
   GraftRegistryEntry,
   GraphSnapshot,
+  GraphSnapshotMemory,
   GraphSnapshotNode,
   InjectionResult,
   IngestOptions,
