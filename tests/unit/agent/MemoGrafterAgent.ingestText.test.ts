@@ -165,3 +165,81 @@ describe("MemoGrafterAgent.ingestText", () => {
     expect(agent.getHistory()).toEqual([]);
   });
 });
+
+describe("MemoGrafterAgent.remember", () => {
+  it("stores explicit memory text through the ingestText path with remember defaults", async () => {
+    const llm = new CapturingLLMAdapter();
+    const agent = createAgent(llm);
+    const privateAgent = internals(agent);
+    const calls: Array<{ text: string; sessionId: string; options?: IngestTextOptions & { tags?: string[] } }> = [];
+
+    privateAgent.core.enqueueTextIngest = async (text, sessionId, options) => {
+      calls.push({ text, sessionId, options });
+    };
+    privateAgent.core.store.setSessionTags = async () => undefined;
+
+    await agent.setSessionTags(["Preference", " preference "]);
+    await agent.remember("The user prefers concise TypeScript examples.", {
+      label: "User preference",
+    });
+
+    expect(llm.calls).toEqual([]);
+    expect(agent.getHistory()).toEqual([]);
+    expect(privateAgent.ingestionHistory).toEqual([
+      { role: "user", content: "The user prefers concise TypeScript examples." },
+    ]);
+    expect(calls).toEqual([{
+      text: "The user prefers concise TypeScript examples.",
+      sessionId: agent.getSessionId(),
+      options: {
+        label: "User preference",
+        source: "remember",
+        tags: ["preference"],
+      },
+    }]);
+  });
+
+  it("lets callers override remember metadata while preserving ingest options", async () => {
+    const agent = createAgent();
+    const privateAgent = internals(agent);
+    const calls: Array<{ text: string; options?: IngestTextOptions & { tags?: string[] } }> = [];
+
+    privateAgent.core.enqueueTextIngest = async (text, _sessionId, options) => {
+      calls.push({ text, options });
+    };
+
+    await agent.remember("The imported CRM profile says the user works in finance.", {
+      replace: true,
+      label: "CRM profile",
+      source: "crm-import",
+    });
+
+    expect(calls).toEqual([{
+      text: "The imported CRM profile says the user works in finance.",
+      options: {
+        replace: true,
+        label: "CRM profile",
+        source: "crm-import",
+        tags: [],
+      },
+    }]);
+    expect(privateAgent.ingestionHistory).toEqual([
+      { role: "user", content: "The imported CRM profile says the user works in finance." },
+    ]);
+  });
+
+  it("treats whitespace-only remembered text as a no-op", async () => {
+    const agent = createAgent();
+    const privateAgent = internals(agent);
+    let callCount = 0;
+    privateAgent.core.enqueueTextIngest = async () => {
+      callCount += 1;
+    };
+
+    await agent.remember("   \n ");
+
+    expect(callCount).toBe(0);
+    expect(agent.getHistory()).toEqual([]);
+    expect(privateAgent.ingestionHistory).toEqual([]);
+  });
+});

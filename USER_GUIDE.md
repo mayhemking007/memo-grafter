@@ -342,6 +342,19 @@ Without `replace`, each text call appends to the current session memory. Later `
 
 In queue mode, `await agent.ingestText()` confirms that the ingestion job was queued. Reads may need to wait for the worker to finish before the new graph content is visible.
 
+### Remembering Explicit Facts
+
+Use `remember()` when your application already knows a fact, preference, or note and wants to store it without running an assistant turn:
+
+```ts
+await agent.remember("The user prefers concise TypeScript examples.", {
+  label: "User preference",
+  source: "profile-settings",
+});
+```
+
+`remember()` is a convenience wrapper around `ingestText()`. It uses the same extraction pipeline, applies the current session tags automatically, does not change `getHistory()`, and defaults `source` to `"remember"` when you do not provide one. The extraction LLM still decides which structured memories to create, so this API is best for natural-language facts and preferences rather than exact row-level inserts.
+
 ### Clearing A Session
 
 Use `clearSession()` when you intentionally want to reset an agent:
@@ -1656,6 +1669,7 @@ Main exports:
 - `TagFilterOptions`
 - `IngestOptions`
 - `IngestTextOptions`
+- `RememberOptions`
 - public shared and fleet types
 
 Useful `GraphStore` inspection methods:
@@ -1682,6 +1696,7 @@ Common `MemoGrafterAgent` methods:
 - `initialize()`: verify that MemoGrafter storage has already been migrated.
 - `invoke(message)`: send a user message and receive an assistant response.
 - `ingestText(text, options?)`: ingest raw text without generating an assistant response.
+- `remember(text, options?)`: store explicit natural-language facts or preferences through the text ingestion path.
 - `getHistory()`: read local chat history.
 - `getSessionId()`: read the current session ID.
 - `getGraphSnapshot()`: read a stable graph snapshot with raw topic and memory rows, graph edges, lifecycle metadata, graft metadata, session ID, and capture timestamp for visualization or inspection.

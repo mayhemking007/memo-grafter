@@ -72,6 +72,8 @@ await agent.ingestText("The product roadmap now prioritizes document imports.", 
   source: "import",
 });
 
+await agent.remember("The user prefers concise TypeScript examples.");
+
 const recall = await agent.recall("travel preferences");
 console.log(recall.facts);
 

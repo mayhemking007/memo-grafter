@@ -49,6 +49,7 @@ export type {
   MemoGrafterInjectConfig,
   MemoGrafterQueueConfig,
   Message,
+  RememberOptions,
   RetrievalResult,
   RetrieverConfig,
   SegmentExtractionResult,
