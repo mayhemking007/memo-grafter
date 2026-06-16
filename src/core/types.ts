@@ -246,6 +246,8 @@ export interface IngestTextOptions {
   source?: string;
 }
 
+export type RememberOptions = IngestTextOptions;
+
 /** @internal */
 export interface IngestPipelineOptions extends IngestOptions {
   replace?: boolean;

@@ -14,6 +14,7 @@ import type {
   MemoryNode,
   MemoGrafterConfig,
   Message,
+  RememberOptions,
   RetrievalResult,
   RetrieverConfig,
   TagFilterOptions,
@@ -99,6 +100,13 @@ export class MemoGrafterAgent {
     const operation = this.pendingIngest.then(run);
     this.pendingIngest = operation.catch(() => undefined);
     return operation;
+  }
+
+  remember(text: string, options: RememberOptions = {}): Promise<void> {
+    return this.ingestText(text, {
+      source: "remember",
+      ...options,
+    });
   }
 
   async getActiveNodes(options: TagFilterOptions = {}): Promise<TopicNode[]> {
