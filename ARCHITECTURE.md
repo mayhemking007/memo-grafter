@@ -14,6 +14,7 @@ The main runtime layers are:
 - `MemoGrafterCrawler`: an optional background maintenance worker for deterministic memory conflict detection and versioning.
 - `GraphStore`: the persistence boundary for messages, segments, topic nodes, memory nodes, edges, graft provenance, ingest state, and fleet metadata.
 - `PostgresGraphStore`: the current built-in `GraphStore` implementation, backed by PostgreSQL and `pgvector`.
+- CLI commands: setup, migration, and the local Studio host used for memory graph visibility.
 
 At a simplified level:
 
@@ -64,6 +65,18 @@ messages + sessionId
 The current ingestion model is incremental. `mg_session_ingest_state` tracks the last processed message index for each session, so repeated ingestion of the same message snapshot is a no-op for graph creation. Existing topic nodes, grafted nodes, memory nodes, and graph edges are preserved during normal `invoke()` processing. `clearSession()` remains available as an explicit reset API rather than a default ingest step.
 
 ## Main Components
+
+### CLI And Studio
+
+The CLI is an additive Node.js layer that lives under `cli/` and is built separately into `dist/cli`. Existing setup commands remain:
+
+- `memo-grafter init`: generate local project files.
+- `memo-grafter migrate`: create or update MemoGrafter-owned database infrastructure.
+- `memo-grafter studio`: launch a local read-only Studio host.
+
+Studio uses the same database resolution order as migration: explicit `--db`, then `.env` / `DATABASE_URL`, then `mg.config.ts`. At startup it verifies the MemoGrafter schema through `PostgresGraphStore.verifySchema()`, reads a distinct session count from existing `mg_*` tables, starts an HTTP server on `localhost:2891` or the next available port, opens the browser, and keeps the process alive until termination.
+
+The current Studio issue only hosts the shell and status surface. It does not add graph mutation APIs, change the `GraphStore` interface, or introduce a frontend build pipeline. The bundled Studio frontend is emitted with the CLI build so the package can serve it from `dist` without extra publish-time asset copying.
 
 ### MemoGrafterAgent
 
