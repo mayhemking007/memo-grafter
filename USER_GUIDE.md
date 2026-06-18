@@ -84,6 +84,20 @@ npx memo-grafter migrate
 
 `memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate app tables from `schema.ts`; keep using Prisma, Drizzle, raw SQL, or another migration tool for application tables.
 
+Launch MemoGrafter Studio when you want a local visibility and debugging entry point:
+
+```bash
+npx memo-grafter studio
+```
+
+Studio uses the same database resolution order as `migrate`: `--db`, then `.env` / `DATABASE_URL`, then `src/memo-grafter/mg.config.ts` or root `mg.config.ts`. To pass a connection string directly:
+
+```bash
+npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_grafter
+```
+
+Studio verifies the MemoGrafter schema, prints database connection status, session count, and the local URL, then opens your browser. It starts on `http://localhost:2891` or the next available port and keeps running until you stop it with `Ctrl+C`.
+
 Current v1 tables:
 
 - `mg_message_buffer`

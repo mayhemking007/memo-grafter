@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runInit } from "./commands/init.js";
 import { runMigrate } from "./commands/migrate.js";
+import { runStudio } from "./commands/studio.js";
 import { logger } from "./utils/logger.js";
 
 const [, , command, ...args] = process.argv;
@@ -10,6 +11,8 @@ try {
     await runInit();
   } else if (command === "migrate") {
     await runMigrate({ db: readFlag(args, "--db") });
+  } else if (command === "studio") {
+    await runStudio({ db: readFlag(args, "--db") });
   } else {
     printHelp();
     process.exitCode = command ? 1 : 0;
@@ -35,5 +38,6 @@ function printHelp(): void {
 Usage:
   memo-grafter init
   memo-grafter migrate [--db <connection-string>]
+  memo-grafter studio [--db <connection-string>]
 `);
 }
