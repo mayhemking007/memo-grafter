@@ -21,7 +21,15 @@ describe("memo-grafter studio", () => {
 
       expect(html.status).toBe(200);
       expect(html.body).toContain("MemoGrafter Studio");
-      expect(html.body).toContain('"sessionCount":3');
+      expect(html.body).toContain("session-list");
+      expect(html.body).toContain("graph-stage");
+      expect(html.body).toContain("node-type-filter");
+      expect(html.body).toContain("tag-filter");
+      expect(html.body).toContain("lifecycle-filter");
+      expect(html.body).toContain("refresh-sessions");
+      expect(html.body).toContain("refresh-graph");
+      expect(html.body).toContain('fetchJson("/api/sessions")');
+      expect(html.body).toContain('"/api/sessions/" + encodeURIComponent(sessionId) + "/graph"');
       expect(status.status).toBe(200);
       expect(status.body).toEqual(state);
       expect(missing.status).toBe(404);
