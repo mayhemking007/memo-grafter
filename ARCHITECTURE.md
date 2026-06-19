@@ -76,7 +76,9 @@ The CLI is an additive Node.js layer that lives under `cli/` and is built separa
 
 Studio uses the same database resolution order as migration: explicit `--db`, then `.env` / `DATABASE_URL`, then `mg.config.ts`. At startup it verifies the MemoGrafter schema through `PostgresGraphStore.verifySchema()`, reads a distinct session count from existing `mg_*` tables, starts an HTTP server on `localhost:2891` or the next available port, opens the browser, and keeps the process alive until termination.
 
-The current Studio issue only hosts the shell and status surface. It does not add graph mutation APIs, change the `GraphStore` interface, or introduce a frontend build pipeline. The bundled Studio frontend is emitted with the CLI build so the package can serve it from `dist` without extra publish-time asset copying.
+Studio includes an internal REST API for the bundled frontend. The API is DB-driven and scoped to one requested session at a time. It reuses `GraphStore` for session graph reads and lifecycle mutations, while `cli/studio/repository.ts` contains Studio-only SQL helpers for session listing, ownership checks, scoped edge reads, and lexical memory search. Keeping these helpers in the CLI avoids adding required methods to `GraphStore` and preserves compatibility for custom store implementations.
+
+The Studio API is local tooling infrastructure, not a public web service. Authentication and multi-user access control are intentionally out of scope. The bundled Studio frontend is emitted with the CLI build so the package can serve it from `dist` without extra publish-time asset copying.
 
 ### MemoGrafterAgent
 
