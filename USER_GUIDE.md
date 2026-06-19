@@ -98,6 +98,8 @@ npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_gr
 
 Studio verifies the MemoGrafter schema, prints database connection status, session count, and the local URL, then opens your browser. It starts on `http://localhost:2891` or the next available port and keeps running until you stop it with `Ctrl+C`.
 
+Studio also hosts an internal REST API for its own views, including session listing, graph reads, memory search, and lifecycle actions such as suppressing topics or forgetting memories. This API is local tooling infrastructure, not a public web service. Authentication, multi-user access control, and internet exposure are out of scope; do not bind Studio to a public interface or proxy it as an application API.
+
 Current v1 tables:
 
 - `mg_message_buffer`

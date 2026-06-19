@@ -4,9 +4,11 @@ import type { AddressInfo } from "node:net";
 import postgres, { type Sql } from "postgres";
 import { resolveConnectionString } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
+import { handleStudioApiRequest, isStudioApiRequest, type StudioApiStore } from "../studio/api.js";
 import { renderStudioHtml, type StudioFrontendState } from "../studio/frontend.js";
+import { StudioRepository } from "../studio/repository.js";
 
-interface StudioStore {
+interface StudioStore extends StudioApiStore {
   verifySchema(): Promise<void>;
   close(): Promise<void>;
 }
@@ -70,13 +72,17 @@ export async function startStudioServer(options: StudioStartOptions): Promise<St
       onnotice: () => undefined,
     });
     const sessionCount = await readSessionCount(sql);
+    const repository = new StudioRepository(sql);
     const state: StudioFrontendState = {
       databaseStatus: "connected",
       sessionCount,
       studioUrl: "",
     };
     const server = http.createServer((request, response) => {
-      handleStudioRequest(request, response, state);
+      void handleStudioRequest(request, response, state, {
+        store,
+        repository,
+      });
     });
     const port = await listenOnAvailablePort(server, options.host, options.port);
     const url = `http://${options.host}:${port}`;
@@ -130,12 +136,26 @@ export function handleStudioRequest(
   request: IncomingMessage,
   response: ServerResponse,
   state: StudioFrontendState,
-): void {
+  apiContext?: { store: StudioApiStore; repository: StudioRepository },
+): void | Promise<void> {
   const url = request.url ?? "/";
 
   if (url === "/api/status") {
     sendJson(response, state);
     return;
+  }
+
+  if (isStudioApiRequest(url)) {
+    if (!apiContext) {
+      response.writeHead(500, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(JSON.stringify({ error: "Studio API is not configured." }));
+      return;
+    }
+
+    return handleStudioApiRequest(request, response, apiContext);
   }
 
   if (url === "/" || url === "/index.html") {
