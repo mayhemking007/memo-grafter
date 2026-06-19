@@ -78,6 +78,8 @@ Studio uses the same database resolution order as migration: explicit `--db`, th
 
 Studio includes an internal REST API for the bundled frontend. The API is DB-driven and scoped to one requested session at a time. It reuses `GraphStore` for session graph reads and lifecycle mutations, while `cli/studio/repository.ts` contains Studio-only SQL helpers for session listing, ownership checks, scoped edge reads, and lexical memory search. Keeping these helpers in the CLI avoids adding required methods to `GraphStore` and preserves compatibility for custom store implementations.
 
+The initial frontend follows a session-first workflow. It loads only the session summary list on landing, fetches graph data after a session is selected, renders topic nodes and memory nodes in a lightweight SVG graph, and applies client-side filters for node type, tags, and lifecycle state. Manual refresh controls let developers reload either the session list or the selected session graph without restarting Studio.
+
 The Studio API is local tooling infrastructure, not a public web service. Authentication and multi-user access control are intentionally out of scope. The bundled Studio frontend is emitted with the CLI build so the package can serve it from `dist` without extra publish-time asset copying.
 
 ### MemoGrafterAgent
