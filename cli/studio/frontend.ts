@@ -357,8 +357,25 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       .details {
         display: grid;
-        gap: 12px;
+        gap: 16px;
         padding: 14px;
+      }
+
+      .detail-section {
+        display: grid;
+        gap: 10px;
+      }
+
+      .detail-section + .detail-section {
+        border-top: 1px solid #dbe2eb;
+        padding-top: 14px;
+      }
+
+      .detail-section-title {
+        color: #34445a;
+        font-size: 12px;
+        font-weight: 800;
+        margin: 0;
       }
 
       .detail-row {
@@ -378,6 +395,59 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         font-size: 13px;
         line-height: 1.45;
         overflow-wrap: anywhere;
+      }
+
+      .detail-list {
+        display: grid;
+        gap: 6px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .detail-link {
+        background: transparent;
+        border: 0;
+        color: #1d4ed8;
+        cursor: pointer;
+        font: inherit;
+        padding: 0;
+        text-align: left;
+      }
+
+      .detail-link:hover {
+        text-decoration: underline;
+      }
+
+      .detail-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .danger-button {
+        background: #fff;
+        border: 1px solid #c2413b;
+        color: #a52f2a;
+      }
+
+      .action-status {
+        border-left: 3px solid;
+        font-size: 13px;
+        line-height: 1.45;
+        padding: 8px 10px;
+      }
+
+      .action-status.success {
+        background: #edf8f1;
+        border-color: #27814c;
+        color: #176238;
+      }
+
+      .action-status.error {
+        background: #fff1f0;
+        border-color: #c2413b;
+        color: #922d28;
       }
 
       .tag-row {
@@ -511,6 +581,8 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           selectedGraphNodeId: null,
           loadingSessions: false,
           loadingGraph: false,
+          actionPending: false,
+          actionStatus: null,
           error: null,
           filters: {
             nodeType: "all",
@@ -541,7 +613,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         elements.refreshSessions.addEventListener("click", () => loadSessions());
         elements.refreshGraph.addEventListener("click", () => {
-          if (state.selectedSessionId) loadGraph(state.selectedSessionId);
+          if (state.selectedSessionId) {
+            state.actionStatus = null;
+            loadGraph(state.selectedSessionId, { preserveSelection: true });
+          }
         });
         elements.nodeTypeFilter.addEventListener("change", () => {
           state.filters.nodeType = elements.nodeTypeFilter.value;
@@ -580,10 +655,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }
         }
 
-        async function loadGraph(sessionId) {
+        async function loadGraph(sessionId, options) {
+          const preserveSelection = Boolean(options && options.preserveSelection && state.selectedSessionId === sessionId);
+          const selectedGraphNodeId = preserveSelection ? state.selectedGraphNodeId : null;
           state.selectedSessionId = sessionId;
-          state.graph = null;
-          state.selectedGraphNodeId = null;
+          if (!preserveSelection) {
+            state.graph = null;
+            state.actionStatus = null;
+          }
+          state.selectedGraphNodeId = selectedGraphNodeId;
           state.loadingGraph = true;
           state.error = null;
           renderSessions();
@@ -591,8 +671,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           renderHeader();
           try {
             state.graph = await fetchJson("/api/sessions/" + encodeURIComponent(sessionId) + "/graph");
+            return true;
           } catch (error) {
             state.error = error.message || String(error);
+            return false;
           } finally {
             state.loadingGraph = false;
             renderSessions();
@@ -601,8 +683,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }
         }
 
-        async function fetchJson(url) {
-          const response = await fetch(url, { headers: { accept: "application/json" } });
+        async function fetchJson(url, options) {
+          const requestOptions = options || {};
+          const response = await fetch(url, {
+            ...requestOptions,
+            headers: { accept: "application/json", ...(requestOptions.headers || {}) }
+          });
           const body = await response.json();
           if (!response.ok) {
             throw new Error(body.error || body.message || "Request failed");
@@ -661,7 +747,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         function renderGraph() {
           renderHeader();
 
-          if (state.loadingGraph) {
+          if (state.loadingGraph && !state.graph) {
             elements.graphStage.innerHTML = '<div class="loading-state">Loading graph...</div>';
             elements.graphSummary.textContent = "";
             renderDetails(null);
@@ -699,6 +785,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             node.addEventListener("click", () => {
               state.selectedGraphNodeId = node.getAttribute("data-graph-node-id");
+              state.actionStatus = null;
               renderGraph();
             });
           });
@@ -817,17 +904,185 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             return;
           }
 
+          elements.detailsPanel.innerHTML = node.kind === "topic"
+            ? renderTopicDetails(node)
+            : renderMemoryDetails(node);
+
+          elements.detailsPanel.querySelectorAll("[data-detail-node-id]").forEach((button) => {
+            button.addEventListener("click", () => {
+              state.selectedGraphNodeId = button.getAttribute("data-detail-node-id");
+              state.actionStatus = null;
+              renderGraph();
+            });
+          });
+
+          elements.detailsPanel.querySelectorAll("[data-lifecycle-action]").forEach((button) => {
+            button.addEventListener("click", () => runLifecycleAction(node, button.getAttribute("data-lifecycle-action")));
+          });
+        }
+
+        function renderTopicDetails(node) {
           const raw = node.raw || {};
-          elements.detailsPanel.innerHTML =
-            detailRow("Type", node.kind) +
-            detailRow("ID", node.id) +
-            detailRow("Lifecycle", node.lifecycle) +
-            detailRow("Title", node.title) +
-            detailRow("Summary", node.subtitle || "None") +
-            detailRow("Tags", tagsMarkup(node.tags)) +
-            detailRow("Created", formatDate(raw.createdAt)) +
-            (node.kind === "memory" ? detailRow("Confidence", raw.confidence == null ? "Unknown" : String(raw.confidence)) : "") +
-            (node.kind === "topic" ? detailRow("Topic order", raw.topicOrder == null ? "Unknown" : String(raw.topicOrder)) : "");
+          const connectedMemories = (state.graph.memories || []).filter((memory) => memory.topicNodeId === node.id);
+          const lifecycle = raw.suppressed
+            ? "Suppressed" + (raw.suppressedAt ? " since " + formatDate(raw.suppressedAt) : "")
+            : "Active";
+          const sourceRows = [
+            detailTextRow("Source", raw.source || "Not recorded"),
+            detailTextRow("Segment", raw.segmentId || "Unknown"),
+            detailTextRow("Message range", Array.isArray(raw.messageRange) ? raw.messageRange.join(" to ") : "Unknown"),
+            detailTextRow("Agent", raw.agentId || "None"),
+            detailTextRow("Fleet", raw.fleetId || "None")
+          ].join("");
+
+          return detailSection("Topic", [
+            detailTextRow("Label", raw.label || node.title),
+            detailTextRow("Summary", raw.summary || "None"),
+            detailRow("Tags", tagsMarkup(node.tags)),
+            detailTextRow("Lifecycle", lifecycle),
+            detailTextRow("Topic order", raw.topicOrder == null ? "Unknown" : String(raw.topicOrder)),
+            detailTextRow("Created", formatDate(raw.createdAt))
+          ].join("")) +
+          detailSection("Source metadata", sourceRows) +
+          detailSection("Connected memories", connectedMemoriesMarkup(connectedMemories)) +
+          renderActionSection(node);
+        }
+
+        function renderMemoryDetails(node) {
+          const raw = node.raw || {};
+          const lifecycleFlags = memoryLifecycleFlags(raw);
+          const relationshipMarkup = memoryRelationshipsMarkup(node.id);
+
+          return detailSection("Memory", [
+            detailTextRow("Subject", raw.subject || "None"),
+            detailTextRow("Predicate", raw.predicate || "None"),
+            detailTextRow("Value", raw.value || "None"),
+            detailTextRow("Confidence", raw.confidence == null ? "Unknown" : String(raw.confidence)),
+            detailTextRow("Memory type", raw.memoryType || "Unknown"),
+            detailTextRow("Source type", raw.sourceType || "Unknown"),
+            detailRow("Tags", tagsMarkup(node.tags)),
+            detailTextRow("Created", formatDate(raw.createdAt))
+          ].join("")) +
+          detailSection("Lifecycle", [
+            detailRow("Flags", tagsMarkup(lifecycleFlags)),
+            detailTextRow("Forgotten at", raw.forgottenAt ? formatDate(raw.forgottenAt) : "Not forgotten"),
+            detailTextRow("Superseded by", raw.supersededBy || "None")
+          ].join("")) +
+          detailSection("Source metadata", [
+            detailTextRow("Source", raw.source || "Not recorded"),
+            detailTextRow("Title", raw.sourceTitle || "Not recorded"),
+            detailTextRow("URL", raw.sourceUrl || "Not recorded"),
+            detailTextRow("Topic node", raw.topicNodeId || "Unknown"),
+            detailTextRow("Agent", raw.agentId || "None"),
+            detailTextRow("Fleet", raw.fleetId || "None")
+          ].join("")) +
+          detailSection("Relationships", relationshipMarkup) +
+          renderActionSection(node);
+        }
+
+        function renderActionSection(node) {
+          const status = state.actionStatus && state.actionStatus.nodeId === node.id
+            ? '<div class="action-status ' + state.actionStatus.kind + '" role="' + (state.actionStatus.kind === "error" ? "alert" : "status") + '" aria-live="polite">' + escapeHtml(state.actionStatus.message) + '</div>'
+            : "";
+          let action = "";
+
+          if (node.kind === "topic") {
+            const actionName = node.raw.suppressed ? "restore" : "suppress";
+            const label = node.raw.suppressed ? "Restore topic" : "Suppress topic";
+            action = '<button class="icon-button" type="button" data-lifecycle-action="' + actionName + '"' + (state.actionPending ? " disabled" : "") + '>' + label + '</button>';
+          } else if (!node.raw.forgotten) {
+            action = '<button class="icon-button danger-button" type="button" data-lifecycle-action="forget"' + (state.actionPending ? " disabled" : "") + '>Forget memory</button>';
+          }
+
+          if (!action && !status) return "";
+          return detailSection("Maintenance", status + (action ? '<div class="detail-actions">' + action + '</div>' : ""));
+        }
+
+        async function runLifecycleAction(node, action) {
+          if (!state.selectedSessionId || state.actionPending) return;
+          if (action === "forget" && !window.confirm("Forget this memory? This lifecycle action cannot be undone in Studio.")) return;
+
+          const sessionId = state.selectedSessionId;
+          const collection = node.kind === "topic" ? "nodes" : "memories";
+          const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/" + collection + "/" + encodeURIComponent(node.id) + "/" + action;
+          state.actionPending = true;
+          state.actionStatus = null;
+          renderDetails(node);
+
+          try {
+            const result = await fetchJson(url, { method: "POST" });
+            state.actionStatus = {
+              nodeId: node.id,
+              kind: "success",
+              message: lifecycleActionMessage(action, result.changed)
+            };
+            const refreshed = await loadGraph(sessionId, { preserveSelection: true });
+            if (!refreshed) {
+              state.actionStatus = {
+                nodeId: node.id,
+                kind: "error",
+                message: "The lifecycle action completed, but the graph could not be refreshed: " + state.error
+              };
+            }
+          } catch (error) {
+            state.actionStatus = {
+              nodeId: node.id,
+              kind: "error",
+              message: error.message || String(error)
+            };
+          } finally {
+            state.actionPending = false;
+            renderGraph();
+          }
+        }
+
+        function lifecycleActionMessage(action, changed) {
+          if (!changed) return "No change was needed; the lifecycle state was already up to date.";
+          if (action === "forget") return "Memory forgotten. The graph and node details have been refreshed.";
+          if (action === "suppress") return "Topic suppressed. The graph and node details have been refreshed.";
+          return "Topic restored. The graph and node details have been refreshed.";
+        }
+
+        function connectedMemoriesMarkup(memories) {
+          if (memories.length === 0) return '<p class="subtle">No memories are connected to this topic.</p>';
+          return '<ul class="detail-list">' + memories.map((memory) =>
+            '<li><button class="detail-link" type="button" data-detail-node-id="' + escapeAttribute(memory.id) + '">' +
+              escapeHtml(memory.subject + " " + memory.predicate + ": " + memory.value) +
+            '</button></li>'
+          ).join("") + '</ul>';
+        }
+
+        function memoryRelationshipsMarkup(memoryId) {
+          const edges = (state.graph.memoryEdges || []).filter((edge) => edge.sourceId === memoryId || edge.targetId === memoryId);
+          if (edges.length === 0) return '<p class="subtle">No related, conflict, or update edges.</p>';
+
+          return '<ul class="detail-list">' + edges.map((edge) => {
+            const outgoing = edge.sourceId === memoryId;
+            const relatedId = outgoing ? edge.targetId : edge.sourceId;
+            const related = (state.graph.memories || []).find((memory) => memory.id === relatedId);
+            const direction = outgoing ? "outgoing" : "incoming";
+            const label = related ? related.subject + " " + related.predicate + ": " + related.value : relatedId;
+            return '<li><span class="badge">' + escapeHtml(edge.edgeType || "related") + '</span> ' +
+              '<span class="subtle">' + direction + '</span> ' +
+              '<button class="detail-link" type="button" data-detail-node-id="' + escapeAttribute(relatedId) + '">' + escapeHtml(label) + '</button></li>';
+          }).join("") + '</ul>';
+        }
+
+        function memoryLifecycleFlags(memory) {
+          const flags = [];
+          if (memory.forgotten) flags.push("forgotten");
+          if (memory.decayed) flags.push("decayed");
+          if (memory.hasConflict) flags.push("conflicting");
+          if (memory.supersededBy) flags.push("superseded");
+          return flags.length > 0 ? flags : ["active"];
+        }
+
+        function detailSection(title, content) {
+          return '<section class="detail-section"><h2 class="detail-section-title">' + escapeHtml(title) + '</h2>' + content + '</section>';
+        }
+
+        function detailTextRow(label, value) {
+          return detailRow(label, escapeHtml(value));
         }
 
         function detailRow(label, value) {

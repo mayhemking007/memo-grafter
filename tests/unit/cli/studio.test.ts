@@ -1,6 +1,7 @@
 import http from "node:http";
 import { describe, expect, it } from "vitest";
 import { handleStudioRequest, listenOnAvailablePort } from "../../../cli/commands/studio.js";
+import { renderStudioHtml } from "../../../cli/studio/frontend.js";
 
 describe("memo-grafter studio", () => {
   it("serves the bundled frontend and status endpoint", async () => {
@@ -55,6 +56,28 @@ describe("memo-grafter studio", () => {
       await closeServer(server);
       await closeServer(occupied);
     }
+  });
+
+  it("bundles node inspection and lifecycle maintenance workflows", () => {
+    const html = renderStudioHtml({
+      databaseStatus: "connected",
+      sessionCount: 1,
+      studioUrl: "http://localhost:2891",
+    });
+
+    expect(html).toContain("Connected memories");
+    expect(html).toContain("Source metadata");
+    expect(html).toContain("Relationships");
+    expect(html).toContain("Memory type");
+    expect(html).toContain("Lifecycle");
+    expect(html).toContain("Suppress topic");
+    expect(html).toContain("Restore topic");
+    expect(html).toContain("Forget memory");
+    expect(html).toContain('data-lifecycle-action="');
+    expect(html).toContain('fetchJson(url, { method: "POST" })');
+    expect(html).toContain("This lifecycle action cannot be undone in Studio.");
+    expect(html).toContain("preserveSelection: true");
+    expect(html).toContain('aria-live="polite"');
   });
 });
 

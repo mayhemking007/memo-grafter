@@ -69,11 +69,12 @@ REDIS_URL=redis://localhost:6379
 
 `REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
 
-Initialize MemoGrafter project files and migrate the MemoGrafter tables:
+For the recommended local setup flow, initialize the project files, migrate the MemoGrafter tables, and then launch Studio:
 
 ```bash
 npx memo-grafter init
 npx memo-grafter migrate
+npx memo-grafter studio
 ```
 
 `memo-grafter init` creates local project files only:
@@ -84,7 +85,7 @@ npx memo-grafter migrate
 
 `memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate app tables from `schema.ts`; keep using Prisma, Drizzle, raw SQL, or another migration tool for application tables.
 
-Launch MemoGrafter Studio when you want a local visibility and debugging entry point:
+You can launch MemoGrafter Studio again whenever you want a local visibility and debugging entry point:
 
 ```bash
 npx memo-grafter studio
@@ -98,7 +99,9 @@ npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_gr
 
 Studio verifies the MemoGrafter schema, prints database connection status, session count, and the local URL, then opens your browser. It starts on `http://localhost:2891` or the next available port and keeps running until you stop it with `Ctrl+C`.
 
-The Studio landing page shows sessions first. Select a session to load its graph on demand, then use the node type, tag, and lifecycle filters to narrow the read-only graph view. Use the refresh controls to reload the session list or the selected graph after your application writes more memory.
+The Studio landing page shows sessions first. Select a session to load its graph on demand, then use the node type, tag, and lifecycle filters to narrow the graph view. Selecting a topic shows its summary, source metadata, lifecycle state, and connected memories. Selecting a memory shows its structured fact fields, confidence, lifecycle flags, source metadata, and related, conflict, or update edges.
+
+The node details panel also provides maintenance actions. Topics can be suppressed and restored, and memories can be forgotten. Studio refreshes the selected graph after each successful action and keeps the affected node selected so its new lifecycle state is visible. Forgetting is a one-way soft lifecycle action in Studio; forgotten memory remains available for audit views but is excluded from active recall. Use the refresh controls to reload the session list or selected graph after your application writes more memory.
 
 Studio also hosts an internal REST API for its own views, including session listing, graph reads, memory search, and lifecycle actions such as suppressing topics or forgetting memories. This API is local tooling infrastructure, not a public web service. Authentication, multi-user access control, and internet exposure are out of scope; do not bind Studio to a public interface or proxy it as an application API.
 
