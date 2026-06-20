@@ -13,8 +13,9 @@ npm run verify
 `init` creates local project files:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter `mg_*` schema reference.
-- `src/memo-grafter/schema.ts`: user-owned schema entrypoint. MemoGrafter does not overwrite it on reruns.
 - `src/memo-grafter/mg.config.ts`: CLI config that reads `DATABASE_URL`.
+
+MemoGrafter does not create an application schema entrypoint. Keep application tables in the schema or migration files already used by your application.
 
 `migrate` creates or updates only MemoGrafter-owned `mg_*` tables. Application tables remain managed by your app migration tool.
 
