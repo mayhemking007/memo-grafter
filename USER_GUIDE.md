@@ -80,10 +80,11 @@ npx memo-grafter studio
 `memo-grafter init` creates local project files only:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
-- `src/memo-grafter/schema.ts`: user-owned schema composition file. It is created only if missing and is never overwritten.
 - `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config.
 
-`memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate app tables from `schema.ts`; keep using Prisma, Drizzle, raw SQL, or another migration tool for application tables.
+`memo-grafter init` does not create, relocate, or modify an application schema file. Keep application models and tables in the location expected by Prisma, Drizzle, raw SQL migrations, or your existing database tool.
+
+`memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate application tables.
 
 You can launch MemoGrafter Studio again whenever you want a local visibility and debugging entry point:
 

@@ -41,7 +41,6 @@ export async function runInit(cwd = process.cwd()): Promise<InitResult> {
   writeFileSync(path.join(memoGrafterDir, "mg-schema.ts"), await renderMgSchema(), "utf8");
   result.generated.push("src/memo-grafter/mg-schema.ts");
 
-  writeIfMissing(path.join(memoGrafterDir, "schema.ts"), renderSchemaTs(), "src/memo-grafter/schema.ts", result);
   writeIfMissing(path.join(memoGrafterDir, "mg.config.ts"), renderConfigTs(), "src/memo-grafter/mg.config.ts", result);
   ensureEnvExample(cwd, result);
 
@@ -90,13 +89,13 @@ function ensureEnvExample(cwd: string, result: InitResult): void {
 async function renderMgSchema(): Promise<string> {
   const schema = await loadSchemaModule();
   const tableBlocks = schema.memoGrafterTables.map((table: SchemaTable) => {
-    const columns = table.columns.map((column: SchemaColumn) => `      ${column.name}: ${JSON.stringify(column)},`).join("\n");
+    const columns = table.columns.map(renderSchemaColumn).join("\n");
     const constraints = table.constraints
       ? `,\n    constraints: ${JSON.stringify(table.constraints)}`
       : "";
-    return `  ${table.name}: {
-    name: "${table.name}",
-    description: "${table.description}",
+    return `  ${renderPropertyName(table.name)}: {
+    name: ${JSON.stringify(table.name)},
+    description: ${JSON.stringify(table.description)},
     columns: {
 ${columns}
     }${constraints}
@@ -116,33 +115,23 @@ export const memoGrafterIndexes = ${JSON.stringify(schema.memoGrafterIndexes, nu
 `;
 }
 
+function renderSchemaColumn(column: SchemaColumn): string {
+  const properties = Object.entries(column)
+    .map(([name, value]) => `        ${renderPropertyName(name)}: ${JSON.stringify(value)},`)
+    .join("\n");
+
+  return `      ${renderPropertyName(column.name)}: {
+${properties}
+      },`;
+}
+
+function renderPropertyName(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
+}
+
 async function loadSchemaModule(): Promise<SchemaModule> {
   const packageName = "memo-grafter/schema";
   return await import(packageName) as SchemaModule;
-}
-
-function renderSchemaTs(): string {
-  return `// Your application schema entrypoint.
-//
-// MemoGrafter owns and regenerates mg-schema.ts.
-// This file is user-owned and will not be overwritten.
-//
-// Today, \`memo-grafter migrate\` manages only MemoGrafter \`mg_*\` tables.
-// If you use Prisma, keep app models in prisma/schema.prisma.
-// If you use another migration tool, keep using it for app tables.
-
-export * from "./mg-schema.js";
-
-/*
-Example app table SQL for your own migration tool:
-
-CREATE TABLE users (
-  id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-*/
-`;
 }
 
 function renderConfigTs(): string {

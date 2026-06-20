@@ -70,7 +70,7 @@ The current ingestion model is incremental. `mg_session_ingest_state` tracks the
 
 The CLI is an additive Node.js layer that lives under `cli/` and is built separately into `dist/cli`. Existing setup commands remain:
 
-- `memo-grafter init`: generate local project files.
+- `memo-grafter init`: generate the MemoGrafter-owned `mg-schema.ts` reference and `mg.config.ts` without creating or modifying an application schema entrypoint.
 - `memo-grafter migrate`: create or update MemoGrafter-owned database infrastructure.
 - `memo-grafter studio`: launch a local read-only Studio host.
 
