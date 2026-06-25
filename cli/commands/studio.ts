@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import postgres, { type Sql } from "postgres";
 import { resolveConnectionString } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
+import { assertProjectInitialized } from "../utils/project.js";
 import { handleStudioApiRequest, isStudioApiRequest, type StudioApiStore } from "../studio/api.js";
 import { renderStudioHtml, type StudioFrontendState } from "../studio/frontend.js";
 import { StudioRepository } from "../studio/repository.js";
@@ -38,6 +39,7 @@ interface StudioStartOptions extends Required<Pick<StudioOptions, "host" | "port
 
 export async function runStudio(options: StudioOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+  assertProjectInitialized(cwd);
   const connectionString = await resolveConnectionString({
     cwd,
     ...(options.db ? { db: options.db } : {}),
@@ -294,6 +296,7 @@ function formatStudioStartupError(error: unknown): Error {
     message,
     "",
     "Troubleshooting:",
+    "- Run npx memo-grafter init before launching Studio.",
     "- Pass --db <connection-string>, set DATABASE_URL, or configure db.connectionString in mg.config.ts.",
     "- Run npx memo-grafter migrate before launching Studio.",
     "- Confirm PostgreSQL is running and reachable from this shell.",

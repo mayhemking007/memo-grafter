@@ -7,7 +7,8 @@ cd examples/cli-schema-workflow
 npm install
 npx memo-grafter init
 npx memo-grafter migrate
-npm run verify
+npm run seed
+npx memo-grafter studio
 ```
 
 `init` creates local project files:
@@ -17,7 +18,7 @@ npm run verify
 
 MemoGrafter does not create an application schema entrypoint. Keep application tables in the schema or migration files already used by your application.
 
-`migrate` creates or updates only MemoGrafter-owned `mg_*` tables. Application tables remain managed by your app migration tool.
+`migrate` is the preferred database setup step. It creates or updates only MemoGrafter-owned `mg_*` tables and should run after `init`. Application tables remain managed by your app migration tool.
 
 Set a database URL before running `migrate`:
 
@@ -48,20 +49,26 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` so `DATABASE_URL` points to your PostgreSQL database, then run:
+Edit `.env` so `DATABASE_URL` points to your PostgreSQL database and `OPENAI_API_KEY` contains your OpenAI key, then run:
 
 ```bash
 npx memo-grafter init
 npx memo-grafter migrate
-npm run verify
+npm run seed
+npx memo-grafter studio
 ```
 
 `npx memo-grafter migrate` reads `DATABASE_URL` from `.env`, the shell environment, or `src/memo-grafter/mg.config.ts`.
 
-Expected result:
+The seed script uses `OpenAILLMAdapter` and `OpenAIEmbedAdapter` to create two sessions. Each session contains several turns, tags, a topic change, topic nodes, and extracted memory nodes. It prints both session IDs and a graph summary when ingestion finishes.
+
+`npx memo-grafter studio` opens the Studio session browser. Select either generated session to inspect its graph and node details.
+
+Expected final output from the seed script:
 
 ```text
-MemoGrafter schema verified. CLI migration is ready to use.
+Studio data is ready.
+Run: npx memo-grafter studio
 ```
 
-To confirm the new runtime behavior, try `npm run verify` before `npx memo-grafter migrate` against a fresh database. It should fail with a helpful message telling you to run `npx memo-grafter migrate`.
+The existing `npm run verify` command remains as an alias for `npm run seed`.

@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "seed": "tsx --env-file=.env src/index.ts",
     "verify": "tsx --env-file=.env src/index.ts"
   },
   "dependencies": {
-    "memo-grafter": "file:../.."
+    "memo-grafter": "file:../..",
+    "openai": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

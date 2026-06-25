@@ -142,7 +142,7 @@ export class PostgresGraphStore implements GraphStore {
     ].join(", ");
     throw new Error(
       `MemoGrafter database schema is not initialized. Missing ${missing}. `
-      + "Run: npx memo-grafter migrate --db <connection-string>",
+      + "Run: npx memo-grafter init, then npx memo-grafter migrate --db <connection-string>",
     );
   }
 

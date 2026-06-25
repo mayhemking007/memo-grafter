@@ -39,5 +39,10 @@ Usage:
   memo-grafter init
   memo-grafter migrate [--db <connection-string>]
   memo-grafter studio [--db <connection-string>]
+
+Recommended setup:
+  memo-grafter init
+  memo-grafter migrate
+  memo-grafter studio
 `);
 }

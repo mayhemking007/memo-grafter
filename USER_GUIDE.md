@@ -69,7 +69,7 @@ REDIS_URL=redis://localhost:6379
 
 `REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
 
-For the recommended local setup flow, initialize the project files, migrate the MemoGrafter tables, and then launch Studio:
+For the recommended setup flow, initialize the project files, migrate the MemoGrafter tables, and then launch Studio:
 
 ```bash
 npx memo-grafter init
@@ -77,14 +77,14 @@ npx memo-grafter migrate
 npx memo-grafter studio
 ```
 
-`memo-grafter init` creates local project files only:
+`memo-grafter init` is required before `migrate` or `studio`. It creates local project files only:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
 - `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config.
 
 `memo-grafter init` does not create, relocate, or modify an application schema file. Keep application models and tables in the location expected by Prisma, Drizzle, raw SQL migrations, or your existing database tool.
 
-`memo-grafter migrate` creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate application tables.
+`memo-grafter migrate` is the preferred migration path. It creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate application tables, and it should run once per database or deployment rather than on every application startup.
 
 You can launch MemoGrafter Studio again whenever you want a local visibility and debugging entry point:
 
@@ -92,7 +92,7 @@ You can launch MemoGrafter Studio again whenever you want a local visibility and
 npx memo-grafter studio
 ```
 
-Studio uses the same database resolution order as `migrate`: `--db`, then `.env` / `DATABASE_URL`, then `src/memo-grafter/mg.config.ts` or root `mg.config.ts`. To pass a connection string directly:
+Studio requires the project to be initialized and uses the same database resolution order as `migrate`: `--db`, then `.env` / `DATABASE_URL`, then `src/memo-grafter/mg.config.ts`. To pass a connection string directly:
 
 ```bash
 npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_grafter
@@ -123,7 +123,7 @@ Current v1 tables:
 
 ## Quick Start
 
-Run the setup commands once for your app:
+Run the setup commands once for your app before starting application code:
 
 ```bash
 npx memo-grafter init
@@ -998,6 +998,8 @@ const store: GraphStore = new PostgresGraphStore(process.env.DATABASE_URL!);
 
 `GraphStore` is the public storage interface. `PostgresGraphStore` is the default PostgreSQL and pgvector implementation.
 
+Do not call `store.migrate()` from normal application startup. Use `npx memo-grafter migrate` during setup or deploy so schema changes happen intentionally before your app starts serving traffic.
+
 Useful store inspection methods include:
 
 - `getNodesBySession(sessionId, options?)`: read topic nodes for a session, optionally filtered by tags.
@@ -1350,7 +1352,6 @@ import {
 } from "memo-grafter";
 
 const store = new PostgresGraphStore(process.env.DATABASE_URL!);
-await store.migrate(); // Or run `npx memo-grafter migrate` before app startup.
 await store.initialize();
 
 const embedder = new OpenAIEmbedAdapter("text-embedding-3-small");
@@ -1375,6 +1376,18 @@ console.log(result.systemPrompt);
 
 await store.close();
 ```
+
+If the CLI cannot run in your deploy, CI, or test environment, `PostgresGraphStore.migrate()` remains available as a manual fallback:
+
+```ts
+import { PostgresGraphStore } from "memo-grafter";
+
+const store = new PostgresGraphStore(process.env.DATABASE_URL!);
+await store.migrate();
+await store.close();
+```
+
+Use this fallback as a dedicated setup step, not inside your main app startup path.
 
 When using pipelines directly you are responsible for managing the store
 connection lifecycle. Call `store.close()` during graceful shutdown.
