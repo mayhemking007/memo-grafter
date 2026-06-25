@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runInit } from "../../../cli/commands/init.js";
+import { getProjectInitializationStatus } from "../../../cli/utils/project.js";
 
 describe("memo-grafter init", () => {
   it("creates only MemoGrafter-owned project files and preserves existing schema files", async () => {
@@ -10,6 +11,7 @@ describe("memo-grafter init", () => {
 
     const first = await runInit(cwd);
 
+    expect(getProjectInitializationStatus(cwd).initialized).toBe(true);
     expect(first.generated).toContain("src/memo-grafter/mg-schema.ts");
     expect(first.created).toEqual(expect.arrayContaining([
       "src/memo-grafter/mg.config.ts",

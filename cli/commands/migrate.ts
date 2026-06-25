@@ -1,5 +1,6 @@
 import { resolveConnectionString } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
+import { assertProjectInitialized } from "../utils/project.js";
 
 interface MigrationReport {
   extensions: Array<{ name: string; status: string }>;
@@ -23,6 +24,7 @@ export interface MigrateOptions {
 
 export async function runMigrate(options: MigrateOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+  assertProjectInitialized(cwd);
   const connectionString = await resolveConnectionString({
     cwd,
     ...(options.db ? { db: options.db } : {}),

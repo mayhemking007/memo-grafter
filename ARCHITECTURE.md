@@ -70,11 +70,11 @@ The current ingestion model is incremental. `mg_session_ingest_state` tracks the
 
 The CLI is an additive Node.js layer that lives under `cli/` and is built separately into `dist/cli`. Existing setup commands remain:
 
-- `memo-grafter init`: generate the MemoGrafter-owned `mg-schema.ts` reference and `mg.config.ts` without creating or modifying an application schema entrypoint.
-- `memo-grafter migrate`: create or update MemoGrafter-owned database infrastructure.
-- `memo-grafter studio`: launch a local read-only Studio host.
+- `memo-grafter init`: required project setup that generates the MemoGrafter-owned `mg-schema.ts` reference and `mg.config.ts` without creating or modifying an application schema entrypoint.
+- `memo-grafter migrate`: preferred database setup command that creates or updates MemoGrafter-owned database infrastructure.
+- `memo-grafter studio`: launch a local Studio host for browsing sessions, inspecting node details, and applying lifecycle actions.
 
-Studio uses the same database resolution order as migration: explicit `--db`, then `.env` / `DATABASE_URL`, then `mg.config.ts`. At startup it verifies the MemoGrafter schema through `PostgresGraphStore.verifySchema()`, reads a distinct session count from existing `mg_*` tables, starts an HTTP server on `localhost:2891` or the next available port, opens the browser, and keeps the process alive until termination.
+`migrate` and `studio` first verify that `init` has created the MemoGrafter project files. This keeps setup explicit and gives the CLI a stable local frame without requiring MemoGrafter to own or discover the host application's schema files. After initialization, Studio uses the same database resolution order as migration: explicit `--db`, then `.env` / `DATABASE_URL`, then `mg.config.ts`. At startup it verifies the MemoGrafter schema through `PostgresGraphStore.verifySchema()`, reads a distinct session count from existing `mg_*` tables, starts an HTTP server on `localhost:2891` or the next available port, opens the browser, and keeps the process alive until termination.
 
 Studio includes an internal REST API for the bundled frontend. The API is DB-driven and scoped to one requested session at a time. It reuses `GraphStore` for session graph reads and lifecycle mutations, while `cli/studio/repository.ts` contains Studio-only SQL helpers for session listing, ownership checks, scoped edge reads, and lexical memory search. Keeping these helpers in the CLI avoids adding required methods to `GraphStore` and preserves compatibility for custom store implementations.
 
@@ -185,6 +185,8 @@ The interface covers:
 - explicit session clearing.
 
 The built-in `PostgresGraphStore` creates and manages the current schema, including `mg_message_buffer`, `mg_segments`, `mg_topic_nodes`, `mg_topic_edges`, `mg_memory_nodes`, `mg_memory_edges`, `mg_session_ingest_state`, `mg_graft_registry`, `mg_fleets`, and `mg_fleet_agents`. `mg_topic_nodes` and `mg_memory_nodes` both include `tags TEXT[] NOT NULL DEFAULT '{}'` plus GIN indexes for tag filters. `mg_memory_nodes` also carries `forgotten BOOLEAN NOT NULL DEFAULT FALSE` and `forgotten_at`; `mg_topic_nodes` carries `suppressed BOOLEAN NOT NULL DEFAULT FALSE` and `suppressed_at`.
+
+The public `PostgresGraphStore.migrate()` method remains available for advanced CI, deploy, test, or constrained runtime tooling. It is an escape hatch around the CLI, not the recommended app startup path. Normal applications should run `memo-grafter init` and `memo-grafter migrate` outside request handling before constructing agents.
 
 Most store reads used by recall, grafting, semantic seed selection, neighbourhood expansion, absorption, and maintenance are active reads. They exclude forgotten memories and suppressed topics at the storage boundary so callers do not need to duplicate lifecycle filtering.
 

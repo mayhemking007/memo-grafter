@@ -45,7 +45,7 @@ npx memo-grafter studio
 
 MemoGrafter runs server-side on Node.js. The built-in storage backend uses PostgreSQL with `pgvector`.
 
-`init` creates MemoGrafter-owned project files under `src/memo-grafter/` (`mg-schema.ts` and `mg.config.ts`) without touching your database or creating an application schema entrypoint. `migrate` creates or updates MemoGrafter-owned `mg_*` tables. `studio` starts a local MemoGrafter Studio host with a session browser and graph viewer backed by an internal DB API. Application tables and schema files remain wherever your existing tool, such as Prisma, Drizzle, or SQL migrations, expects them.
+`init` is the required project setup step. It creates MemoGrafter-owned project files under `src/memo-grafter/` (`mg-schema.ts` and `mg.config.ts`) without touching your database or creating an application schema entrypoint. `migrate` is the preferred database setup step; it creates or updates MemoGrafter-owned `mg_*` tables and should run once per database or deployment, not during normal app startup. `studio` starts a local MemoGrafter Studio host with a session browser and graph viewer backed by an internal DB API. Application tables and schema files remain wherever your existing tool, such as Prisma, Drizzle, or SQL migrations, expects them.
 
 Studio resolves its database connection the same way as migration:
 
@@ -54,6 +54,8 @@ npx memo-grafter studio --db postgres://user:password@localhost:5432/memo_grafte
 ```
 
 If `--db` is omitted, Studio reads `.env` / `DATABASE_URL`, then `mg.config.ts`. It starts on `http://localhost:2891` or the next available port and keeps running until you stop the process.
+
+For advanced deploy, CI, or test tooling where the CLI cannot run, `PostgresGraphStore.migrate()` remains available as a manual fallback. Prefer `npx memo-grafter migrate` for normal projects so migrations do not run every time your application starts.
 
 ## Minimal Example
 
