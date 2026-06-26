@@ -154,6 +154,7 @@ export interface InjectionResult {
   nodes: TopicNode[];
   memories?: MemoryNode[];
   tokenCount: number;
+  tokenBudget?: number;
 }
 
 export interface GraftRegistryEntry {
@@ -262,6 +263,7 @@ export interface RetrievalResult {
   nodes: TopicNode[];
   systemPrompt: string;
   tokenCount: number;
+  tokenBudget?: number;
 }
 
 export interface AbsorbFromAgentOptions {

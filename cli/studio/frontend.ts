@@ -2,6 +2,10 @@ export interface StudioFrontendState {
   databaseStatus: "connected" | "error";
   sessionCount: number;
   studioUrl: string;
+  previewStatus?: {
+    available: boolean;
+    reason?: string;
+  };
   message?: string;
 }
 

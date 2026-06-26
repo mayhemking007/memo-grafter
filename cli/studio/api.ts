@@ -10,9 +10,14 @@ export interface StudioApiStore {
   getNodesBySession(sessionId: string, options?: { includeSuppressed?: boolean }): Promise<unknown[]>;
   getSegmentsBySession(sessionId: string): Promise<unknown[]>;
   getMemoriesBySession(sessionId: string): Promise<unknown[]>;
+  getMessagesBySession(sessionId: string, startIndex?: number, endIndex?: number): Promise<unknown[]>;
   suppressTopic(nodeId: string): Promise<boolean>;
   restoreTopic(nodeId: string): Promise<boolean>;
   forgetMemory(memoryId: string): Promise<boolean>;
+}
+
+export interface StudioApiPreviewService {
+  getStatus(): { available: boolean; reason?: string };
 }
 
 export interface StudioApiRepository {
@@ -28,6 +33,7 @@ export interface StudioApiRepository {
 export interface StudioApiContext {
   store: StudioApiStore;
   repository: StudioApiRepository;
+  preview?: StudioApiPreviewService;
 }
 
 interface RouteMatch {
