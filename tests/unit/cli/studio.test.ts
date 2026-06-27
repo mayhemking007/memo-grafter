@@ -71,11 +71,11 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("Memory type");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Suppress topic");
-    expect(html).toContain("Restore topic");
-    expect(html).toContain("Forget memory");
     expect(html).toContain('data-lifecycle-action="');
     expect(html).toContain('fetchJson(url, { method: "POST" })');
-    expect(html).toContain("This lifecycle action cannot be undone in Studio.");
+    expect(html).not.toContain("Restore topic");
+    expect(html).not.toContain("Forget memory");
+    expect(html).not.toContain("This lifecycle action cannot be undone in Studio.");
     expect(html).toContain("preserveSelection: true");
     expect(html).toContain('aria-live="polite"');
   });

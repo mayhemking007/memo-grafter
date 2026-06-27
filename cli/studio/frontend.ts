@@ -990,12 +990,8 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             : "";
           let action = "";
 
-          if (node.kind === "topic") {
-            const actionName = node.raw.suppressed ? "restore" : "suppress";
-            const label = node.raw.suppressed ? "Restore topic" : "Suppress topic";
-            action = '<button class="icon-button" type="button" data-lifecycle-action="' + actionName + '"' + (state.actionPending ? " disabled" : "") + '>' + label + '</button>';
-          } else if (!node.raw.forgotten) {
-            action = '<button class="icon-button danger-button" type="button" data-lifecycle-action="forget"' + (state.actionPending ? " disabled" : "") + '>Forget memory</button>';
+          if (node.kind === "topic" && !node.raw.suppressed) {
+            action = '<button class="icon-button" type="button" data-lifecycle-action="suppress"' + (state.actionPending ? " disabled" : "") + '>Suppress topic</button>';
           }
 
           if (!action && !status) return "";
@@ -1004,11 +1000,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         async function runLifecycleAction(node, action) {
           if (!state.selectedSessionId || state.actionPending) return;
-          if (action === "forget" && !window.confirm("Forget this memory? This lifecycle action cannot be undone in Studio.")) return;
+          if (node.kind !== "topic" || action !== "suppress") return;
 
           const sessionId = state.selectedSessionId;
-          const collection = node.kind === "topic" ? "nodes" : "memories";
-          const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/" + collection + "/" + encodeURIComponent(node.id) + "/" + action;
+          const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/nodes/" + encodeURIComponent(node.id) + "/suppress";
           state.actionPending = true;
           state.actionStatus = null;
           renderDetails(node);
@@ -1042,9 +1037,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         function lifecycleActionMessage(action, changed) {
           if (!changed) return "No change was needed; the lifecycle state was already up to date.";
-          if (action === "forget") return "Memory forgotten. The graph and node details have been refreshed.";
-          if (action === "suppress") return "Topic suppressed. The graph and node details have been refreshed.";
-          return "Topic restored. The graph and node details have been refreshed.";
+          return "Topic suppressed. The graph and node details have been refreshed.";
         }
 
         function connectedMemoriesMarkup(memories) {

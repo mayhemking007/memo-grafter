@@ -189,18 +189,6 @@ export class StudioRepository {
     return rows[0]?.exists ?? false;
   }
 
-  async memoryBelongsToSession(sessionId: string, memoryId: string): Promise<boolean> {
-    const rows = await this.sql<{ exists: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1 FROM mg_memory_nodes
-        WHERE session_id = ${sessionId}
-          AND id = ${memoryId}::uuid
-      ) AS exists
-    `;
-
-    return rows[0]?.exists ?? false;
-  }
-
   async getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]> {
     const rows = await this.sql<TopicEdgeRow[]>`
       SELECT DISTINCT edge.*
