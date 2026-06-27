@@ -24,6 +24,11 @@ describe("memo-grafter studio", () => {
       expect(html.body).toContain("MemoGrafter Studio");
       expect(html.body).toContain("session-list");
       expect(html.body).toContain("graph-stage");
+      expect(html.body).toContain("tab-graph");
+      expect(html.body).toContain("tab-tables");
+      expect(html.body).toContain("tab-preview");
+      expect(html.body).toContain("Prompt Preview");
+      expect(html.body).toContain("workspace-panel");
       expect(html.body).toContain("node-type-filter");
       expect(html.body).toContain("tag-filter");
       expect(html.body).toContain("lifecycle-filter");
@@ -31,6 +36,7 @@ describe("memo-grafter studio", () => {
       expect(html.body).toContain("refresh-graph");
       expect(html.body).toContain('fetchJson("/api/sessions")');
       expect(html.body).toContain('"/api/sessions/" + encodeURIComponent(sessionId) + "/graph"');
+      expect(html.body).toContain('"/api/sessions/" + encodeURIComponent(sessionId) + "/tables"');
       expect(status.status).toBe(200);
       expect(status.body).toEqual(state);
       expect(missing.status).toBe(404);
@@ -68,6 +74,10 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("Connected memories");
     expect(html).toContain("Source metadata");
     expect(html).toContain("Relationships");
+    expect(html).toContain("renderDetailsPanel");
+    expect(html).toContain("selectedEntity");
+    expect(html).toContain("Tables workspace shell");
+    expect(html).toContain("Prompt Preview workspace shell");
     expect(html).toContain("Memory type");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Suppress topic");

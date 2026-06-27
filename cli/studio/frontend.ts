@@ -235,6 +235,43 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         margin-bottom: 16px;
       }
 
+      .workspace-tabs {
+        align-items: center;
+        border-bottom: 1px solid #d8dee9;
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+      }
+
+      .tab-button {
+        background: transparent;
+        border: 0;
+        border-bottom: 3px solid transparent;
+        color: #55657b;
+        font-weight: 750;
+        padding: 10px 12px;
+      }
+
+      .tab-button[aria-selected="true"] {
+        border-bottom-color: #3d6fb6;
+        color: #1f2a3a;
+      }
+
+      .workspace-placeholder {
+        color: #66758a;
+        display: grid;
+        gap: 10px;
+        min-height: 508px;
+        place-items: center;
+        text-align: center;
+      }
+
+      .placeholder-card {
+        display: grid;
+        gap: 8px;
+        max-width: 560px;
+      }
+
       .field {
         display: grid;
         gap: 5px;
@@ -525,7 +562,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           <button class="primary-button" id="refresh-graph" type="button" disabled><span class="icon">R</span>Refresh graph</button>
         </div>
 
-        <div class="filters" aria-label="Graph filters">
+        <div class="workspace-tabs" role="tablist" aria-label="Session workspace tabs">
+          <button class="tab-button" id="tab-graph" type="button" role="tab" aria-controls="workspace-panel" aria-selected="true" data-tab="graph">Graph</button>
+          <button class="tab-button" id="tab-tables" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="tables">Tables</button>
+          <button class="tab-button" id="tab-preview" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="preview">Prompt Preview</button>
+        </div>
+
+        <div class="filters" id="graph-filters" aria-label="Graph filters">
           <div class="field">
             <label for="node-type-filter">Node type</label>
             <select id="node-type-filter">
@@ -554,9 +597,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         </div>
 
         <div class="content-grid">
-          <section class="panel graph-panel" aria-label="Memory graph">
+          <section class="panel graph-panel" id="workspace-panel" aria-label="Session workspace">
             <div class="panel-header">
-              <p class="panel-title">Graph</p>
+              <p class="panel-title" id="workspace-title">Graph</p>
               <div class="summary-strip" id="graph-summary"></div>
             </div>
             <div class="graph-stage" id="graph-stage">
@@ -581,10 +624,18 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         const state = {
           sessions: [],
           selectedSessionId: null,
+          activeTab: "graph",
           graph: null,
+          tables: null,
           selectedGraphNodeId: null,
+          selectedEntity: null,
           loadingSessions: false,
           loadingGraph: false,
+          tabs: {
+            graph: { loading: false, error: null, loadedAt: null },
+            tables: { loading: false, error: null, loadedAt: null },
+            preview: { loading: false, error: null, loadedAt: null }
+          },
           actionPending: false,
           actionStatus: null,
           error: null,
@@ -603,6 +654,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           refreshGraph: document.getElementById("refresh-graph"),
           pageTitle: document.getElementById("page-title"),
           pageSubtitle: document.getElementById("page-subtitle"),
+          tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
+          graphFilters: document.getElementById("graph-filters"),
+          workspaceTitle: document.getElementById("workspace-title"),
           graphStage: document.getElementById("graph-stage"),
           graphSummary: document.getElementById("graph-summary"),
           detailsPanel: document.getElementById("details-panel"),
@@ -616,11 +670,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.studioUrl.textContent = initialState.studioUrl;
 
         elements.refreshSessions.addEventListener("click", () => loadSessions());
-        elements.refreshGraph.addEventListener("click", () => {
-          if (state.selectedSessionId) {
-            state.actionStatus = null;
-            loadGraph(state.selectedSessionId, { preserveSelection: true });
-          }
+        elements.refreshGraph.addEventListener("click", () => refreshActiveTab());
+        elements.tabButtons.forEach((button) => {
+          button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
         });
         elements.nodeTypeFilter.addEventListener("change", () => {
           state.filters.nodeType = elements.nodeTypeFilter.value;
@@ -663,28 +715,90 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const preserveSelection = Boolean(options && options.preserveSelection && state.selectedSessionId === sessionId);
           const selectedGraphNodeId = preserveSelection ? state.selectedGraphNodeId : null;
           state.selectedSessionId = sessionId;
+          state.activeTab = "graph";
           if (!preserveSelection) {
             state.graph = null;
+            state.tables = null;
+            state.selectedEntity = null;
             state.actionStatus = null;
           }
           state.selectedGraphNodeId = selectedGraphNodeId;
           state.loadingGraph = true;
+          state.tabs.graph.loading = true;
+          state.tabs.graph.error = null;
           state.error = null;
           renderSessions();
-          renderGraph();
+          renderWorkspace();
           renderHeader();
           try {
             state.graph = await fetchJson("/api/sessions/" + encodeURIComponent(sessionId) + "/graph");
+            state.tabs.graph.loadedAt = new Date().toISOString();
             return true;
           } catch (error) {
             state.error = error.message || String(error);
+            state.tabs.graph.error = state.error;
             return false;
           } finally {
             state.loadingGraph = false;
+            state.tabs.graph.loading = false;
             renderSessions();
             renderHeader();
-            renderGraph();
+            renderWorkspace();
           }
+        }
+
+        async function loadTables(sessionId, options) {
+          const force = Boolean(options && options.force);
+          if (!force && state.tables && state.selectedSessionId === sessionId) {
+            renderWorkspace();
+            return true;
+          }
+
+          state.tabs.tables.loading = true;
+          state.tabs.tables.error = null;
+          renderWorkspace();
+
+          try {
+            state.tables = await fetchJson("/api/sessions/" + encodeURIComponent(sessionId) + "/tables");
+            state.tabs.tables.loadedAt = new Date().toISOString();
+            return true;
+          } catch (error) {
+            state.tabs.tables.error = error.message || String(error);
+            return false;
+          } finally {
+            state.tabs.tables.loading = false;
+            renderWorkspace();
+          }
+        }
+
+        function selectTab(tab) {
+          if (!tab || !state.tabs[tab] || state.activeTab === tab) return;
+          state.activeTab = tab;
+          state.actionStatus = null;
+          renderWorkspace();
+          renderHeader();
+
+          if (tab === "tables" && state.selectedSessionId) {
+            void loadTables(state.selectedSessionId);
+          }
+        }
+
+        function refreshActiveTab() {
+          if (!state.selectedSessionId) return;
+          state.actionStatus = null;
+
+          if (state.activeTab === "tables") {
+            void loadTables(state.selectedSessionId, { force: true });
+            return;
+          }
+
+          if (state.activeTab === "preview") {
+            state.tabs.preview.loadedAt = new Date().toISOString();
+            renderWorkspace();
+            return;
+          }
+
+          void loadGraph(state.selectedSessionId, { preserveSelection: true });
         }
 
         async function fetchJson(url, options) {
@@ -735,17 +849,100 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function renderHeader() {
-          elements.refreshGraph.disabled = !state.selectedSessionId || state.loadingGraph;
+          const activeTabState = state.tabs[state.activeTab] || state.tabs.graph;
+          elements.refreshGraph.disabled = !state.selectedSessionId || activeTabState.loading;
+          elements.refreshGraph.innerHTML = '<span class="icon">R</span>Refresh ' + tabLabel(state.activeTab);
           if (!state.selectedSessionId) {
             elements.pageTitle.textContent = "Select a session";
-            elements.pageSubtitle.textContent = "Graph data loads only after you choose a session.";
+            elements.pageSubtitle.textContent = "Workspace data loads only after you choose a session.";
             return;
           }
 
           elements.pageTitle.textContent = "Session " + state.selectedSessionId;
-          elements.pageSubtitle.textContent = state.loadingGraph
-            ? "Loading graph data..."
-            : "Inspect topics, memories, edges, tags, and lifecycle metadata.";
+          elements.pageSubtitle.textContent = activeTabState.loading
+            ? "Loading " + tabLabel(state.activeTab).toLowerCase() + " data..."
+            : "Inspect graph, table, and prompt-preview data without editing stored memory.";
+        }
+
+        function tabLabel(tab) {
+          if (tab === "tables") return "Tables";
+          if (tab === "preview") return "Prompt Preview";
+          return "Graph";
+        }
+
+        function renderWorkspace() {
+          elements.tabButtons.forEach((button) => {
+            const active = button.getAttribute("data-tab") === state.activeTab;
+            button.setAttribute("aria-selected", active ? "true" : "false");
+          });
+          elements.graphFilters.classList.toggle("hidden", state.activeTab !== "graph");
+          elements.workspaceTitle.textContent = tabLabel(state.activeTab);
+          renderHeader();
+
+          if (!state.selectedSessionId) {
+            elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its workspace.</div>';
+            elements.graphSummary.textContent = "";
+            renderDetailsPanel();
+            return;
+          }
+
+          if (state.activeTab === "tables") {
+            renderTablesPlaceholder();
+            return;
+          }
+
+          if (state.activeTab === "preview") {
+            renderPreviewPlaceholder();
+            return;
+          }
+
+          renderGraph();
+        }
+
+        function renderTablesPlaceholder() {
+          const tab = state.tabs.tables;
+          elements.graphSummary.textContent = "";
+
+          if (tab.loading && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="loading-state">Loading tables...</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          if (tab.error && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(tab.error) + '</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          const counts = state.tables
+            ? [
+              numberText((state.tables.topics || []).length) + " topics",
+              numberText((state.tables.memories || []).length) + " memories",
+              numberText((state.tables.segments || []).length) + " segments",
+              numberText((state.tables.messages || []).length) + " messages"
+            ]
+            : ["not loaded"];
+          elements.graphSummary.innerHTML = counts.map((label) => '<span>' + escapeHtml(label) + '</span>').join("");
+          elements.graphStage.innerHTML =
+            '<div class="workspace-placeholder"><div class="placeholder-card">' +
+              '<h2 class="panel-title">Tables workspace shell</h2>' +
+              '<p class="subtle">Tables data is wired through the shared session workspace. The read-only table UI lands in Phase 4.</p>' +
+              '<p class="subtle">' + escapeHtml(counts.join(" · ")) + '</p>' +
+            '</div></div>';
+          renderDetailsPanel();
+        }
+
+        function renderPreviewPlaceholder() {
+          const status = initialState.previewStatus || { available: false, reason: "Prompt Preview is not configured." };
+          elements.graphSummary.innerHTML = '<span>' + (status.available ? "available" : "unavailable") + '</span>';
+          elements.graphStage.innerHTML =
+            '<div class="workspace-placeholder"><div class="placeholder-card">' +
+              '<h2 class="panel-title">Prompt Preview workspace shell</h2>' +
+              '<p class="subtle">Preview status: ' + escapeHtml(status.available ? "available" : "unavailable") + '</p>' +
+              '<p class="subtle">' + escapeHtml(status.available ? "Prompt controls land in Phase 5." : (status.reason || "Prompt Preview is unavailable.")) + '</p>' +
+            '</div></div>';
+          renderDetailsPanel();
         }
 
         function renderGraph() {
@@ -754,21 +951,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (state.loadingGraph && !state.graph) {
             elements.graphStage.innerHTML = '<div class="loading-state">Loading graph...</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           if (state.error && state.selectedSessionId && !state.graph) {
             elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(state.error) + '</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           if (!state.graph) {
             elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its memory graph.</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
@@ -781,22 +978,22 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
           if (graph.nodes.length === 0) {
             elements.graphStage.innerHTML = '<div class="empty-state">No nodes match the current filters.</div>';
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           elements.graphStage.innerHTML = renderGraphSvg(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             node.addEventListener("click", () => {
-              state.selectedGraphNodeId = node.getAttribute("data-graph-node-id");
+              selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
               state.actionStatus = null;
               renderGraph();
             });
           });
 
           const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || graph.nodes[0];
-          if (selected && !state.selectedGraphNodeId) state.selectedGraphNodeId = selected.id;
-          renderDetails(selected || null);
+          if (selected && selected.id !== state.selectedGraphNodeId) selectGraphNode(selected.id, graph);
+          renderDetailsPanel();
         }
 
         function buildDisplayGraph(raw) {
@@ -902,9 +1099,63 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           '</g>';
         }
 
-        function renderDetails(node) {
+        function selectGraphNode(nodeId, graph) {
+          if (!nodeId) return;
+          const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+          state.selectedGraphNodeId = nodeId;
+          state.selectedEntity = node
+            ? { kind: node.kind, id: node.id, source: "graph" }
+            : null;
+        }
+
+        function renderDetailsPanel() {
+          const node = resolveSelectedEntity();
           if (!node) {
-            elements.detailsPanel.innerHTML = '<p class="subtle">Select a node in the graph to inspect its metadata.</p>';
+            const noun = state.activeTab === "graph" ? "node in the graph" : "entity";
+            elements.detailsPanel.innerHTML = '<p class="subtle">Select a ' + noun + ' to inspect its metadata.</p>';
+            return;
+          }
+
+          renderEntityDetails(node);
+        }
+
+        function resolveSelectedEntity() {
+          if (!state.selectedEntity || !state.graph) return null;
+
+          if (state.selectedEntity.kind === "topic") {
+            const raw = (state.graph.nodes || []).find((node) => node.id === state.selectedEntity.id);
+            if (!raw) return null;
+            return {
+              id: raw.id,
+              kind: "topic",
+              title: raw.label || raw.id,
+              subtitle: raw.summary || "",
+              tags: raw.tags || [],
+              lifecycle: raw.suppressed ? "suppressed" : "active",
+              raw
+            };
+          }
+
+          if (state.selectedEntity.kind === "memory") {
+            const raw = (state.graph.memories || []).find((memory) => memory.id === state.selectedEntity.id);
+            if (!raw) return null;
+            return {
+              id: raw.id,
+              kind: "memory",
+              title: raw.subject ? raw.subject + " " + raw.predicate : raw.id,
+              subtitle: raw.value || "",
+              tags: raw.tags || [],
+              lifecycle: memoryLifecycle(raw),
+              raw
+            };
+          }
+
+          return null;
+        }
+
+        function renderEntityDetails(node) {
+          if (!node) {
+            renderDetailsPanel();
             return;
           }
 
@@ -914,7 +1165,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
           elements.detailsPanel.querySelectorAll("[data-detail-node-id]").forEach((button) => {
             button.addEventListener("click", () => {
-              state.selectedGraphNodeId = button.getAttribute("data-detail-node-id");
+              const id = button.getAttribute("data-detail-node-id");
+              const kind = (state.graph.nodes || []).some((topic) => topic.id === id) ? "topic" : "memory";
+              state.selectedGraphNodeId = id;
+              state.selectedEntity = { kind, id, source: "graph" };
               state.actionStatus = null;
               renderGraph();
             });
@@ -1006,7 +1260,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/nodes/" + encodeURIComponent(node.id) + "/suppress";
           state.actionPending = true;
           state.actionStatus = null;
-          renderDetails(node);
+          renderEntityDetails(node);
 
           try {
             const result = await fetchJson(url, { method: "POST" });
