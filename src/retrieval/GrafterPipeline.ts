@@ -23,7 +23,7 @@ export class GrafterPipeline {
 
   async run(sessionId: string, topicIds: string[], options: GrafterPipelineRunOptions = {}): Promise<InjectionResult> {
     if (topicIds.length === 0) {
-      return { systemPrompt: "", nodes: [], tokenCount: 0 };
+      return { systemPrompt: "", nodes: [], tokenCount: 0, tokenBudget: this.config.tokenBudget };
     }
 
     const hopDepth = options.expansionStrategy === "none" ? 0 : options.hopDepth ?? this.config.hopDepth;
@@ -59,6 +59,7 @@ export class GrafterPipeline {
       systemPrompt,
       nodes: fittedNodes,
       tokenCount,
+      tokenBudget: this.config.tokenBudget,
     };
   }
 

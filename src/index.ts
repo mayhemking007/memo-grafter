@@ -8,8 +8,14 @@ export { AnthropicLLMAdapter } from "./adapters/AnthropicAdapter.js";
 export { GeminiEmbedAdapter, GeminiLLMAdapter } from "./adapters/GeminiAdapter.js";
 export { OpenAIEmbedAdapter, OpenAILLMAdapter } from "./adapters/OpenAIAdapter.js";
 export { GrafterPipeline } from "./retrieval/GrafterPipeline.js";
+export { GraftRelevancePipeline } from "./retrieval/GraftRelevancePipeline.js";
 export { IngestPipeline } from "./ingestion/conversation/IngestPipeline.js";
 export { RetrieverPipeline } from "./retrieval/RetrieverPipeline.js";
+export {
+  createStudioPreviewService,
+  UnavailableStudioPreviewService,
+  PipelineStudioPreviewService,
+} from "./studio/StudioPreviewService.js";
 export { PostgresGraphStore } from "./store/index.js";
 export type {
   OpenAILLMAdapterOptions,
@@ -72,6 +78,14 @@ export type {
   SharedMemorySnapshot,
   WorkerAgentConfig,
 } from "./agents/fleet/types.js";
+export type {
+  StudioPreviewMode,
+  StudioPreviewRequest,
+  StudioPreviewResult,
+  StudioPreviewService,
+  StudioPreviewServiceConfig,
+  StudioPreviewStatus,
+} from "./studio/StudioPreviewService.js";
 export type {
   CrawlerConfig,
   CrawlerMaintenanceStore,

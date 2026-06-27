@@ -69,6 +69,7 @@ export class RetrieverPipeline {
         nodes: [],
         systemPrompt: buildFactRetrievalPrompt([]),
         tokenCount: 0,
+        tokenBudget,
       };
     }
 
@@ -103,6 +104,7 @@ export class RetrieverPipeline {
       nodes,
       systemPrompt: buildFactRetrievalPrompt(includedBlocks),
       tokenCount,
+      tokenBudget,
     };
   }
 

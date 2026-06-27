@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import postgres, { type Sql } from "postgres";
-import { resolveConnectionString } from "../utils/config.js";
+import { resolveConnectionString, resolveStudioRuntimeConfig, type StudioRuntimeConfig } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
 import { assertProjectInitialized } from "../utils/project.js";
-import { handleStudioApiRequest, isStudioApiRequest, type StudioApiStore } from "../studio/api.js";
+import { handleStudioApiRequest, isStudioApiRequest, type StudioApiPreviewService, type StudioApiStore } from "../studio/api.js";
 import { renderStudioHtml, type StudioFrontendState } from "../studio/frontend.js";
 import { StudioRepository } from "../studio/repository.js";
 
@@ -16,6 +16,7 @@ interface StudioStore extends StudioApiStore {
 
 interface MemoGrafterModule {
   PostgresGraphStore: new (connectionString: string) => StudioStore;
+  createStudioPreviewService: (store: StudioStore, config: StudioRuntimeConfig | null | undefined) => StudioApiPreviewService;
 }
 
 export interface StudioOptions {
@@ -35,6 +36,7 @@ export interface StudioServer {
 
 interface StudioStartOptions extends Required<Pick<StudioOptions, "host" | "port" | "openBrowser">> {
   connectionString: string;
+  runtimeConfig?: StudioRuntimeConfig | null;
 }
 
 export async function runStudio(options: StudioOptions = {}): Promise<void> {
@@ -44,9 +46,11 @@ export async function runStudio(options: StudioOptions = {}): Promise<void> {
     cwd,
     ...(options.db ? { db: options.db } : {}),
   });
+  const runtimeConfig = await resolveStudioRuntimeConfig({ cwd });
 
   const server = await startStudioServer({
     connectionString,
+    runtimeConfig,
     host: options.host ?? "localhost",
     port: options.port ?? 2891,
     openBrowser: options.openBrowser ?? true,
@@ -61,7 +65,7 @@ export async function runStudio(options: StudioOptions = {}): Promise<void> {
 export async function startStudioServer(options: StudioStartOptions): Promise<StudioServer> {
   logger.info("MemoGrafter Studio starting");
 
-  const { PostgresGraphStore } = await loadMemoGrafterModule();
+  const { PostgresGraphStore, createStudioPreviewService } = await loadMemoGrafterModule();
   const store = new PostgresGraphStore(options.connectionString);
   let sql: Sql | null = null;
 
@@ -75,15 +79,18 @@ export async function startStudioServer(options: StudioStartOptions): Promise<St
     });
     const sessionCount = await readSessionCount(sql);
     const repository = new StudioRepository(sql);
+    const preview = createStudioPreviewService(store, options.runtimeConfig);
     const state: StudioFrontendState = {
       databaseStatus: "connected",
       sessionCount,
       studioUrl: "",
+      previewStatus: preview.getStatus(),
     };
     const server = http.createServer((request, response) => {
       void handleStudioRequest(request, response, state, {
         store,
         repository,
+        preview,
       });
     });
     const port = await listenOnAvailablePort(server, options.host, options.port);
@@ -138,7 +145,7 @@ export function handleStudioRequest(
   request: IncomingMessage,
   response: ServerResponse,
   state: StudioFrontendState,
-  apiContext?: { store: StudioApiStore; repository: StudioRepository },
+  apiContext?: { store: StudioApiStore; repository: StudioRepository; preview?: StudioApiPreviewService },
 ): void | Promise<void> {
   const url = request.url ?? "/";
 

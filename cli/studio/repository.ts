@@ -50,6 +50,11 @@ export interface StudioMemoryEdge {
   createdAt: Date;
 }
 
+export interface StudioTableBrowserTable {
+  name: string;
+  rows: Record<string, unknown>[];
+}
+
 interface SessionSummaryRow {
   id: string;
   message_count: number | null;
@@ -189,18 +194,6 @@ export class StudioRepository {
     return rows[0]?.exists ?? false;
   }
 
-  async memoryBelongsToSession(sessionId: string, memoryId: string): Promise<boolean> {
-    const rows = await this.sql<{ exists: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1 FROM mg_memory_nodes
-        WHERE session_id = ${sessionId}
-          AND id = ${memoryId}::uuid
-      ) AS exists
-    `;
-
-    return rows[0]?.exists ?? false;
-  }
-
   async getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]> {
     const rows = await this.sql<TopicEdgeRow[]>`
       SELECT DISTINCT edge.*
@@ -239,6 +232,143 @@ export class StudioRepository {
       weight: row.weight ?? 1,
       createdAt: row.created_at,
     }));
+  }
+
+  async getTablesBySession(sessionId: string): Promise<StudioTableBrowserTable[]> {
+    const [
+      messageBuffer,
+      segments,
+      topicNodes,
+      topicEdges,
+      memoryNodes,
+      memoryEdges,
+      fleets,
+      fleetAgents,
+      ingestState,
+      graftRegistry,
+    ] = await Promise.all([
+      this.sql<Record<string, unknown>[]>`
+        SELECT session_id, message_index, role, content
+        FROM mg_message_buffer
+        WHERE session_id = ${sessionId}
+        ORDER BY message_index ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT id, session_id, start_index, end_index, topic_order, drift_score, created_at
+        FROM mg_segments
+        WHERE session_id = ${sessionId}
+        ORDER BY topic_order ASC, start_index ASC, id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT
+          id,
+          session_id,
+          segment_id,
+          label,
+          summary,
+          embedding::text AS embedding,
+          tags,
+          source,
+          message_range,
+          topic_order,
+          drift_score,
+          agent_color,
+          fleet_id,
+          agent_id,
+          suppressed,
+          suppressed_at,
+          created_at
+        FROM mg_topic_nodes
+        WHERE session_id = ${sessionId}
+        ORDER BY topic_order ASC, message_range ASC, id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT DISTINCT edge.src_id, edge.dst_id, edge.weight, edge.type
+        FROM mg_topic_edges edge
+        JOIN mg_topic_nodes source ON source.id = edge.src_id
+        JOIN mg_topic_nodes target ON target.id = edge.dst_id
+        WHERE source.session_id = ${sessionId}
+           OR target.session_id = ${sessionId}
+        ORDER BY edge.type ASC, edge.src_id ASC, edge.dst_id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT
+          id,
+          segment_id,
+          topic_node_id,
+          agent_id,
+          session_id,
+          memory_type,
+          source_type,
+          subject,
+          predicate,
+          value,
+          confidence,
+          embedding::text AS embedding,
+          tags,
+          source,
+          source_url,
+          source_title,
+          superseded_by,
+          decayed,
+          forgotten,
+          forgotten_at,
+          has_conflict,
+          agent_color,
+          fleet_id,
+          created_at
+        FROM mg_memory_nodes
+        WHERE session_id = ${sessionId}
+        ORDER BY created_at ASC, id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT DISTINCT edge.id, edge.source_id, edge.target_id, edge.edge_type, edge.weight, edge.created_at
+        FROM mg_memory_edges edge
+        JOIN mg_memory_nodes source ON source.id = edge.source_id
+        JOIN mg_memory_nodes target ON target.id = edge.target_id
+        WHERE source.session_id = ${sessionId}
+          AND target.session_id = ${sessionId}
+        ORDER BY edge.created_at ASC, edge.id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT DISTINCT fleet.id, fleet.name, fleet.created_at
+        FROM mg_fleets fleet
+        JOIN mg_fleet_agents agent ON agent.fleet_id = fleet.id
+        WHERE agent.session_id = ${sessionId}
+        ORDER BY fleet.created_at ASC, fleet.id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT id, fleet_id, session_id, agent_color, created_at
+        FROM mg_fleet_agents
+        WHERE session_id = ${sessionId}
+        ORDER BY created_at ASC, id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT session_id, last_ingested_message_index, updated_at
+        FROM mg_session_ingest_state
+        WHERE session_id = ${sessionId}
+        ORDER BY updated_at DESC, session_id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
+        SELECT id, session_id, node_id, source_session_id, source_node_id, grafted_at
+        FROM mg_graft_registry
+        WHERE session_id = ${sessionId}
+        ORDER BY grafted_at ASC, id ASC
+      `,
+    ]);
+
+    return [
+      { name: "mg_message_buffer", rows: messageBuffer },
+      { name: "mg_segments", rows: segments },
+      { name: "mg_topic_nodes", rows: topicNodes },
+      { name: "mg_topic_edges", rows: topicEdges },
+      { name: "mg_memory_nodes", rows: memoryNodes },
+      { name: "mg_memory_edges", rows: memoryEdges },
+      { name: "mg_fleets", rows: fleets },
+      { name: "mg_fleet_agents", rows: fleetAgents },
+      { name: "mg_session_ingest_state", rows: ingestState },
+      { name: "mg_graft_registry", rows: graftRegistry },
+    ];
   }
 
   async searchMemories(sessionId: string, query: string, limit = 25): Promise<StudioMemorySearchResult[]> {

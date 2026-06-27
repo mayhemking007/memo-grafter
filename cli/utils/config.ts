@@ -6,6 +6,31 @@ export interface MemoGrafterCliConfig {
   db?: {
     connectionString?: string;
   };
+  embedder?: {
+    embed(text: string): Promise<number[]>;
+  };
+  graph?: {
+    topK?: number;
+    hopDepth?: number;
+  };
+  inject?: {
+    bufferSize?: number;
+    tokenBudget?: number;
+    recentWindowSize?: number;
+    recallLimit?: number;
+    recallMinSimilarity?: number;
+  };
+  cache?: {
+    connectionString: string;
+    ttlSeconds?: number;
+  };
+}
+
+export interface StudioRuntimeConfig {
+  embedder?: MemoGrafterCliConfig["embedder"];
+  graph?: MemoGrafterCliConfig["graph"];
+  inject?: MemoGrafterCliConfig["inject"];
+  cache?: MemoGrafterCliConfig["cache"];
 }
 
 export async function loadConfig(cwd: string): Promise<MemoGrafterCliConfig | null> {
@@ -57,6 +82,20 @@ export async function resolveConnectionString(options: {
   throw new Error(
     "No database connection string found. Pass --db, set DATABASE_URL, or configure db.connectionString in src/memo-grafter/mg.config.ts.",
   );
+}
+
+export async function resolveStudioRuntimeConfig(options: {
+  cwd: string;
+}): Promise<StudioRuntimeConfig | null> {
+  const config = await loadConfig(options.cwd);
+  if (!config) return null;
+
+  return {
+    ...(config.embedder !== undefined ? { embedder: config.embedder } : {}),
+    ...(config.graph !== undefined ? { graph: config.graph } : {}),
+    ...(config.inject !== undefined ? { inject: config.inject } : {}),
+    ...(config.cache !== undefined ? { cache: config.cache } : {}),
+  };
 }
 
 function loadEnvFile(cwd: string): void {

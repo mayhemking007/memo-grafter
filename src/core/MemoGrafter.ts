@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { GraftRelevancePipeline } from "../retrieval/GraftRelevancePipeline.js";
 import { GrafterPipeline } from "../retrieval/GrafterPipeline.js";
 import { IngestPipeline } from "../ingestion/conversation/IngestPipeline.js";
 import { IngestQueue } from "../ingestion/IngestQueue.js";
@@ -192,34 +193,11 @@ export class MemoGrafter {
     query: string,
     options: GraftByRelevanceOptions = {},
   ): Promise<InjectionResult> {
-    const embedding = await this.embedder.embed(query);
-    const configuredSessionIds = options.sessionIds?.filter(Boolean) ?? [];
-    const sessionIds = this.resolveSessionIds(sessionId, configuredSessionIds);
-    const useConfiguredSessions = configuredSessionIds.length > 0
-      && (sessionIds.length > 1 || sessionIds[0] !== sessionId);
-    const seedNodes = useConfiguredSessions
-      ? await this.store.getSimilarNodesAcrossSessions(embedding, sessionIds, {
-        k: options.topK ?? this.graphTopK,
-        minSimilarity: options.minSimilarity ?? 0.6,
-      })
-      : await this.store.getSimilarNodes(embedding, sessionId, {
-        k: options.topK ?? this.graphTopK,
-        minSimilarity: options.minSimilarity ?? 0.6,
-      });
-
-    if (seedNodes.length === 0) {
-      return { systemPrompt: "", nodes: [], tokenCount: 0 };
-    }
-
-    return this.grafterPipeline.run(
-      sessionId,
-      seedNodes.map((node) => node.id),
-      {
-        hopDepth: options.hopDepth ?? this.graphHopDepth,
-        expansionStrategy: options.expansionStrategy ?? "graph",
-        ...(configuredSessionIds.length > 0 ? { sessionIds } : {}),
-      },
-    );
+    const pipeline = new GraftRelevancePipeline(this.store, this.embedder, this.grafterPipeline, {
+      topK: this.graphTopK,
+      hopDepth: this.graphHopDepth,
+    });
+    return pipeline.run(sessionId, query, options);
   }
 
   async ingestGraftedNodes(nodes: TopicNode[], targetSessionId: string): Promise<TopicNode[]> {

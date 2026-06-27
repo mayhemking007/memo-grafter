@@ -2,6 +2,10 @@ export interface StudioFrontendState {
   databaseStatus: "connected" | "error";
   sessionCount: number;
   studioUrl: string;
+  previewStatus?: {
+    available: boolean;
+    reason?: string;
+  };
   message?: string;
 }
 
@@ -229,6 +233,208 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         gap: 12px;
         grid-template-columns: repeat(3, minmax(130px, 1fr)) auto;
         margin-bottom: 16px;
+      }
+
+      .workspace-tabs {
+        align-items: center;
+        border-bottom: 1px solid #d8dee9;
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+      }
+
+      .tab-button {
+        background: transparent;
+        border: 0;
+        border-bottom: 3px solid transparent;
+        color: #55657b;
+        font-weight: 750;
+        padding: 10px 12px;
+      }
+
+      .tab-button[aria-selected="true"] {
+        border-bottom-color: #3d6fb6;
+        color: #1f2a3a;
+      }
+
+      .workspace-placeholder {
+        color: #66758a;
+        display: grid;
+        gap: 10px;
+        min-height: 508px;
+        place-items: center;
+        text-align: center;
+      }
+
+      .placeholder-card {
+        display: grid;
+        gap: 8px;
+        max-width: 560px;
+      }
+
+      .table-stack {
+        display: grid;
+        gap: 16px;
+        padding: 14px;
+      }
+
+      .data-table-section {
+        border: 1px solid #e0e5ee;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .data-table-heading {
+        align-items: center;
+        background: #f8fbff;
+        border-bottom: 1px solid #e0e5ee;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+      }
+
+      .data-table-wrap {
+        max-height: 320px;
+        overflow: auto;
+      }
+
+      .data-table {
+        border-collapse: collapse;
+        font-size: 12px;
+        min-width: 860px;
+        width: 100%;
+      }
+
+      .data-table th,
+      .data-table td {
+        border-bottom: 1px solid #edf1f6;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .data-table th {
+        background: #ffffff;
+        color: #53647a;
+        font-size: 11px;
+        font-weight: 800;
+        position: sticky;
+        text-transform: uppercase;
+        top: 0;
+        z-index: 1;
+      }
+
+      .data-table tr {
+        cursor: pointer;
+      }
+
+      .data-table tr:hover td {
+        background: #f8fbff;
+      }
+
+      .data-table tr.selected td {
+        background: #eef6ff;
+      }
+
+      .table-cell-clip {
+        display: inline-block;
+        max-width: 320px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: top;
+        white-space: nowrap;
+      }
+
+      .table-empty {
+        color: #66758a;
+        font-size: 13px;
+        padding: 16px;
+      }
+
+      .content-grid.tables-active {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .table-browser {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .table-browser-toolbar,
+      .pagination-controls,
+      .cell-meta {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .table-browser-toolbar {
+        justify-content: space-between;
+      }
+
+      .table-browser-controls {
+        align-items: end;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .table-select {
+        min-width: 260px;
+      }
+
+      .db-table {
+        border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 12px;
+        min-width: 920px;
+        width: 100%;
+      }
+
+      .db-table th,
+      .db-table td {
+        border-bottom: 1px solid #edf1f6;
+        max-width: 340px;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .db-table th {
+        background: #ffffff;
+        color: #53647a;
+        font-size: 11px;
+        font-weight: 800;
+        position: sticky;
+        text-transform: uppercase;
+        top: 0;
+        z-index: 1;
+      }
+
+      .db-cell {
+        cursor: pointer;
+      }
+
+      .db-cell:hover {
+        background: #f8fbff;
+      }
+
+      .db-cell.selected {
+        background: #eef6ff;
+        box-shadow: inset 0 0 0 2px #3d6fb6;
+      }
+
+      .db-cell-expanded {
+        display: block;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        line-height: 1.5;
+        max-height: 260px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       .field {
@@ -521,7 +727,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           <button class="primary-button" id="refresh-graph" type="button" disabled><span class="icon">R</span>Refresh graph</button>
         </div>
 
-        <div class="filters" aria-label="Graph filters">
+        <div class="workspace-tabs" role="tablist" aria-label="Session workspace tabs">
+          <button class="tab-button" id="tab-graph" type="button" role="tab" aria-controls="workspace-panel" aria-selected="true" data-tab="graph">Graph</button>
+          <button class="tab-button" id="tab-tables" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="tables">Tables</button>
+          <button class="tab-button" id="tab-preview" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="preview">Prompt Preview</button>
+        </div>
+
+        <div class="filters" id="graph-filters" aria-label="Graph filters">
           <div class="field">
             <label for="node-type-filter">Node type</label>
             <select id="node-type-filter">
@@ -549,17 +761,17 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           <button class="icon-button" id="clear-filters" type="button"><span class="icon">X</span>Clear</button>
         </div>
 
-        <div class="content-grid">
-          <section class="panel graph-panel" aria-label="Memory graph">
+        <div class="content-grid" id="content-grid">
+          <section class="panel graph-panel" id="workspace-panel" aria-label="Session workspace">
             <div class="panel-header">
-              <p class="panel-title">Graph</p>
+              <p class="panel-title" id="workspace-title">Graph</p>
               <div class="summary-strip" id="graph-summary"></div>
             </div>
             <div class="graph-stage" id="graph-stage">
               <div class="empty-state">Choose a session to load its memory graph.</div>
             </div>
           </section>
-          <section class="panel" aria-label="Selection details">
+          <section class="panel" id="details-section" aria-label="Selection details">
             <div class="panel-header">
               <p class="panel-title">Details</p>
             </div>
@@ -577,10 +789,24 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         const state = {
           sessions: [],
           selectedSessionId: null,
+          activeTab: "graph",
           graph: null,
+          tables: null,
           selectedGraphNodeId: null,
+          selectedEntity: null,
+          tablesBrowser: {
+            selectedTable: "mg_topic_nodes",
+            page: 1,
+            pageSize: 25,
+            expandedCell: null
+          },
           loadingSessions: false,
           loadingGraph: false,
+          tabs: {
+            graph: { loading: false, error: null, loadedAt: null },
+            tables: { loading: false, error: null, loadedAt: null },
+            preview: { loading: false, error: null, loadedAt: null }
+          },
           actionPending: false,
           actionStatus: null,
           error: null,
@@ -599,8 +825,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           refreshGraph: document.getElementById("refresh-graph"),
           pageTitle: document.getElementById("page-title"),
           pageSubtitle: document.getElementById("page-subtitle"),
+          tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
+          graphFilters: document.getElementById("graph-filters"),
+          contentGrid: document.getElementById("content-grid"),
+          workspaceTitle: document.getElementById("workspace-title"),
           graphStage: document.getElementById("graph-stage"),
           graphSummary: document.getElementById("graph-summary"),
+          detailsSection: document.getElementById("details-section"),
           detailsPanel: document.getElementById("details-panel"),
           nodeTypeFilter: document.getElementById("node-type-filter"),
           tagFilter: document.getElementById("tag-filter"),
@@ -612,11 +843,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.studioUrl.textContent = initialState.studioUrl;
 
         elements.refreshSessions.addEventListener("click", () => loadSessions());
-        elements.refreshGraph.addEventListener("click", () => {
-          if (state.selectedSessionId) {
-            state.actionStatus = null;
-            loadGraph(state.selectedSessionId, { preserveSelection: true });
-          }
+        elements.refreshGraph.addEventListener("click", () => refreshActiveTab());
+        elements.tabButtons.forEach((button) => {
+          button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
         });
         elements.nodeTypeFilter.addEventListener("change", () => {
           state.filters.nodeType = elements.nodeTypeFilter.value;
@@ -659,28 +888,90 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const preserveSelection = Boolean(options && options.preserveSelection && state.selectedSessionId === sessionId);
           const selectedGraphNodeId = preserveSelection ? state.selectedGraphNodeId : null;
           state.selectedSessionId = sessionId;
+          state.activeTab = "graph";
           if (!preserveSelection) {
             state.graph = null;
+            state.tables = null;
+            state.selectedEntity = null;
             state.actionStatus = null;
           }
           state.selectedGraphNodeId = selectedGraphNodeId;
           state.loadingGraph = true;
+          state.tabs.graph.loading = true;
+          state.tabs.graph.error = null;
           state.error = null;
           renderSessions();
-          renderGraph();
+          renderWorkspace();
           renderHeader();
           try {
             state.graph = await fetchJson("/api/sessions/" + encodeURIComponent(sessionId) + "/graph");
+            state.tabs.graph.loadedAt = new Date().toISOString();
             return true;
           } catch (error) {
             state.error = error.message || String(error);
+            state.tabs.graph.error = state.error;
             return false;
           } finally {
             state.loadingGraph = false;
+            state.tabs.graph.loading = false;
             renderSessions();
             renderHeader();
-            renderGraph();
+            renderWorkspace();
           }
+        }
+
+        async function loadTables(sessionId, options) {
+          const force = Boolean(options && options.force);
+          if (!force && state.tables && state.selectedSessionId === sessionId) {
+            renderWorkspace();
+            return true;
+          }
+
+          state.tabs.tables.loading = true;
+          state.tabs.tables.error = null;
+          renderWorkspace();
+
+          try {
+            state.tables = await fetchJson("/api/sessions/" + encodeURIComponent(sessionId) + "/tables");
+            state.tabs.tables.loadedAt = new Date().toISOString();
+            return true;
+          } catch (error) {
+            state.tabs.tables.error = error.message || String(error);
+            return false;
+          } finally {
+            state.tabs.tables.loading = false;
+            renderWorkspace();
+          }
+        }
+
+        function selectTab(tab) {
+          if (!tab || !state.tabs[tab] || state.activeTab === tab) return;
+          state.activeTab = tab;
+          state.actionStatus = null;
+          renderWorkspace();
+          renderHeader();
+
+          if (tab === "tables" && state.selectedSessionId) {
+            void loadTables(state.selectedSessionId);
+          }
+        }
+
+        function refreshActiveTab() {
+          if (!state.selectedSessionId) return;
+          state.actionStatus = null;
+
+          if (state.activeTab === "tables") {
+            void loadTables(state.selectedSessionId, { force: true });
+            return;
+          }
+
+          if (state.activeTab === "preview") {
+            state.tabs.preview.loadedAt = new Date().toISOString();
+            renderWorkspace();
+            return;
+          }
+
+          void loadGraph(state.selectedSessionId, { preserveSelection: true });
         }
 
         async function fetchJson(url, options) {
@@ -731,17 +1022,447 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function renderHeader() {
-          elements.refreshGraph.disabled = !state.selectedSessionId || state.loadingGraph;
+          const activeTabState = state.tabs[state.activeTab] || state.tabs.graph;
+          elements.refreshGraph.disabled = !state.selectedSessionId || activeTabState.loading;
+          elements.refreshGraph.innerHTML = '<span class="icon">R</span>Refresh ' + tabLabel(state.activeTab);
           if (!state.selectedSessionId) {
             elements.pageTitle.textContent = "Select a session";
-            elements.pageSubtitle.textContent = "Graph data loads only after you choose a session.";
+            elements.pageSubtitle.textContent = "Workspace data loads only after you choose a session.";
             return;
           }
 
           elements.pageTitle.textContent = "Session " + state.selectedSessionId;
-          elements.pageSubtitle.textContent = state.loadingGraph
-            ? "Loading graph data..."
-            : "Inspect topics, memories, edges, tags, and lifecycle metadata.";
+          elements.pageSubtitle.textContent = activeTabState.loading
+            ? "Loading " + tabLabel(state.activeTab).toLowerCase() + " data..."
+            : "Inspect graph, table, and prompt-preview data without editing stored memory.";
+        }
+
+        function tabLabel(tab) {
+          if (tab === "tables") return "Tables";
+          if (tab === "preview") return "Prompt Preview";
+          return "Graph";
+        }
+
+        function renderWorkspace() {
+          elements.tabButtons.forEach((button) => {
+            const active = button.getAttribute("data-tab") === state.activeTab;
+            button.setAttribute("aria-selected", active ? "true" : "false");
+          });
+          elements.graphFilters.classList.toggle("hidden", state.activeTab !== "graph");
+          elements.contentGrid.classList.toggle("tables-active", state.activeTab === "tables");
+          elements.detailsSection.classList.toggle("hidden", state.activeTab === "tables");
+          elements.workspaceTitle.textContent = tabLabel(state.activeTab);
+          renderHeader();
+
+          if (!state.selectedSessionId) {
+            elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its workspace.</div>';
+            elements.graphSummary.textContent = "";
+            renderDetailsPanel();
+            return;
+          }
+
+          if (state.activeTab === "tables") {
+            renderTables();
+            return;
+          }
+
+          if (state.activeTab === "preview") {
+            renderPreviewPlaceholder();
+            return;
+          }
+
+          renderGraph();
+        }
+
+        function renderTables() {
+          const tab = state.tabs.tables;
+          elements.graphSummary.textContent = "";
+
+          if (tab.loading && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="loading-state">Loading tables...</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          if (tab.error && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(tab.error) + '</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          const browserTables = getBrowserTables();
+          ensureSelectedBrowserTable(browserTables);
+          const table = browserTables.find((candidate) => candidate.name === state.tablesBrowser.selectedTable) || browserTables[0];
+          const totalRows = table ? table.rows.length : 0;
+          const pageSize = state.tablesBrowser.pageSize;
+          const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+          state.tablesBrowser.page = Math.min(Math.max(1, state.tablesBrowser.page), totalPages);
+          const start = (state.tablesBrowser.page - 1) * pageSize;
+          const visibleRows = table ? table.rows.slice(start, start + pageSize) : [];
+          const columns = getTableColumns(table);
+
+          elements.graphSummary.innerHTML = browserTables.map((candidate) =>
+            '<span>' + escapeHtml(candidate.name) + ': ' + numberText(candidate.rows.length) + '</span>'
+          ).join("");
+          elements.graphStage.innerHTML = renderTableBrowser(browserTables, table, columns, visibleRows, start, totalRows, totalPages);
+
+          const tableSelect = elements.graphStage.querySelector("[data-table-browser-select]");
+          if (tableSelect) {
+            tableSelect.addEventListener("change", () => {
+              state.tablesBrowser.selectedTable = tableSelect.value;
+              state.tablesBrowser.page = 1;
+              state.tablesBrowser.expandedCell = null;
+              renderWorkspace();
+            });
+          }
+
+          const pageSizeSelect = elements.graphStage.querySelector("[data-table-page-size]");
+          if (pageSizeSelect) {
+            pageSizeSelect.addEventListener("change", () => {
+              state.tablesBrowser.pageSize = Number.parseInt(pageSizeSelect.value, 10) || 25;
+              state.tablesBrowser.page = 1;
+              state.tablesBrowser.expandedCell = null;
+              renderWorkspace();
+            });
+          }
+
+          elements.graphStage.querySelectorAll("[data-page-action]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const action = button.getAttribute("data-page-action");
+              state.tablesBrowser.page += action === "next" ? 1 : -1;
+              state.tablesBrowser.expandedCell = null;
+              renderWorkspace();
+            });
+          });
+
+          elements.graphStage.querySelectorAll("[data-db-cell-column]").forEach((cell) => {
+            cell.addEventListener("click", () => {
+              const rowIndex = Number.parseInt(cell.getAttribute("data-db-cell-row") || "0", 10);
+              const columnName = cell.getAttribute("data-db-cell-column") || "";
+              const current = state.tablesBrowser.expandedCell;
+              state.tablesBrowser.expandedCell = current
+                && current.tableName === table.name
+                && current.rowIndex === rowIndex
+                && current.columnName === columnName
+                  ? null
+                  : { tableName: table.name, rowIndex, columnName };
+              renderWorkspace();
+            });
+          });
+        }
+
+        function getBrowserTables() {
+          if (state.tables && Array.isArray(state.tables.tables) && state.tables.tables.length > 0) {
+            return state.tables.tables.map((table) => ({
+              name: table.name,
+              rows: (table.rows || []).map(normalizeDbRow)
+            }));
+          }
+
+          const source = state.tables || {};
+          return [
+            { name: "mg_message_buffer", rows: (source.messages || []).map((message, index) => normalizeDbRow({ message_index: index, role: message.role, content: message.content })) },
+            { name: "mg_segments", rows: (source.segments || []).map((segment) => normalizeDbRow(toSnakeRow(segment))) },
+            { name: "mg_topic_nodes", rows: (source.topics || []).map((topic) => normalizeDbRow(toSnakeRow(topic))) },
+            { name: "mg_memory_nodes", rows: (source.memories || []).map((memory) => normalizeDbRow(toSnakeRow(memory))) }
+          ];
+        }
+
+        function ensureSelectedBrowserTable(tables) {
+          if (!tables.some((table) => table.name === state.tablesBrowser.selectedTable)) {
+            state.tablesBrowser.selectedTable = tables[0] ? tables[0].name : "mg_topic_nodes";
+            state.tablesBrowser.page = 1;
+            state.tablesBrowser.expandedCell = null;
+          }
+        }
+
+        function renderTableBrowser(tables, table, columns, rows, start, totalRows, totalPages) {
+          const selectedName = table ? table.name : "";
+          return '<div class="table-browser">' +
+            '<div class="table-browser-toolbar">' +
+              '<div class="table-browser-controls">' +
+                '<div class="field"><label for="table-browser-select">Table</label><select class="table-select" id="table-browser-select" data-table-browser-select>' +
+                  tables.map((candidate) => '<option value="' + escapeAttribute(candidate.name) + '"' + (candidate.name === selectedName ? " selected" : "") + '>' + escapeHtml(candidate.name) + '</option>').join("") +
+                '</select></div>' +
+                '<div class="field"><label for="table-page-size">Page size</label><select id="table-page-size" data-table-page-size>' +
+                  [10, 25, 50, 100].map((size) => '<option value="' + size + '"' + (size === state.tablesBrowser.pageSize ? " selected" : "") + '>' + size + '</option>').join("") +
+                '</select></div>' +
+              '</div>' +
+              '<div class="pagination-controls">' +
+                '<span class="subtle">' + escapeHtml(numberText(totalRows)) + ' rows · page ' + numberText(state.tablesBrowser.page) + ' of ' + numberText(totalPages) + '</span>' +
+                '<button class="icon-button" type="button" data-page-action="previous"' + (state.tablesBrowser.page <= 1 ? " disabled" : "") + '>Previous</button>' +
+                '<button class="icon-button" type="button" data-page-action="next"' + (state.tablesBrowser.page >= totalPages ? " disabled" : "") + '>Next</button>' +
+              '</div>' +
+            '</div>' +
+            renderDbTable(selectedName, columns, rows, start) +
+          '</div>';
+        }
+
+        function renderDbTable(tableName, columns, rows, start) {
+          if (!tableName) return '<div class="table-empty">No tables are available for this session.</div>';
+          if (columns.length === 0) return '<div class="table-empty">' + escapeHtml(tableName) + ' has no rows to display.</div>';
+
+          return '<div class="data-table-section">' +
+            '<div class="data-table-heading"><p class="panel-title">' + escapeHtml(tableName) + '</p><span class="badge">read-only</span></div>' +
+            '<div class="data-table-wrap"><table class="db-table"><thead><tr>' +
+              columns.map((column) => '<th scope="col">' + escapeHtml(column) + '</th>').join("") +
+            '</tr></thead><tbody>' +
+              rows.map((row, index) => {
+                const absoluteRow = start + index + 1;
+                return '<tr>' + columns.map((column) => renderDbCell(tableName, row, absoluteRow, column)).join("") + '</tr>';
+              }).join("") +
+            '</tbody></table></div>' +
+          '</div>';
+        }
+
+        function renderDbCell(tableName, row, rowIndex, columnName) {
+          const expanded = state.tablesBrowser.expandedCell
+            && state.tablesBrowser.expandedCell.tableName === tableName
+            && state.tablesBrowser.expandedCell.rowIndex === rowIndex
+            && state.tablesBrowser.expandedCell.columnName === columnName;
+          const value = expanded ? formatFullCellValue(row[columnName]) : formatCellPreview(row[columnName]);
+          return '<td class="db-cell' + (expanded ? " selected" : "") + '" tabindex="0" title="Click to expand or collapse" data-db-cell-row="' + rowIndex + '" data-db-cell-column="' + escapeAttribute(columnName) + '">' +
+            (expanded
+              ? '<span class="db-cell-expanded">' + escapeHtml(value) + '</span>'
+              : clipped(value, 260)) +
+          '</td>';
+        }
+
+        function getTableColumns(table) {
+          if (!table) return [];
+          const preferred = tableColumnOrder(table.name);
+          const observed = [];
+          for (const row of table.rows) {
+            Object.keys(row).forEach((key) => {
+              if (!observed.includes(key)) observed.push(key);
+            });
+          }
+          return preferred.filter((column) => observed.includes(column))
+            .concat(observed.filter((column) => !preferred.includes(column)));
+        }
+
+        function tableColumnOrder(name) {
+          const columns = {
+            mg_message_buffer: ["session_id", "message_index", "role", "content"],
+            mg_segments: ["id", "session_id", "start_index", "end_index", "topic_order", "drift_score", "created_at"],
+            mg_topic_nodes: ["id", "session_id", "segment_id", "label", "summary", "embedding", "tags", "source", "message_range", "topic_order", "drift_score", "agent_color", "fleet_id", "agent_id", "suppressed", "suppressed_at", "created_at"],
+            mg_topic_edges: ["src_id", "dst_id", "weight", "type"],
+            mg_memory_nodes: ["id", "segment_id", "topic_node_id", "agent_id", "session_id", "memory_type", "source_type", "subject", "predicate", "value", "confidence", "embedding", "tags", "source", "source_url", "source_title", "superseded_by", "decayed", "forgotten", "forgotten_at", "has_conflict", "agent_color", "fleet_id", "created_at"],
+            mg_memory_edges: ["id", "source_id", "target_id", "edge_type", "weight", "created_at"],
+            mg_fleets: ["id", "name", "created_at"],
+            mg_fleet_agents: ["id", "fleet_id", "session_id", "agent_color", "created_at"],
+            mg_session_ingest_state: ["session_id", "last_ingested_message_index", "updated_at"],
+            mg_graft_registry: ["id", "session_id", "node_id", "source_session_id", "source_node_id", "grafted_at"]
+          };
+          return columns[name] || [];
+        }
+
+        function normalizeDbRow(row) {
+          const normalized = {};
+          Object.entries(row || {}).forEach(([key, value]) => {
+            normalized[toSnakeCase(key)] = value;
+          });
+          return normalized;
+        }
+
+        function toSnakeRow(row) {
+          return normalizeDbRow(row);
+        }
+
+        function toSnakeCase(value) {
+          return String(value).replace(/[A-Z]/g, (letter) => "_" + letter.toLowerCase());
+        }
+
+        function formatCellPreview(value) {
+          if (value === null) return "null";
+          if (value === undefined) return "undefined";
+          if (Array.isArray(value)) return JSON.stringify(value);
+          if (typeof value === "object") return JSON.stringify(value);
+          return String(value);
+        }
+
+        function formatFullCellValue(value) {
+          if (value === null) return "null";
+          if (value === undefined) return "undefined";
+          if (typeof value === "object") return JSON.stringify(value, null, 2);
+          return String(value);
+        }
+
+        function normalizeTables(raw) {
+          const source = raw || {};
+          return {
+            topics: (source.topics || []).map((topic) => ({
+              id: topic.id,
+              kind: "topic",
+              raw: topic,
+              title: topic.label || topic.id,
+              subtitle: topic.summary || "",
+              tags: topic.tags || [],
+              lifecycle: topic.suppressed ? "suppressed" : "active"
+            })),
+            memories: (source.memories || []).map((memory) => ({
+              id: memory.id,
+              kind: "memory",
+              raw: memory,
+              title: memory.subject ? memory.subject + " " + memory.predicate : memory.id,
+              subtitle: memory.value || "",
+              tags: memory.tags || [],
+              lifecycle: memoryLifecycle(memory)
+            })),
+            segments: (source.segments || []).map((segment) => ({
+              id: segment.id,
+              kind: "segment",
+              raw: segment
+            })),
+            messages: (source.messages || []).map((message, index) => ({
+              id: "message:" + index,
+              kind: "message",
+              index,
+              raw: message
+            }))
+          };
+        }
+
+        function ensureSelectedEntityExists(tables) {
+          if (!state.selectedEntity || state.selectedEntity.source !== "tables") return;
+          const bucket = state.selectedEntity.kind === "topic" ? tables.topics
+            : state.selectedEntity.kind === "memory" ? tables.memories
+              : state.selectedEntity.kind === "segment" ? tables.segments
+                : state.selectedEntity.kind === "message" ? tables.messages
+                  : [];
+          if (!bucket.some((item) => item.id === state.selectedEntity.id)) {
+            state.selectedEntity = null;
+          }
+        }
+
+        function renderTopicTable(rows) {
+          return renderDataTable("Topics", rows.length, ["Label", "Summary", "Tags", "Lifecycle", "Message range", "Created", "ID"], rows.map((row) => {
+            const raw = row.raw;
+            return tableRow(row, [
+              clipped(raw.label || raw.id, 180),
+              clipped(raw.summary || "None", 320),
+              tagsMarkup(raw.tags || []),
+              badgeMarkup(row.lifecycle),
+              escapeHtml(formatMessageRange(raw.messageRange)),
+              escapeHtml(formatDate(raw.createdAt)),
+              clipped(raw.id, 180)
+            ]);
+          }));
+        }
+
+        function renderMemoryTable(rows) {
+          return renderDataTable("Memories", rows.length, ["Subject", "Predicate", "Value", "Type", "Confidence", "Lifecycle", "Tags", "Created", "ID"], rows.map((row) => {
+            const raw = row.raw;
+            return tableRow(row, [
+              clipped(raw.subject || "None", 160),
+              clipped(raw.predicate || "None", 140),
+              clipped(raw.value || "None", 320),
+              escapeHtml(raw.memoryType || "Unknown"),
+              escapeHtml(raw.confidence == null ? "Unknown" : String(raw.confidence)),
+              badgeMarkup(row.lifecycle),
+              tagsMarkup(raw.tags || []),
+              escapeHtml(formatDate(raw.createdAt)),
+              clipped(raw.id, 180)
+            ]);
+          }));
+        }
+
+        function renderSegmentTable(rows) {
+          return renderDataTable("Segments", rows.length, ["Order", "Message range", "Drift score", "Created", "ID"], rows.map((row) => {
+            const raw = row.raw;
+            return tableRow(row, [
+              escapeHtml(raw.topicOrder == null ? "Unknown" : String(raw.topicOrder)),
+              escapeHtml(formatSegmentRange(raw)),
+              escapeHtml(raw.driftScore == null ? "Unknown" : String(raw.driftScore)),
+              escapeHtml(formatDate(raw.createdAt)),
+              clipped(raw.id, 220)
+            ]);
+          }));
+        }
+
+        function renderMessageTable(rows) {
+          return renderDataTable("Message buffer", rows.length, ["Index", "Role", "Content", "Approx length"], rows.map((row) => {
+            const raw = row.raw;
+            const content = raw.content || "";
+            return tableRow(row, [
+              escapeHtml(String(row.index)),
+              badgeMarkup(raw.role || "unknown"),
+              clipped(content, 520),
+              escapeHtml(numberText(content.length) + " chars")
+            ]);
+          }));
+        }
+
+        function renderDataTable(title, count, columns, rowMarkup) {
+          return '<section class="data-table-section">' +
+            '<div class="data-table-heading"><p class="panel-title">' + escapeHtml(title) + '</p><span class="badge">' + numberText(count) + '</span></div>' +
+            (count === 0
+              ? '<div class="table-empty">No ' + escapeHtml(title.toLowerCase()) + ' found for this session.</div>'
+              : '<div class="data-table-wrap"><table class="data-table"><thead><tr>' +
+                columns.map((column) => '<th scope="col">' + escapeHtml(column) + '</th>').join("") +
+                '</tr></thead><tbody>' + rowMarkup.join("") + '</tbody></table></div>') +
+          '</section>';
+        }
+
+        function tableRow(row, cells) {
+          const selected = state.selectedEntity && state.selectedEntity.kind === row.kind && state.selectedEntity.id === row.id ? " selected" : "";
+          return '<tr class="' + selected + '" tabindex="0" data-table-entity-kind="' + escapeAttribute(row.kind) + '" data-table-entity-id="' + escapeAttribute(row.id) + '">' +
+            cells.map((cell) => '<td>' + cell + '</td>').join("") +
+          '</tr>';
+        }
+
+        function clipped(value, length) {
+          return '<span class="table-cell-clip" title="' + escapeAttribute(value || "") + '">' + escapeHtml(truncate(value || "", length)) + '</span>';
+        }
+
+        function badgeMarkup(label) {
+          return '<span class="badge">' + escapeHtml(label || "unknown") + '</span>';
+        }
+
+        function renderTablesPlaceholder() {
+          const tab = state.tabs.tables;
+          elements.graphSummary.textContent = "";
+
+          if (tab.loading && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="loading-state">Loading tables...</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          if (tab.error && !state.tables) {
+            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(tab.error) + '</div>';
+            renderDetailsPanel();
+            return;
+          }
+
+          const counts = state.tables
+            ? [
+              numberText((state.tables.topics || []).length) + " topics",
+              numberText((state.tables.memories || []).length) + " memories",
+              numberText((state.tables.segments || []).length) + " segments",
+              numberText((state.tables.messages || []).length) + " messages"
+            ]
+            : ["not loaded"];
+          elements.graphSummary.innerHTML = counts.map((label) => '<span>' + escapeHtml(label) + '</span>').join("");
+          elements.graphStage.innerHTML =
+            '<div class="workspace-placeholder"><div class="placeholder-card">' +
+              '<h2 class="panel-title">Tables</h2>' +
+              '<p class="subtle">Tables data is available through the read-only tables workspace.</p>' +
+              '<p class="subtle">' + escapeHtml(counts.join(" · ")) + '</p>' +
+            '</div></div>';
+          renderDetailsPanel();
+        }
+
+        function renderPreviewPlaceholder() {
+          const status = initialState.previewStatus || { available: false, reason: "Prompt Preview is not configured." };
+          elements.graphSummary.innerHTML = '<span>' + (status.available ? "available" : "unavailable") + '</span>';
+          elements.graphStage.innerHTML =
+            '<div class="workspace-placeholder"><div class="placeholder-card">' +
+              '<h2 class="panel-title">Prompt Preview workspace shell</h2>' +
+              '<p class="subtle">Preview status: ' + escapeHtml(status.available ? "available" : "unavailable") + '</p>' +
+              '<p class="subtle">' + escapeHtml(status.available ? "Prompt controls land in Phase 5." : (status.reason || "Prompt Preview is unavailable.")) + '</p>' +
+            '</div></div>';
+          renderDetailsPanel();
         }
 
         function renderGraph() {
@@ -750,21 +1471,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (state.loadingGraph && !state.graph) {
             elements.graphStage.innerHTML = '<div class="loading-state">Loading graph...</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           if (state.error && state.selectedSessionId && !state.graph) {
             elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(state.error) + '</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           if (!state.graph) {
             elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its memory graph.</div>';
             elements.graphSummary.textContent = "";
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
@@ -777,22 +1498,22 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
           if (graph.nodes.length === 0) {
             elements.graphStage.innerHTML = '<div class="empty-state">No nodes match the current filters.</div>';
-            renderDetails(null);
+            renderDetailsPanel();
             return;
           }
 
           elements.graphStage.innerHTML = renderGraphSvg(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             node.addEventListener("click", () => {
-              state.selectedGraphNodeId = node.getAttribute("data-graph-node-id");
+              selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
               state.actionStatus = null;
               renderGraph();
             });
           });
 
           const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || graph.nodes[0];
-          if (selected && !state.selectedGraphNodeId) state.selectedGraphNodeId = selected.id;
-          renderDetails(selected || null);
+          if (selected && selected.id !== state.selectedGraphNodeId) selectGraphNode(selected.id, graph);
+          renderDetailsPanel();
         }
 
         function buildDisplayGraph(raw) {
@@ -898,21 +1619,97 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           '</g>';
         }
 
-        function renderDetails(node) {
+        function selectGraphNode(nodeId, graph) {
+          if (!nodeId) return;
+          const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+          state.selectedGraphNodeId = nodeId;
+          state.selectedEntity = node
+            ? { kind: node.kind, id: node.id, source: "graph" }
+            : null;
+        }
+
+        function renderDetailsPanel() {
+          const node = resolveSelectedEntity();
           if (!node) {
-            elements.detailsPanel.innerHTML = '<p class="subtle">Select a node in the graph to inspect its metadata.</p>';
+            const noun = state.activeTab === "graph" ? "node in the graph" : "entity";
+            elements.detailsPanel.innerHTML = '<p class="subtle">Select a ' + noun + ' to inspect its metadata.</p>';
+            return;
+          }
+
+          renderEntityDetails(node);
+        }
+
+        function resolveSelectedEntity() {
+          if (!state.selectedEntity) return null;
+          const tables = normalizeTables(state.tables);
+
+          if (state.selectedEntity.kind === "topic") {
+            const raw = ((state.graph && state.graph.nodes) || []).find((node) => node.id === state.selectedEntity.id)
+              || ((state.tables && state.tables.topics) || []).find((node) => node.id === state.selectedEntity.id);
+            if (!raw) return null;
+            return {
+              id: raw.id,
+              kind: "topic",
+              title: raw.label || raw.id,
+              subtitle: raw.summary || "",
+              tags: raw.tags || [],
+              lifecycle: raw.suppressed ? "suppressed" : "active",
+              raw
+            };
+          }
+
+          if (state.selectedEntity.kind === "memory") {
+            const raw = ((state.graph && state.graph.memories) || []).find((memory) => memory.id === state.selectedEntity.id)
+              || ((state.tables && state.tables.memories) || []).find((memory) => memory.id === state.selectedEntity.id);
+            if (!raw) return null;
+            return {
+              id: raw.id,
+              kind: "memory",
+              title: raw.subject ? raw.subject + " " + raw.predicate : raw.id,
+              subtitle: raw.value || "",
+              tags: raw.tags || [],
+              lifecycle: memoryLifecycle(raw),
+              raw
+            };
+          }
+
+          if (state.selectedEntity.kind === "segment") {
+            return tables.segments.find((segment) => segment.id === state.selectedEntity.id) || null;
+          }
+
+          if (state.selectedEntity.kind === "message") {
+            return tables.messages.find((message) => message.id === state.selectedEntity.id) || null;
+          }
+
+          return null;
+        }
+
+        function renderEntityDetails(node) {
+          if (!node) {
+            renderDetailsPanel();
             return;
           }
 
           elements.detailsPanel.innerHTML = node.kind === "topic"
             ? renderTopicDetails(node)
-            : renderMemoryDetails(node);
+            : node.kind === "memory"
+              ? renderMemoryDetails(node)
+              : node.kind === "segment"
+                ? renderSegmentDetails(node)
+                : renderMessageDetails(node);
 
           elements.detailsPanel.querySelectorAll("[data-detail-node-id]").forEach((button) => {
             button.addEventListener("click", () => {
-              state.selectedGraphNodeId = button.getAttribute("data-detail-node-id");
+              const id = button.getAttribute("data-detail-node-id");
+              const kind = ((state.graph && state.graph.nodes) || (state.tables && state.tables.topics) || []).some((topic) => topic.id === id) ? "topic" : "memory";
+              state.selectedGraphNodeId = id;
+              state.selectedEntity = { kind, id, source: state.activeTab === "tables" ? "tables" : "graph" };
               state.actionStatus = null;
-              renderGraph();
+              if (state.activeTab === "graph") {
+                renderGraph();
+              } else {
+                renderWorkspace();
+              }
             });
           });
 
@@ -923,7 +1720,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         function renderTopicDetails(node) {
           const raw = node.raw || {};
-          const connectedMemories = (state.graph.memories || []).filter((memory) => memory.topicNodeId === node.id);
+          const connectedMemories = (((state.graph && state.graph.memories) || (state.tables && state.tables.memories) || [])).filter((memory) => memory.topicNodeId === node.id);
           const lifecycle = raw.suppressed
             ? "Suppressed" + (raw.suppressedAt ? " since " + formatDate(raw.suppressedAt) : "")
             : "Active";
@@ -951,7 +1748,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         function renderMemoryDetails(node) {
           const raw = node.raw || {};
           const lifecycleFlags = memoryLifecycleFlags(raw);
-          const relationshipMarkup = memoryRelationshipsMarkup(node.id);
+          const relationshipMarkup = state.graph ? memoryRelationshipsMarkup(node.id) : '<p class="subtle">Load the Graph tab to inspect memory relationships.</p>';
 
           return detailSection("Memory", [
             detailTextRow("Subject", raw.subject || "None"),
@@ -980,18 +1777,46 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           renderActionSection(node);
         }
 
+        function renderSegmentDetails(node) {
+          const raw = node.raw || {};
+          const topics = (((state.graph && state.graph.nodes) || (state.tables && state.tables.topics) || [])).filter((topic) => topic.segmentId === node.id);
+
+          return detailSection("Segment", [
+            detailTextRow("ID", raw.id || node.id),
+            detailTextRow("Order", raw.topicOrder == null ? "Unknown" : String(raw.topicOrder)),
+            detailTextRow("Message range", formatSegmentRange(raw)),
+            detailTextRow("Drift score", raw.driftScore == null ? "Unknown" : String(raw.driftScore)),
+            detailTextRow("Created", formatDate(raw.createdAt)),
+            detailTextRow("Related topics", String(topics.length))
+          ].join("")) +
+          detailSection("Related topics", connectedTopicsMarkup(topics));
+        }
+
+        function renderMessageDetails(node) {
+          const raw = node.raw || {};
+          const content = raw.content || "";
+          const index = node.index == null ? messageIndexFromId(node.id) : node.index;
+          const segment = (((state.tables && state.tables.segments) || [])).find((candidate) =>
+            index != null && candidate.startIndex <= index && candidate.endIndex >= index
+          );
+
+          return detailSection("Message", [
+            detailTextRow("Index", index == null ? "Unknown" : String(index)),
+            detailTextRow("Role", raw.role || "Unknown"),
+            detailTextRow("Approx length", numberText(content.length) + " chars"),
+            detailTextRow("Related segment", segment ? segment.id : "None")
+          ].join("")) +
+          detailSection("Content", '<p class="detail-value">' + escapeHtml(content || "No content") + '</p>');
+        }
+
         function renderActionSection(node) {
           const status = state.actionStatus && state.actionStatus.nodeId === node.id
             ? '<div class="action-status ' + state.actionStatus.kind + '" role="' + (state.actionStatus.kind === "error" ? "alert" : "status") + '" aria-live="polite">' + escapeHtml(state.actionStatus.message) + '</div>'
             : "";
           let action = "";
 
-          if (node.kind === "topic") {
-            const actionName = node.raw.suppressed ? "restore" : "suppress";
-            const label = node.raw.suppressed ? "Restore topic" : "Suppress topic";
-            action = '<button class="icon-button" type="button" data-lifecycle-action="' + actionName + '"' + (state.actionPending ? " disabled" : "") + '>' + label + '</button>';
-          } else if (!node.raw.forgotten) {
-            action = '<button class="icon-button danger-button" type="button" data-lifecycle-action="forget"' + (state.actionPending ? " disabled" : "") + '>Forget memory</button>';
+          if (node.kind === "topic" && !node.raw.suppressed) {
+            action = '<button class="icon-button" type="button" data-lifecycle-action="suppress"' + (state.actionPending ? " disabled" : "") + '>Suppress topic</button>';
           }
 
           if (!action && !status) return "";
@@ -1000,14 +1825,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         async function runLifecycleAction(node, action) {
           if (!state.selectedSessionId || state.actionPending) return;
-          if (action === "forget" && !window.confirm("Forget this memory? This lifecycle action cannot be undone in Studio.")) return;
+          if (node.kind !== "topic" || action !== "suppress") return;
 
           const sessionId = state.selectedSessionId;
-          const collection = node.kind === "topic" ? "nodes" : "memories";
-          const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/" + collection + "/" + encodeURIComponent(node.id) + "/" + action;
+          const url = "/api/sessions/" + encodeURIComponent(sessionId) + "/nodes/" + encodeURIComponent(node.id) + "/suppress";
           state.actionPending = true;
           state.actionStatus = null;
-          renderDetails(node);
+          renderEntityDetails(node);
 
           try {
             const result = await fetchJson(url, { method: "POST" });
@@ -1016,12 +1840,14 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               kind: "success",
               message: lifecycleActionMessage(action, result.changed)
             };
-            const refreshed = await loadGraph(sessionId, { preserveSelection: true });
+            const refreshed = state.activeTab === "tables"
+              ? await loadTables(sessionId, { force: true })
+              : await loadGraph(sessionId, { preserveSelection: true });
             if (!refreshed) {
               state.actionStatus = {
                 nodeId: node.id,
                 kind: "error",
-                message: "The lifecycle action completed, but the graph could not be refreshed: " + state.error
+                message: "The lifecycle action completed, but the workspace could not be refreshed."
               };
             }
           } catch (error) {
@@ -1038,9 +1864,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         function lifecycleActionMessage(action, changed) {
           if (!changed) return "No change was needed; the lifecycle state was already up to date.";
-          if (action === "forget") return "Memory forgotten. The graph and node details have been refreshed.";
-          if (action === "suppress") return "Topic suppressed. The graph and node details have been refreshed.";
-          return "Topic restored. The graph and node details have been refreshed.";
+          return "Topic suppressed. The graph and node details have been refreshed.";
         }
 
         function connectedMemoriesMarkup(memories) {
@@ -1048,6 +1872,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           return '<ul class="detail-list">' + memories.map((memory) =>
             '<li><button class="detail-link" type="button" data-detail-node-id="' + escapeAttribute(memory.id) + '">' +
               escapeHtml(memory.subject + " " + memory.predicate + ": " + memory.value) +
+            '</button></li>'
+          ).join("") + '</ul>';
+        }
+
+        function connectedTopicsMarkup(topics) {
+          if (topics.length === 0) return '<p class="subtle">No topics are connected to this segment.</p>';
+          return '<ul class="detail-list">' + topics.map((topic) =>
+            '<li><button class="detail-link" type="button" data-detail-node-id="' + escapeAttribute(topic.id) + '">' +
+              escapeHtml((topic.label || topic.id) + (topic.summary ? ": " + truncate(topic.summary, 80) : "")) +
             '</button></li>'
           ).join("") + '</ul>';
         }
@@ -1100,6 +1933,20 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (memory.supersededBy) return "superseded";
           if (memory.hasConflict) return "conflicting";
           return "active";
+        }
+
+        function formatMessageRange(range) {
+          return Array.isArray(range) ? range.join(" to ") : "Unknown";
+        }
+
+        function formatSegmentRange(segment) {
+          if (segment.startIndex == null || segment.endIndex == null) return "Unknown";
+          return String(segment.startIndex) + " to " + String(segment.endIndex);
+        }
+
+        function messageIndexFromId(id) {
+          const match = String(id || "").match(/^message:(\\d+)$/);
+          return match ? Number.parseInt(match[1], 10) : null;
         }
 
         function sessionBadges(session) {

@@ -3,6 +3,7 @@ import type {
   StudioMemoryEdge,
   StudioMemorySearchResult,
   StudioSessionSummary,
+  StudioTableBrowserTable,
   StudioTopicEdge,
 } from "./repository.js";
 
@@ -10,24 +11,37 @@ export interface StudioApiStore {
   getNodesBySession(sessionId: string, options?: { includeSuppressed?: boolean }): Promise<unknown[]>;
   getSegmentsBySession(sessionId: string): Promise<unknown[]>;
   getMemoriesBySession(sessionId: string): Promise<unknown[]>;
+  getMessagesBySession(sessionId: string, startIndex?: number, endIndex?: number): Promise<unknown[]>;
   suppressTopic(nodeId: string): Promise<boolean>;
-  restoreTopic(nodeId: string): Promise<boolean>;
-  forgetMemory(memoryId: string): Promise<boolean>;
+}
+
+export interface StudioApiPreviewService {
+  getStatus(): { available: boolean; reason?: string };
+  run(request: StudioPreviewRequest): Promise<unknown>;
+}
+
+export interface StudioPreviewRequest {
+  mode: "graft" | "recall";
+  sessionId: string;
+  query: string;
+  graft?: unknown;
+  recall?: unknown;
 }
 
 export interface StudioApiRepository {
   listSessions(): Promise<StudioSessionSummary[]>;
   sessionExists(sessionId: string): Promise<boolean>;
   nodeBelongsToSession(sessionId: string, nodeId: string): Promise<boolean>;
-  memoryBelongsToSession(sessionId: string, memoryId: string): Promise<boolean>;
   getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<StudioMemoryEdge[]>;
+  getTablesBySession(sessionId: string): Promise<StudioTableBrowserTable[]>;
   searchMemories(sessionId: string, query: string, limit?: number): Promise<StudioMemorySearchResult[]>;
 }
 
 export interface StudioApiContext {
   store: StudioApiStore;
   repository: StudioApiRepository;
+  preview?: StudioApiPreviewService;
 }
 
 interface RouteMatch {
@@ -100,6 +114,26 @@ export async function handleStudioApiRequest(
       return;
     }
 
+    if (collection === "tables" && route.segments.length === 3) {
+      if (method !== "GET") {
+        sendMethodNotAllowed(response, ["GET"]);
+        return;
+      }
+
+      await sendSessionTables(response, context, sessionId);
+      return;
+    }
+
+    if (collection === "preview" && route.segments.length === 3) {
+      if (method !== "POST") {
+        sendMethodNotAllowed(response, ["POST"]);
+        return;
+      }
+
+      await sendPromptPreview(request, response, context, sessionId);
+      return;
+    }
+
     if (collection === "search" && route.segments.length === 3) {
       if (method !== "GET") {
         sendMethodNotAllowed(response, ["GET"]);
@@ -110,23 +144,13 @@ export async function handleStudioApiRequest(
       return;
     }
 
-    if (collection === "nodes" && itemId && (action === "suppress" || action === "restore") && route.segments.length === 5) {
+    if (collection === "nodes" && itemId && action === "suppress" && route.segments.length === 5) {
       if (method !== "POST") {
         sendMethodNotAllowed(response, ["POST"]);
         return;
       }
 
-      await sendNodeLifecycleAction(response, context, sessionId, itemId, action);
-      return;
-    }
-
-    if (collection === "memories" && itemId && action === "forget" && route.segments.length === 5) {
-      if (method !== "POST") {
-        sendMethodNotAllowed(response, ["POST"]);
-        return;
-      }
-
-      await sendForgetMemory(response, context, sessionId, itemId);
+      await sendSuppressTopic(response, context, sessionId, itemId);
       return;
     }
 
@@ -182,6 +206,86 @@ async function sendSessionMemories(
   sendJson(response, 200, { sessionId, memories });
 }
 
+async function sendSessionTables(
+  response: ServerResponse,
+  context: StudioApiContext,
+  sessionId: string,
+): Promise<void> {
+  if (!await context.repository.sessionExists(sessionId)) {
+    sendJson(response, 404, { error: `Session '${sessionId}' was not found.` });
+    return;
+  }
+
+  const [topics, segments, memories, messages, tables] = await Promise.all([
+    context.store.getNodesBySession(sessionId, { includeSuppressed: true }),
+    context.store.getSegmentsBySession(sessionId),
+    context.store.getMemoriesBySession(sessionId),
+    context.store.getMessagesBySession(sessionId),
+    context.repository.getTablesBySession(sessionId),
+  ]);
+
+  sendJson(response, 200, {
+    sessionId,
+    topics,
+    segments,
+    memories,
+    messages,
+    tables,
+    capturedAt: new Date().toISOString(),
+  });
+}
+
+async function sendPromptPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: StudioApiContext,
+  sessionId: string,
+): Promise<void> {
+  if (!await context.repository.sessionExists(sessionId)) {
+    sendJson(response, 404, { error: `Session '${sessionId}' was not found.` });
+    return;
+  }
+
+  const status = context.preview?.getStatus() ?? {
+    available: false,
+    reason: "Prompt Preview is not configured.",
+  };
+  if (!context.preview || !status.available) {
+    sendJson(response, 503, {
+      error: "Prompt Preview is unavailable.",
+      previewStatus: status,
+    });
+    return;
+  }
+
+  const body = await readJsonBody(request);
+  if (!isObject(body)) {
+    sendJson(response, 400, { error: "Prompt Preview requires a JSON object body." });
+    return;
+  }
+
+  const mode = body.mode;
+  if (mode !== "graft" && mode !== "recall") {
+    sendJson(response, 400, { error: "Prompt Preview mode must be 'graft' or 'recall'." });
+    return;
+  }
+
+  const query = typeof body.query === "string" ? body.query.trim() : "";
+  if (!query) {
+    sendJson(response, 400, { error: "Prompt Preview requires a non-empty query." });
+    return;
+  }
+
+  const result = await context.preview.run({
+    mode,
+    sessionId,
+    query,
+    ...(isObject(body.graft) ? { graft: body.graft } : {}),
+    ...(isObject(body.recall) ? { recall: body.recall } : {}),
+  });
+  sendJson(response, 200, result);
+}
+
 async function sendMemorySearch(
   response: ServerResponse,
   context: StudioApiContext,
@@ -204,12 +308,11 @@ async function sendMemorySearch(
   sendJson(response, 200, { sessionId, query, memories });
 }
 
-async function sendNodeLifecycleAction(
+async function sendSuppressTopic(
   response: ServerResponse,
   context: StudioApiContext,
   sessionId: string,
   nodeId: string,
-  action: "suppress" | "restore",
 ): Promise<void> {
   if (!await context.repository.sessionExists(sessionId)) {
     sendJson(response, 404, { error: `Session '${sessionId}' was not found.` });
@@ -221,36 +324,9 @@ async function sendNodeLifecycleAction(
     return;
   }
 
-  const changed = action === "suppress"
-    ? await context.store.suppressTopic(nodeId)
-    : await context.store.restoreTopic(nodeId);
+  const changed = await context.store.suppressTopic(nodeId);
 
-  sendJson(response, 200, { sessionId, nodeId, action, changed });
-}
-
-async function sendForgetMemory(
-  response: ServerResponse,
-  context: StudioApiContext,
-  sessionId: string,
-  memoryId: string,
-): Promise<void> {
-  if (!isUuid(memoryId)) {
-    sendJson(response, 400, { error: "Memory id must be a UUID." });
-    return;
-  }
-
-  if (!await context.repository.sessionExists(sessionId)) {
-    sendJson(response, 404, { error: `Session '${sessionId}' was not found.` });
-    return;
-  }
-
-  if (!await context.repository.memoryBelongsToSession(sessionId, memoryId)) {
-    sendJson(response, 404, { error: `Memory '${memoryId}' was not found in session '${sessionId}'.` });
-    return;
-  }
-
-  const changed = await context.store.forgetMemory(memoryId);
-  sendJson(response, 200, { sessionId, memoryId, action: "forget", changed });
+  sendJson(response, 200, { sessionId, nodeId, action: "suppress", changed });
 }
 
 function matchRoute(requestUrl: string | undefined): RouteMatch | null {
@@ -283,8 +359,30 @@ function parseLimit(value: string | null): number | undefined {
   return Math.max(1, Math.min(parsed, 100));
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > 64 * 1024) {
+      throw new Error("Request body is too large.");
+    }
+    chunks.push(buffer);
+  }
+
+  if (chunks.length === 0) return {};
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function sendMethodNotAllowed(response: ServerResponse, methods: string[]): void {
