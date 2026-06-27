@@ -38,6 +38,10 @@ describe("MemoGrafter Studio API", () => {
         segments: [{ id: "segment-1", sessionId: "session-1" }],
         memories: [{ id: memoryId, sessionId: "session-1" }],
         messages: [{ role: "user", content: "hello" }],
+        tables: [
+          { name: "mg_topic_nodes", rows: [{ id: "topic-1", session_id: "session-1" }] },
+          { name: "mg_message_buffer", rows: [{ message_index: 0, role: "user", content: "hello" }] },
+        ],
       });
       expect(memories.body).toMatchObject({
         sessionId: "session-1",
@@ -50,6 +54,7 @@ describe("MemoGrafter Studio API", () => {
       });
       expect(context.store.getNodesBySession).toHaveBeenCalledWith("session-1", { includeSuppressed: true });
       expect(context.store.getMessagesBySession).toHaveBeenCalledWith("session-1");
+      expect(context.repository.getTablesBySession).toHaveBeenCalledWith("session-1");
       expect(context.repository.searchMemories).toHaveBeenCalledWith("session-1", "alpha", undefined);
     } finally {
       await closeServer(server);
@@ -231,6 +236,10 @@ function makeContext(repositoryOverrides: Partial<StudioApiContext["repository"]
         weight: 1,
         createdAt: new Date("2026-06-19T00:00:00.000Z"),
       }]),
+      getTablesBySession: vi.fn(async () => [
+        { name: "mg_topic_nodes", rows: [{ id: "topic-1", session_id: "session-1" }] },
+        { name: "mg_message_buffer", rows: [{ session_id: "session-1", message_index: 0, role: "user", content: "hello" }] },
+      ]),
       searchMemories: vi.fn(async () => [memory]),
       ...repositoryOverrides,
     },

@@ -3,6 +3,7 @@ import type {
   StudioMemoryEdge,
   StudioMemorySearchResult,
   StudioSessionSummary,
+  StudioTableBrowserTable,
   StudioTopicEdge,
 } from "./repository.js";
 
@@ -33,6 +34,7 @@ export interface StudioApiRepository {
   nodeBelongsToSession(sessionId: string, nodeId: string): Promise<boolean>;
   getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<StudioMemoryEdge[]>;
+  getTablesBySession(sessionId: string): Promise<StudioTableBrowserTable[]>;
   searchMemories(sessionId: string, query: string, limit?: number): Promise<StudioMemorySearchResult[]>;
 }
 
@@ -214,11 +216,12 @@ async function sendSessionTables(
     return;
   }
 
-  const [topics, segments, memories, messages] = await Promise.all([
+  const [topics, segments, memories, messages, tables] = await Promise.all([
     context.store.getNodesBySession(sessionId, { includeSuppressed: true }),
     context.store.getSegmentsBySession(sessionId),
     context.store.getMemoriesBySession(sessionId),
     context.store.getMessagesBySession(sessionId),
+    context.repository.getTablesBySession(sessionId),
   ]);
 
   sendJson(response, 200, {
@@ -227,6 +230,7 @@ async function sendSessionTables(
     segments,
     memories,
     messages,
+    tables,
     capturedAt: new Date().toISOString(),
   });
 }
