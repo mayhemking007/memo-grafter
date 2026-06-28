@@ -124,3 +124,20 @@ All notable changes to this project will be documented here.
 ### Internal
 
 - Improved project structure and module boundaries to support future CLI, fleet, and visualization capabilities.
+
+## [0.4.0] - 2026-06-28
+
+### Added
+
+- Added MemoGrafter Studio with graph, tables, and Prompt Preview tabs.
+- Added `memo-grafter studio` CLI command and internal Studio API.
+- Added read-only table inspection and prompt preview runtime wiring.
+
+### Changed
+
+- Redesigned Studio graph visualization, filtering, node details, and lifecycle actions.
+- Enforced explicit `init` / `migrate` setup before Studio startup.
+
+### Internal
+
+- Refactored Studio infrastructure for future developer tooling.
