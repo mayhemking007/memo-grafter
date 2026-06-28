@@ -95,6 +95,36 @@ describe("MemoGrafter Studio API", () => {
     }
   });
 
+  it("accepts graft prompt preview requests", async () => {
+    const context = makeContext();
+    const server = createApiServer(context);
+    const port = await listenOnAvailablePort(server, "127.0.0.1", 0);
+
+    try {
+      const preview = await requestJson(port, "/api/sessions/session-1/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "graft",
+          query: "deployment rollout",
+        }),
+      });
+
+      expect(preview.status).toBe(200);
+      expect(preview.body).toMatchObject({
+        mode: "graft",
+        query: "deployment rollout",
+        systemPrompt: "preview prompt",
+      });
+      expect(context.preview?.run).toHaveBeenCalledWith({
+        mode: "graft",
+        sessionId: "session-1",
+        query: "deployment rollout",
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it("reports prompt preview configuration and input errors", async () => {
     const context = makeContext();
     context.preview = {

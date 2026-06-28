@@ -65,25 +65,38 @@ function writeIfMissing(filePath: string, content: string, label: string, result
 
 function ensureEnvExample(cwd: string, result: InitResult): void {
   const envExamplePath = path.join(cwd, ".env.example");
-  const databaseLine = "DATABASE_URL=postgres://user:password@localhost:5432/memo_grafter";
+  const requiredLines = [
+    "DATABASE_URL=postgres://user:password@localhost:5432/memo_grafter",
+    "OPENAI_API_KEY=",
+    "MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small",
+  ];
 
   if (!existsSync(envExamplePath)) {
-    writeFileSync(envExamplePath, `${databaseLine}\n`, "utf8");
+    writeFileSync(envExamplePath, `${requiredLines.join("\n")}\n`, "utf8");
     result.created.push(".env.example");
     return;
   }
 
   const existing = readFileSync(envExamplePath, "utf8");
-  if (/^DATABASE_URL=/m.test(existing)) {
+  const missingLines = requiredLines.filter((line) => {
+    const key = line.slice(0, line.indexOf("="));
+    return !new RegExp(`^${escapeRegExp(key)}=`, "m").test(existing);
+  });
+
+  if (missingLines.length === 0) {
     result.skipped.push(".env.example DATABASE_URL");
     return;
   }
 
   const next = existing.endsWith("\n")
-    ? `${existing}${databaseLine}\n`
-    : `${existing}\n${databaseLine}\n`;
+    ? `${existing}${missingLines.join("\n")}\n`
+    : `${existing}\n${missingLines.join("\n")}\n`;
   writeFileSync(envExamplePath, next, "utf8");
   result.updated.push(".env.example");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function renderMgSchema(): Promise<string> {
@@ -138,13 +151,45 @@ function renderConfigTs(): string {
   return `declare const process: {
   env: {
     DATABASE_URL?: string;
+    OPENAI_API_KEY?: string;
+    MEMO_GRAFTER_EMBEDDING_MODEL?: string;
   };
 };
+
+const embeddingModel = process.env.MEMO_GRAFTER_EMBEDDING_MODEL ?? "text-embedding-3-small";
 
 export default {
   db: {
     connectionString: process.env.DATABASE_URL,
   },
+  // Prompt Preview uses this embedder to run graft/recall preview from Studio.
+  // Set OPENAI_API_KEY in your environment or replace this object with your own embedder.
+  embedder: process.env.OPENAI_API_KEY
+    ? {
+      async embed(text: string): Promise<number[]> {
+        const response = await fetch("https://api.openai.com/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: \`Bearer \${process.env.OPENAI_API_KEY}\`,
+          },
+          body: JSON.stringify({
+            model: embeddingModel,
+            input: text,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(\`OpenAI embeddings request failed: \${response.status} \${await response.text()}\`);
+        }
+
+        const body = await response.json() as { data?: Array<{ embedding?: number[] }> };
+        const embedding = body.data?.[0]?.embedding;
+        if (!embedding) throw new Error("OpenAI embeddings response did not include an embedding.");
+        return embedding;
+      },
+    }
+    : undefined,
 };
 `;
 }

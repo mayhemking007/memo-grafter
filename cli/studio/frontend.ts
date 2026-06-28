@@ -352,7 +352,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         padding: 16px;
       }
 
-      .content-grid.tables-active {
+      .content-grid.single-pane {
         grid-template-columns: minmax(0, 1fr);
       }
 
@@ -433,6 +433,68 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         line-height: 1.5;
         max-height: 260px;
         overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .preview-workspace {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .preview-form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .preview-form textarea {
+        min-height: 92px;
+        resize: vertical;
+      }
+
+      .preview-actions,
+      .preview-summary {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .preview-result {
+        border: 1px solid #d8dee9;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .preview-result-header {
+        align-items: center;
+        background: #f8fbff;
+        border-bottom: 1px solid #e0e5ee;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: space-between;
+        padding: 10px 12px;
+      }
+
+      .token-meter.warning {
+        background: #fff7ed;
+        border-color: #fed7aa;
+        color: #9a3412;
+      }
+
+      .prompt-preview-output {
+        background: #111827;
+        color: #f8fafc;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        margin: 0;
+        max-height: 520px;
+        min-height: 220px;
+        overflow: auto;
+        padding: 14px;
         white-space: pre-wrap;
         word-break: break-word;
       }
@@ -800,6 +862,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             pageSize: 25,
             expandedCell: null
           },
+          preview: {
+            query: "",
+            mode: "graft",
+            result: null,
+            error: null,
+            loading: false,
+            requestId: 0,
+            copied: false
+          },
           loadingSessions: false,
           loadingGraph: false,
           tabs: {
@@ -966,8 +1037,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }
 
           if (state.activeTab === "preview") {
-            state.tabs.preview.loadedAt = new Date().toISOString();
-            renderWorkspace();
+            if (state.preview.query.trim()) {
+              void runPreview();
+            } else {
+              state.tabs.preview.loadedAt = new Date().toISOString();
+              renderWorkspace();
+            }
             return;
           }
 
@@ -1049,8 +1124,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             button.setAttribute("aria-selected", active ? "true" : "false");
           });
           elements.graphFilters.classList.toggle("hidden", state.activeTab !== "graph");
-          elements.contentGrid.classList.toggle("tables-active", state.activeTab === "tables");
-          elements.detailsSection.classList.toggle("hidden", state.activeTab === "tables");
+          const singlePane = state.activeTab === "tables" || state.activeTab === "preview";
+          elements.contentGrid.classList.toggle("single-pane", singlePane);
+          elements.detailsSection.classList.toggle("hidden", singlePane);
+          elements.contentGrid.style.gridTemplateColumns = singlePane ? "minmax(0, 1fr)" : "";
+          elements.detailsSection.hidden = singlePane;
+          elements.detailsSection.style.display = singlePane ? "none" : "";
           elements.workspaceTitle.textContent = tabLabel(state.activeTab);
           renderHeader();
 
@@ -1454,15 +1533,193 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function renderPreviewPlaceholder() {
-          const status = initialState.previewStatus || { available: false, reason: "Prompt Preview is not configured." };
-          elements.graphSummary.innerHTML = '<span>' + (status.available ? "available" : "unavailable") + '</span>';
-          elements.graphStage.innerHTML =
-            '<div class="workspace-placeholder"><div class="placeholder-card">' +
-              '<h2 class="panel-title">Prompt Preview workspace shell</h2>' +
-              '<p class="subtle">Preview status: ' + escapeHtml(status.available ? "available" : "unavailable") + '</p>' +
-              '<p class="subtle">' + escapeHtml(status.available ? "Prompt controls land in Phase 5." : (status.reason || "Prompt Preview is unavailable.")) + '</p>' +
-            '</div></div>';
+          const status = previewStatus();
+          elements.graphSummary.innerHTML =
+            '<span>' + (status.available ? "available" : "unavailable") + '</span>' +
+            (state.preview.result ? '<span>' + escapeHtml(tokenUsageText(state.preview.result)) + '</span>' : "");
+          elements.graphStage.innerHTML = renderPreviewWorkspace(status);
+          bindPreviewEvents(status);
           renderDetailsPanel();
+        }
+
+        function previewStatus() {
+          return initialState.previewStatus || { available: false, reason: "Prompt Preview is not configured." };
+        }
+
+        function renderPreviewWorkspace(status) {
+          return '<div class="preview-workspace">' +
+            '<section class="panel">' +
+              '<div class="panel-header"><p class="panel-title">Prompt Preview</p><span class="badge">' + escapeHtml(status.available ? "available" : "unavailable") + '</span></div>' +
+              '<div class="details">' +
+                '<div class="preview-form">' +
+                  '<div class="field"><label for="preview-query">Query</label><textarea id="preview-query" ' + (!status.available ? "disabled" : "") + ' placeholder="Ask what context should be recalled or grafted...">' + escapeHtml(state.preview.query) + '</textarea></div>' +
+                  '<div class="table-browser-controls">' +
+                    '<div class="field"><label for="preview-mode">Mode</label><select id="preview-mode" ' + (!status.available ? "disabled" : "") + '>' +
+                      '<option value="graft"' + (state.preview.mode === "graft" ? " selected" : "") + '>graft</option>' +
+                      '<option value="recall"' + (state.preview.mode === "recall" ? " selected" : "") + '>recall</option>' +
+                    '</select></div>' +
+                    '<div class="preview-actions">' +
+                      '<button class="primary-button" type="button" id="run-preview"' + (!status.available || state.preview.loading || !state.preview.query.trim() ? " disabled" : "") + '>Run preview</button>' +
+                      '<button class="icon-button" type="button" id="clear-preview"' + (state.preview.loading ? " disabled" : "") + '>Clear</button>' +
+                    '</div>' +
+                  '</div>' +
+                  '<p class="subtle">' + escapeHtml(status.available ? "Generates a read-only preview. No memory writes are performed." : (status.reason || "Prompt Preview is unavailable.")) + '</p>' +
+                  (state.preview.error ? '<div class="action-status error" role="alert">' + escapeHtml(state.preview.error) + '</div>' : "") +
+                '</div>' +
+              '</div>' +
+            '</section>' +
+            renderPreviewResult(status) +
+          '</div>';
+        }
+
+        function renderPreviewResult(status) {
+          if (!status.available) {
+            return '<div class="workspace-placeholder"><div class="placeholder-card"><h2 class="panel-title">Prompt Preview unavailable</h2><p class="subtle">' + escapeHtml(status.reason || "Configure an embedder to enable prompt preview.") + '</p></div></div>';
+          }
+
+          if (state.preview.loading) {
+            return '<div class="loading-state">Generating prompt preview...</div>';
+          }
+
+          const result = state.preview.result;
+          if (!result) {
+            return '<div class="workspace-placeholder"><div class="placeholder-card"><h2 class="panel-title">No preview yet</h2><p class="subtle">Enter a query, choose graft or recall, and run preview to inspect the exact generated prompt.</p></div></div>';
+          }
+
+          const prompt = result.systemPrompt || "";
+          return '<section class="preview-result">' +
+            '<div class="preview-result-header">' +
+              '<div class="preview-summary">' +
+                '<span class="badge">' + escapeHtml(result.mode || state.preview.mode) + '</span>' +
+                '<span class="' + tokenUsageClass(result) + '">' + escapeHtml(tokenUsageText(result)) + '</span>' +
+                '<span class="badge">' + escapeHtml(previewCountsText(result)) + '</span>' +
+              '</div>' +
+              '<div class="preview-actions">' +
+                '<button class="icon-button" type="button" id="copy-preview"' + (!prompt ? " disabled" : "") + '>Copy prompt</button>' +
+                (state.preview.copied ? '<span class="subtle">Copied</span>' : "") +
+              '</div>' +
+            '</div>' +
+            '<pre class="prompt-preview-output" id="prompt-preview-output">' + escapeHtml(prompt || "No prompt content generated.") + '</pre>' +
+          '</section>';
+        }
+
+        function bindPreviewEvents(status) {
+          const queryInput = document.getElementById("preview-query");
+          const modeSelect = document.getElementById("preview-mode");
+          const runButton = document.getElementById("run-preview");
+          const clearButton = document.getElementById("clear-preview");
+          const copyButton = document.getElementById("copy-preview");
+
+          if (queryInput) {
+            queryInput.addEventListener("input", () => {
+              state.preview.query = queryInput.value;
+              state.preview.error = null;
+              state.preview.copied = false;
+              if (runButton) {
+                runButton.disabled = !status.available || state.preview.loading || !state.preview.query.trim();
+              }
+            });
+          }
+
+          if (modeSelect) {
+            modeSelect.addEventListener("change", () => {
+              state.preview.mode = modeSelect.value;
+              state.preview.error = null;
+              state.preview.copied = false;
+              renderWorkspace();
+            });
+          }
+
+          if (runButton) {
+            runButton.addEventListener("click", () => {
+              if (status.available) void runPreview();
+            });
+          }
+
+          if (clearButton) {
+            clearButton.addEventListener("click", () => {
+              state.preview.result = null;
+              state.preview.error = null;
+              state.preview.copied = false;
+              renderWorkspace();
+            });
+          }
+
+          if (copyButton) {
+            copyButton.addEventListener("click", () => void copyPreviewPrompt());
+          }
+        }
+
+        async function runPreview() {
+          const query = state.preview.query.trim();
+          if (!state.selectedSessionId || !query || state.preview.loading) return;
+
+          const requestId = state.preview.requestId + 1;
+          state.preview.requestId = requestId;
+          state.preview.loading = true;
+          state.preview.error = null;
+          state.preview.copied = false;
+          state.tabs.preview.loading = true;
+          renderWorkspace();
+
+          try {
+            const body = {
+              mode: state.preview.mode,
+              query
+            };
+            const result = await fetchJson("/api/sessions/" + encodeURIComponent(state.selectedSessionId) + "/preview", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            if (state.preview.requestId !== requestId) return;
+            state.preview.result = result;
+            state.tabs.preview.loadedAt = new Date().toISOString();
+          } catch (error) {
+            if (state.preview.requestId !== requestId) return;
+            state.preview.error = error.message || String(error);
+          } finally {
+            if (state.preview.requestId === requestId) {
+              state.preview.loading = false;
+              state.tabs.preview.loading = false;
+              renderWorkspace();
+            }
+          }
+        }
+
+        async function copyPreviewPrompt() {
+          const prompt = state.preview.result && state.preview.result.systemPrompt;
+          if (!prompt) return;
+
+          try {
+            await navigator.clipboard.writeText(prompt);
+            state.preview.copied = true;
+          } catch {
+            state.preview.error = "Could not copy prompt to clipboard.";
+          }
+          renderWorkspace();
+        }
+
+        function tokenUsageText(result) {
+          const tokenCount = result && typeof result.tokenCount === "number" ? result.tokenCount : 0;
+          const tokenBudget = result && typeof result.tokenBudget === "number" ? result.tokenBudget : null;
+          if (!tokenBudget) return "Tokens: " + numberText(tokenCount);
+          const percent = Math.round((tokenCount / tokenBudget) * 100);
+          return "Tokens: " + numberText(tokenCount) + " / " + numberText(tokenBudget) + " · " + percent + "%";
+        }
+
+        function tokenUsageClass(result) {
+          const overBudget = result && typeof result.tokenBudget === "number" && typeof result.tokenCount === "number" && result.tokenCount > result.tokenBudget;
+          return "badge token-meter" + (overBudget ? " warning" : "");
+        }
+
+        function previewCountsText(result) {
+          if (!result) return "0 items";
+          const nodes = Array.isArray(result.nodes) ? result.nodes.length : 0;
+          const facts = Array.isArray(result.facts) ? result.facts.length : 0;
+          const memories = Array.isArray(result.memories) ? result.memories.length : 0;
+          if ((result.mode || state.preview.mode) === "recall") return numberText(facts) + " facts · " + numberText(nodes) + " nodes";
+          return numberText(nodes) + " nodes" + (memories ? " · " + numberText(memories) + " memories" : "");
         }
 
         function renderGraph() {

@@ -56,7 +56,7 @@ export function createStudioPreviewService(
 ): StudioPreviewService {
   if (!config?.embedder) {
     return new UnavailableStudioPreviewService(
-      "Prompt Preview requires an embedder in mg.config.js. TypeScript configs are currently used for database settings only.",
+      "Prompt Preview requires an embedder in mg.config.ts or mg.config.js. Run memo-grafter init to scaffold one, then set OPENAI_API_KEY or provide your own embedder.",
     );
   }
 
