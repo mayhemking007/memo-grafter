@@ -130,26 +130,60 @@ function stripEnvQuotes(value: string): string {
 }
 
 function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
+  const config: MemoGrafterCliConfig = {};
   const envMatch = source.match(/connectionString\s*:\s*process\.env\.([A-Z0-9_]+)/);
   if (envMatch?.[1]) {
     const connectionString = process.env[envMatch[1]];
-    if (!connectionString) return {};
-
-    return {
-      db: {
+    if (connectionString) {
+      config.db = {
         connectionString,
-      },
-    };
-  }
-
-  const literalMatch = source.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/);
-  if (literalMatch?.[1]) {
-    return {
-      db: {
+      };
+    }
+  } else {
+    const literalMatch = source.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/);
+    if (literalMatch?.[1]) {
+      config.db = {
         connectionString: literalMatch[1],
-      },
-    };
+      };
+    }
   }
 
-  return {};
+  const hasOpenAiEmbedderScaffold = /OPENAI_API_KEY/.test(source)
+    && /https:\/\/api\.openai\.com\/v1\/embeddings/.test(source)
+    && /\bembedder\s*:/.test(source);
+  if (hasOpenAiEmbedderScaffold && process.env.OPENAI_API_KEY) {
+    config.embedder = createOpenAiEmbedder(
+      process.env.OPENAI_API_KEY,
+      process.env.MEMO_GRAFTER_EMBEDDING_MODEL ?? "text-embedding-3-small",
+    );
+  }
+
+  return config;
+}
+
+function createOpenAiEmbedder(apiKey: string, model: string): NonNullable<MemoGrafterCliConfig["embedder"]> {
+  return {
+    async embed(text: string): Promise<number[]> {
+      const response = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          input: text,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI embeddings request failed: ${response.status} ${await response.text()}`);
+      }
+
+      const body = await response.json() as { data?: Array<{ embedding?: number[] }> };
+      const embedding = body.data?.[0]?.embedding;
+      if (!embedding) throw new Error("OpenAI embeddings response did not include an embedding.");
+      return embedding;
+    },
+  };
 }

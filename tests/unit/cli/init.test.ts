@@ -25,6 +25,7 @@ describe("memo-grafter init", () => {
     const second = await runInit(cwd);
     const schema = await readFile(schemaPath, "utf8");
     const mgSchema = await readFile(path.join(cwd, "src", "memo-grafter", "mg-schema.ts"), "utf8");
+    const mgConfig = await readFile(path.join(cwd, "src", "memo-grafter", "mg.config.ts"), "utf8");
     const envExample = await readFile(path.join(cwd, ".env.example"), "utf8");
 
     expect(second.generated).toContain("src/memo-grafter/mg-schema.ts");
@@ -36,6 +37,11 @@ describe("memo-grafter init", () => {
     expect(mgSchema).toContain("mg_topic_nodes");
     expect(mgSchema).toContain("mg_memory_nodes");
     expect(mgSchema).toContain('session_id: {\n        name: "session_id",\n        type: "text",');
+    expect(mgConfig).toContain("OPENAI_API_KEY");
+    expect(mgConfig).toContain("https://api.openai.com/v1/embeddings");
+    expect(mgConfig).toContain("text-embedding-3-small");
     expect(envExample).toContain("DATABASE_URL=");
+    expect(envExample).toContain("OPENAI_API_KEY=");
+    expect(envExample).toContain("MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small");
   });
 });
