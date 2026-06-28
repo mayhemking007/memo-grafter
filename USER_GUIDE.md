@@ -80,7 +80,7 @@ npx memo-grafter studio
 `memo-grafter init` is required before `migrate` or `studio`. It creates local project files only:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
-- `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config.
+- `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config. The generated config includes database resolution plus an OpenAI-compatible embedder scaffold for Studio Prompt Preview; set `OPENAI_API_KEY` to enable it, and optionally set `MEMO_GRAFTER_EMBEDDING_MODEL`.
 
 `memo-grafter init` does not create, relocate, or modify an application schema file. Keep application models and tables in the location expected by Prisma, Drizzle, raw SQL migrations, or your existing database tool.
 
@@ -100,11 +100,15 @@ npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_gr
 
 Studio verifies the MemoGrafter schema, prints database connection status, session count, and the local URL, then opens your browser. It starts on `http://localhost:2891` or the next available port and keeps running until you stop it with `Ctrl+C`.
 
-The Studio landing page shows sessions first. Select a session to load its graph on demand, then use the node type, tag, and lifecycle filters to narrow the graph view. Selecting a topic shows its summary, source metadata, lifecycle state, and connected memories. Selecting a memory shows its structured fact fields, confidence, lifecycle flags, source metadata, and related, conflict, or update edges.
+The Studio landing page shows sessions first. Select a session to open its workspace:
 
-The node details panel also provides maintenance actions. Topics can be suppressed and restored, and memories can be forgotten. Studio refreshes the selected graph after each successful action and keeps the affected node selected so its new lifecycle state is visible. Forgetting is a one-way soft lifecycle action in Studio; forgotten memory remains available for audit views but is excluded from active recall. Use the refresh controls to reload the session list or selected graph after your application writes more memory.
+- **Graph:** shows topic nodes as the stable graph backbone. Memories are shown only for the selected topic, which keeps large sessions readable. Use node type, tag, and lifecycle filters to narrow the graph. Selecting a topic shows its summary, source metadata, lifecycle state, and connected memories. Selecting a memory shows its structured fact fields, confidence, lifecycle flags, source metadata, and related, conflict, or update edges.
+- **Tables:** provides a read-only browser for the underlying `mg_*` tables using their original table names. Use the table selector and pagination controls to inspect rows; long cell values can be expanded in place.
+- **Prompt Preview:** runs a read-only graft or recall query simulation for the selected session. It displays the exact generated system prompt and token usage. Prompt Preview requires an embedder in `mg.config.ts`; the generated OpenAI scaffold works when `OPENAI_API_KEY` is available.
 
-Studio also hosts an internal REST API for its own views, including session listing, graph reads, memory search, and lifecycle actions such as suppressing topics or forgetting memories. This API is local tooling infrastructure, not a public web service. Authentication, multi-user access control, and internet exposure are out of scope; do not bind Studio to a public interface or proxy it as an application API.
+The node details panel also provides the supported maintenance action: suppressing a topic. Studio refreshes the selected graph after a successful suppression and keeps the affected node selected so its new lifecycle state is visible. Use the refresh controls to reload the session list or active tab after your application writes more memory.
+
+Studio also hosts an internal REST API for its own views, including session listing, graph reads, table reads, memory search, Prompt Preview, and topic suppression. This API is local tooling infrastructure, not a public web service. Authentication, multi-user access control, and internet exposure are out of scope; do not bind Studio to a public interface or proxy it as an application API.
 
 Current v1 tables:
 
