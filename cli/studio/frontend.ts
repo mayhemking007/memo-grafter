@@ -37,12 +37,30 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       button,
       input,
-      select {
+      select,
+      textarea {
         font: inherit;
       }
 
       button {
         cursor: pointer;
+      }
+
+      button,
+      input,
+      select,
+      textarea,
+      [tabindex="0"] {
+        transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease, stroke-width 140ms ease;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      [tabindex="0"]:focus-visible {
+        outline: 3px solid rgba(61, 111, 182, 0.28);
+        outline-offset: 2px;
       }
 
       .app-shell {
@@ -141,12 +159,6 @@ export function renderStudioHtml(state: StudioFrontendState): string {
       .primary-button:hover {
         border-color: #8fa4c4;
         background: #f8fbff;
-      }
-
-      .icon {
-        display: inline-block;
-        line-height: 1;
-        width: 16px;
       }
 
       .session-list {
@@ -333,6 +345,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         background: #f8fbff;
       }
 
+      .data-table tr:focus-visible td {
+        background: #eef6ff;
+        box-shadow: inset 0 0 0 2px #3d6fb6;
+      }
+
       .data-table tr.selected td {
         background: #eef6ff;
       }
@@ -420,6 +437,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       .db-cell:hover {
         background: #f8fbff;
+      }
+
+      .db-cell:focus-visible {
+        background: #eef6ff;
+        box-shadow: inset 0 0 0 2px #3d6fb6;
       }
 
       .db-cell.selected {
@@ -576,28 +598,42 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       .graph-svg {
         display: block;
-        min-width: 760px;
+        min-width: 980px;
       }
 
-      .node-card rect {
+      .node-card .node-surface {
         fill: #ffffff;
+        filter: drop-shadow(0 8px 18px rgba(17, 24, 39, 0.08));
         stroke: #cad3e2;
         stroke-width: 1.5;
       }
 
-      .node-card.topic rect {
-        fill: #eef6ff;
-        stroke: #78a6d8;
+      .node-card.topic .node-surface {
+        fill: #f0fdfa;
+        stroke: #99d8cf;
       }
 
-      .node-card.memory rect {
-        fill: #f4f2ff;
-        stroke: #9f91d9;
+      .node-card.memory .node-surface {
+        fill: #fff7ed;
+        stroke: #f2c38b;
       }
 
-      .node-card.selected rect {
+      .node-card.selected .node-surface,
+      .node-card.hovered .node-surface {
         stroke: #1d4ed8;
-        stroke-width: 2.5;
+        stroke-width: 2.4;
+      }
+
+      .node-card.dimmed {
+        opacity: 0.34;
+      }
+
+      .node-card .accent-rail.topic {
+        fill: #0f766e;
+      }
+
+      .node-card .accent-rail.memory {
+        fill: #b45309;
       }
 
       .node-card text {
@@ -613,14 +649,77 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         text-transform: uppercase;
       }
 
+      .node-card .node-title {
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .node-card .node-meta {
+        fill: #617086;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .node-card .badge-text {
+        fill: #ffffff;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .status-badge.active {
+        fill: #0f766e;
+      }
+
+      .status-badge.suppressed,
+      .status-badge.forgotten {
+        fill: #64748b;
+      }
+
+      .status-badge.decayed,
+      .status-badge.superseded {
+        fill: #b45309;
+      }
+
+      .status-badge.conflicting {
+        fill: #b42318;
+      }
+
       .edge-line {
-        stroke: #98a6ba;
-        stroke-width: 1.5;
+        fill: none;
+        marker-end: url(#graph-arrow-topic);
+        opacity: 0.82;
+        stroke: #8ea0b8;
+        stroke-linecap: round;
+        stroke-width: 1.8;
       }
 
       .edge-line.memory {
-        stroke: #a693cf;
-        stroke-dasharray: 4 4;
+        marker-end: url(#graph-arrow-memory);
+        stroke: #b89a71;
+        stroke-dasharray: 5 5;
+      }
+
+      .edge-line.attachment {
+        marker-end: url(#graph-arrow-attachment);
+        opacity: 0.55;
+        stroke: #94a3b8;
+        stroke-dasharray: 2 6;
+      }
+
+      .edge-line.highlighted {
+        opacity: 1;
+        stroke-width: 2.8;
+      }
+
+      .edge-line.dimmed {
+        opacity: 0.14;
+      }
+
+      .node-card:focus-visible .node-surface {
+        outline: none;
+        stroke: #2563eb;
+        stroke-width: 3;
       }
 
       .details {
@@ -736,6 +835,17 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         display: none;
       }
 
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+
       @media (max-width: 980px) {
         .app-shell,
         .content-grid {
@@ -776,7 +886,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         </div>
         <div class="session-toolbar">
           <p class="section-title">Sessions</p>
-          <button class="icon-button" id="refresh-sessions" type="button" title="Refresh sessions"><span class="icon">R</span>Refresh</button>
+          <button class="icon-button" id="refresh-sessions" type="button" title="Refresh sessions">Refresh</button>
         </div>
         <ul class="session-list" id="session-list" aria-label="Sessions"></ul>
       </aside>
@@ -786,7 +896,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             <h1 id="page-title">Select a session</h1>
             <p class="subtle" id="page-subtitle">Graph data loads only after you choose a session.</p>
           </div>
-          <button class="primary-button" id="refresh-graph" type="button" disabled><span class="icon">R</span>Refresh graph</button>
+          <button class="primary-button" id="refresh-graph" type="button" disabled>Refresh graph</button>
         </div>
 
         <div class="workspace-tabs" role="tablist" aria-label="Session workspace tabs">
@@ -820,17 +930,17 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               <option value="conflicting">Conflicting memories</option>
             </select>
           </div>
-          <button class="icon-button" id="clear-filters" type="button"><span class="icon">X</span>Clear</button>
+          <button class="icon-button" id="clear-filters" type="button">Clear</button>
         </div>
 
         <div class="content-grid" id="content-grid">
-          <section class="panel graph-panel" id="workspace-panel" aria-label="Session workspace">
+          <section class="panel graph-panel" id="workspace-panel" role="tabpanel" aria-labelledby="tab-graph" aria-label="Session workspace">
             <div class="panel-header">
               <p class="panel-title" id="workspace-title">Graph</p>
-              <div class="summary-strip" id="graph-summary"></div>
+              <div class="summary-strip" id="graph-summary" aria-live="polite"></div>
             </div>
             <div class="graph-stage" id="graph-stage">
-              <div class="empty-state">Choose a session to load its memory graph.</div>
+              <div class="empty-state" role="status">Choose a session to load its memory graph.</div>
             </div>
           </section>
           <section class="panel" id="details-section" aria-label="Selection details">
@@ -855,6 +965,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           graph: null,
           tables: null,
           selectedGraphNodeId: null,
+          hoveredGraphNodeId: null,
           selectedEntity: null,
           tablesBrowser: {
             selectedTable: "mg_topic_nodes",
@@ -917,6 +1028,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.refreshGraph.addEventListener("click", () => refreshActiveTab());
         elements.tabButtons.forEach((button) => {
           button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
+          button.addEventListener("keydown", (event) => handleTabKeydown(event, button));
         });
         elements.nodeTypeFilter.addEventListener("change", () => {
           state.filters.nodeType = elements.nodeTypeFilter.value;
@@ -1027,6 +1139,28 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }
         }
 
+        function handleTabKeydown(event, button) {
+          const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+          if (!keys.includes(event.key)) return;
+          event.preventDefault();
+          const currentIndex = elements.tabButtons.indexOf(button);
+          let nextIndex = currentIndex;
+          if (event.key === "Home") nextIndex = 0;
+          if (event.key === "End") nextIndex = elements.tabButtons.length - 1;
+          if (event.key === "ArrowLeft") nextIndex = currentIndex <= 0 ? elements.tabButtons.length - 1 : currentIndex - 1;
+          if (event.key === "ArrowRight") nextIndex = currentIndex >= elements.tabButtons.length - 1 ? 0 : currentIndex + 1;
+          const nextButton = elements.tabButtons[nextIndex];
+          if (!nextButton) return;
+          nextButton.focus();
+          selectTab(nextButton.getAttribute("data-tab"));
+        }
+
+        function handleEnterOrSpace(event, callback) {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          callback();
+        }
+
         function refreshActiveTab() {
           if (!state.selectedSessionId) return;
           state.actionStatus = null;
@@ -1099,7 +1233,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         function renderHeader() {
           const activeTabState = state.tabs[state.activeTab] || state.tabs.graph;
           elements.refreshGraph.disabled = !state.selectedSessionId || activeTabState.loading;
-          elements.refreshGraph.innerHTML = '<span class="icon">R</span>Refresh ' + tabLabel(state.activeTab);
+          elements.refreshGraph.textContent = "Refresh " + tabLabel(state.activeTab);
           if (!state.selectedSessionId) {
             elements.pageTitle.textContent = "Select a session";
             elements.pageSubtitle.textContent = "Workspace data loads only after you choose a session.";
@@ -1122,7 +1256,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           elements.tabButtons.forEach((button) => {
             const active = button.getAttribute("data-tab") === state.activeTab;
             button.setAttribute("aria-selected", active ? "true" : "false");
+            button.setAttribute("tabindex", active ? "0" : "-1");
           });
+          const activeTabButton = elements.tabButtons.find((button) => button.getAttribute("data-tab") === state.activeTab);
+          if (activeTabButton) {
+            elements.graphStage.parentElement.setAttribute("aria-labelledby", activeTabButton.id);
+          }
           elements.graphFilters.classList.toggle("hidden", state.activeTab !== "graph");
           const singlePane = state.activeTab === "tables" || state.activeTab === "preview";
           elements.contentGrid.classList.toggle("single-pane", singlePane);
@@ -1134,7 +1273,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           renderHeader();
 
           if (!state.selectedSessionId) {
-            elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its workspace.</div>';
+            elements.graphStage.innerHTML = '<div class="empty-state" role="status">Choose a session to load its workspace.</div>';
             elements.graphSummary.textContent = "";
             renderDetailsPanel();
             return;
@@ -1158,13 +1297,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           elements.graphSummary.textContent = "";
 
           if (tab.loading && !state.tables) {
-            elements.graphStage.innerHTML = '<div class="loading-state">Loading tables...</div>';
+            elements.graphStage.innerHTML = '<div class="loading-state" role="status" aria-live="polite">Loading tables...</div>';
             renderDetailsPanel();
             return;
           }
 
           if (tab.error && !state.tables) {
-            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(tab.error) + '</div>';
+            elements.graphStage.innerHTML = '<div class="error-state" role="alert">' + escapeHtml(tab.error) + '</div>';
             renderDetailsPanel();
             return;
           }
@@ -1215,7 +1354,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           });
 
           elements.graphStage.querySelectorAll("[data-db-cell-column]").forEach((cell) => {
-            cell.addEventListener("click", () => {
+            const toggleCell = () => {
               const rowIndex = Number.parseInt(cell.getAttribute("data-db-cell-row") || "0", 10);
               const columnName = cell.getAttribute("data-db-cell-column") || "";
               const current = state.tablesBrowser.expandedCell;
@@ -1226,7 +1365,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
                   ? null
                   : { tableName: table.name, rowIndex, columnName };
               renderWorkspace();
-            });
+            };
+            cell.addEventListener("click", toggleCell);
+            cell.addEventListener("keydown", (event) => handleEnterOrSpace(event, toggleCell));
           });
         }
 
@@ -1300,7 +1441,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             && state.tablesBrowser.expandedCell.rowIndex === rowIndex
             && state.tablesBrowser.expandedCell.columnName === columnName;
           const value = expanded ? formatFullCellValue(row[columnName]) : formatCellPreview(row[columnName]);
-          return '<td class="db-cell' + (expanded ? " selected" : "") + '" tabindex="0" title="Click to expand or collapse" data-db-cell-row="' + rowIndex + '" data-db-cell-column="' + escapeAttribute(columnName) + '">' +
+          return '<td class="db-cell' + (expanded ? " selected" : "") + '" tabindex="0" role="button" aria-expanded="' + (expanded ? "true" : "false") + '" aria-label="' + escapeAttribute((expanded ? "Collapse " : "Expand ") + columnName + " cell in row " + rowIndex) + '" title="Click to expand or collapse" data-db-cell-row="' + rowIndex + '" data-db-cell-column="' + escapeAttribute(columnName) + '">' +
             (expanded
               ? '<span class="db-cell-expanded">' + escapeHtml(value) + '</span>'
               : clipped(value, 260)) +
@@ -1503,13 +1644,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           elements.graphSummary.textContent = "";
 
           if (tab.loading && !state.tables) {
-            elements.graphStage.innerHTML = '<div class="loading-state">Loading tables...</div>';
+            elements.graphStage.innerHTML = '<div class="loading-state" role="status" aria-live="polite">Loading tables...</div>';
             renderDetailsPanel();
             return;
           }
 
           if (tab.error && !state.tables) {
-            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(tab.error) + '</div>';
+            elements.graphStage.innerHTML = '<div class="error-state" role="alert">' + escapeHtml(tab.error) + '</div>';
             renderDetailsPanel();
             return;
           }
@@ -1524,7 +1665,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             : ["not loaded"];
           elements.graphSummary.innerHTML = counts.map((label) => '<span>' + escapeHtml(label) + '</span>').join("");
           elements.graphStage.innerHTML =
-            '<div class="workspace-placeholder"><div class="placeholder-card">' +
+            '<div class="workspace-placeholder" role="status"><div class="placeholder-card">' +
               '<h2 class="panel-title">Tables</h2>' +
               '<p class="subtle">Tables data is available through the read-only tables workspace.</p>' +
               '<p class="subtle">' + escapeHtml(counts.join(" · ")) + '</p>' +
@@ -1574,16 +1715,16 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         function renderPreviewResult(status) {
           if (!status.available) {
-            return '<div class="workspace-placeholder"><div class="placeholder-card"><h2 class="panel-title">Prompt Preview unavailable</h2><p class="subtle">' + escapeHtml(status.reason || "Configure an embedder to enable prompt preview.") + '</p></div></div>';
+            return '<div class="workspace-placeholder" role="status"><div class="placeholder-card"><h2 class="panel-title">Prompt Preview unavailable</h2><p class="subtle">' + escapeHtml(status.reason || "Configure an embedder to enable prompt preview.") + '</p></div></div>';
           }
 
           if (state.preview.loading) {
-            return '<div class="loading-state">Generating prompt preview...</div>';
+            return '<div class="loading-state" role="status" aria-live="polite">Generating prompt preview...</div>';
           }
 
           const result = state.preview.result;
           if (!result) {
-            return '<div class="workspace-placeholder"><div class="placeholder-card"><h2 class="panel-title">No preview yet</h2><p class="subtle">Enter a query, choose graft or recall, and run preview to inspect the exact generated prompt.</p></div></div>';
+            return '<div class="workspace-placeholder" role="status"><div class="placeholder-card"><h2 class="panel-title">No preview yet</h2><p class="subtle">Enter a query, choose graft or recall, and run preview to inspect the exact generated prompt.</p></div></div>';
           }
 
           const prompt = result.systemPrompt || "";
@@ -1726,21 +1867,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           renderHeader();
 
           if (state.loadingGraph && !state.graph) {
-            elements.graphStage.innerHTML = '<div class="loading-state">Loading graph...</div>';
+            elements.graphStage.innerHTML = '<div class="loading-state" role="status" aria-live="polite">Loading graph...</div>';
             elements.graphSummary.textContent = "";
             renderDetailsPanel();
             return;
           }
 
           if (state.error && state.selectedSessionId && !state.graph) {
-            elements.graphStage.innerHTML = '<div class="error-state">' + escapeHtml(state.error) + '</div>';
+            elements.graphStage.innerHTML = '<div class="error-state" role="alert">' + escapeHtml(state.error) + '</div>';
             elements.graphSummary.textContent = "";
             renderDetailsPanel();
             return;
           }
 
           if (!state.graph) {
-            elements.graphStage.innerHTML = '<div class="empty-state">Choose a session to load its memory graph.</div>';
+            elements.graphStage.innerHTML = '<div class="empty-state" role="status">Choose a session to load its memory graph.</div>';
             elements.graphSummary.textContent = "";
             renderDetailsPanel();
             return;
@@ -1754,22 +1895,45 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             '<span>' + numberText(graph.memoryEdges.length) + ' memory edges</span>';
 
           if (graph.nodes.length === 0) {
-            elements.graphStage.innerHTML = '<div class="empty-state">No nodes match the current filters.</div>';
+            elements.graphStage.innerHTML = '<div class="empty-state" role="status">No nodes match the current filters.</div>';
             renderDetailsPanel();
             return;
           }
 
+          const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || graph.nodes[0];
+          if (selected && selected.id !== state.selectedGraphNodeId) selectGraphNode(selected.id, graph);
+
           elements.graphStage.innerHTML = renderGraphSvg(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
-            node.addEventListener("click", () => {
+            const selectNode = () => {
               selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
               state.actionStatus = null;
+              renderGraph();
+            };
+            node.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              selectNode();
+            });
+            node.addEventListener("click", selectNode);
+            node.addEventListener("keydown", (event) => handleEnterOrSpace(event, selectNode));
+            node.addEventListener("mouseenter", () => {
+              state.hoveredGraphNodeId = node.getAttribute("data-graph-node-id");
+              renderGraph();
+            });
+            node.addEventListener("mouseleave", () => {
+              state.hoveredGraphNodeId = null;
+              renderGraph();
+            });
+            node.addEventListener("focus", () => {
+              state.hoveredGraphNodeId = node.getAttribute("data-graph-node-id");
+              renderGraph();
+            });
+            node.addEventListener("blur", () => {
+              state.hoveredGraphNodeId = null;
               renderGraph();
             });
           });
 
-          const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || graph.nodes[0];
-          if (selected && selected.id !== state.selectedGraphNodeId) selectGraphNode(selected.id, graph);
           renderDetailsPanel();
         }
 
@@ -1794,21 +1958,41 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }));
 
           const topicNodes = topics.filter(matchesFilters);
-          const memoryNodes = memories.filter(matchesFilters);
+          const memoryCandidates = memories.filter(matchesFilters);
+          let selectedTopicId = selectedTopicIdForGraph(raw);
+          if (!selectedTopicId && topicNodes.length > 0 && state.filters.nodeType !== "memories") {
+            selectedTopicId = topicNodes[0].id;
+          }
+          const memoryNodes = selectedTopicId && state.filters.nodeType !== "topics"
+            ? memoryCandidates.filter((memory) => memory.raw.topicNodeId === selectedTopicId)
+            : [];
           const visibleIds = new Set(topicNodes.concat(memoryNodes).map((node) => node.id));
           const topicEdges = (raw.edges || []).filter((edge) => visibleIds.has(edge.srcId) && visibleIds.has(edge.dstId));
           const memoryEdges = (raw.memoryEdges || []).filter((edge) => visibleIds.has(edge.sourceId) && visibleIds.has(edge.targetId));
           const attachmentEdges = memoryNodes
             .filter((memory) => visibleIds.has(memory.raw.topicNodeId))
-            .map((memory) => ({ srcId: memory.raw.topicNodeId, dstId: memory.id, type: "contains", weight: 1 }));
+            .map((memory) => ({ srcId: memory.raw.topicNodeId, dstId: memory.id, type: "contains", weight: 1, attachment: true }));
 
           return {
             topicNodes,
             memoryNodes,
             nodes: topicNodes.concat(memoryNodes),
+            selectedTopicId,
             topicEdges: topicEdges.concat(attachmentEdges.filter((edge) => visibleIds.has(edge.srcId))),
             memoryEdges
           };
+        }
+
+        function selectedTopicIdForGraph(raw) {
+          const selectedId = state.selectedGraphNodeId || (state.selectedEntity && state.selectedEntity.id);
+          if (!selectedId) return null;
+
+          if ((raw.nodes || []).some((topic) => topic.id === selectedId)) {
+            return selectedId;
+          }
+
+          const selectedMemory = (raw.memories || []).find((memory) => memory.id === selectedId);
+          return selectedMemory ? selectedMemory.topicNodeId : null;
         }
 
         function matchesFilters(node) {
@@ -1823,11 +2007,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function renderGraphSvg(graph) {
-          const rowGap = 108;
-          const nodeWidth = 260;
-          const nodeHeight = 72;
-          const topicX = 50;
-          const memoryX = 420;
+          const rowGap = 132;
+          const nodeWidth = 330;
+          const nodeHeight = 96;
+          const topicX = 56;
+          const memoryX = 520;
           const topicPositions = new Map();
           const memoryPositions = new Map();
 
@@ -1841,12 +2025,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }));
 
           const positions = new Map([...topicPositions, ...memoryPositions]);
-          const height = Math.max(560, 140 + Math.max(graph.topicNodes.length, graph.memoryNodes.length) * rowGap);
-          const width = 760;
-          const edgeMarkup = graph.topicEdges.map((edge) => renderLine(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, "topic"))
-            .concat(graph.memoryEdges.map((edge) => renderLine(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory")))
+          const height = Math.max(560, 160 + Math.max(graph.topicNodes.length, graph.memoryNodes.length) * rowGap);
+          const width = 920;
+          const activeId = state.hoveredGraphNodeId || state.selectedGraphNodeId;
+          const connectedIds = connectedNodeIds(graph, activeId);
+          const edgeMarkup = renderGraphMarkers() +
+            graph.topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
+            .concat(graph.memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
             .join("");
-          const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight)).join("");
+          const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight, activeId, connectedIds)).join("");
 
           return '<svg class="graph-svg" role="img" aria-label="Session memory graph" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">' +
             edgeMarkup +
@@ -1854,7 +2041,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           '</svg>';
         }
 
-        function renderLine(fromId, toId, positions, nodeWidth, nodeHeight, kind) {
+        function renderGraphMarkers() {
+          return '<defs>' +
+            '<marker id="graph-arrow-topic" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#8ea0b8"></path></marker>' +
+            '<marker id="graph-arrow-memory" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#b89a71"></path></marker>' +
+            '<marker id="graph-arrow-attachment" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"></path></marker>' +
+          '</defs>';
+        }
+
+        function renderCurve(fromId, toId, positions, nodeWidth, nodeHeight, kind, activeId) {
           const from = positions.get(fromId);
           const to = positions.get(toId);
           if (!from || !to) return "";
@@ -1862,27 +2057,93 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const y1 = from.y + nodeHeight / 2;
           const x2 = to.x;
           const y2 = to.y + nodeHeight / 2;
-          return '<line class="edge-line ' + kind + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"></line>';
+          const curve = Math.max(80, Math.abs(x2 - x1) * 0.42);
+          const highlightClass = activeId && (fromId === activeId || toId === activeId) ? " highlighted" : activeId ? " dimmed" : "";
+          const edgeKind = kind;
+          return '<path class="edge-line ' + edgeKind + highlightClass + '" d="M ' + x1 + ' ' + y1 + ' C ' + (x1 + curve) + ' ' + y1 + ', ' + (x2 - curve) + ' ' + y2 + ', ' + x2 + ' ' + y2 + '"></path>';
         }
 
-        function renderNode(node, position, width, height) {
+        function renderNode(node, position, width, height, activeId, connectedIds) {
           if (!position) return "";
           const selected = node.id === state.selectedGraphNodeId ? " selected" : "";
-          return '<g class="node-card ' + node.kind + selected + '" tabindex="0" role="button" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
-            '<rect x="' + position.x + '" y="' + position.y + '" width="' + width + '" height="' + height + '" rx="8"></rect>' +
-            '<text class="node-kind" x="' + (position.x + 14) + '" y="' + (position.y + 20) + '">' + escapeHtml(node.kind + " - " + node.lifecycle) + '</text>' +
-            '<text x="' + (position.x + 14) + '" y="' + (position.y + 40) + '">' + escapeHtml(truncate(node.title, 32)) + '</text>' +
-            '<text x="' + (position.x + 14) + '" y="' + (position.y + 58) + '">' + escapeHtml(truncate(node.subtitle, 38)) + '</text>' +
+          const hovered = node.id === state.hoveredGraphNodeId ? " hovered" : "";
+          const dimmed = activeId && !connectedIds.has(node.id) ? " dimmed" : "";
+          const badge = lifecycleBadge(node.lifecycle);
+          const meta = graphNodeMeta(node);
+          const aria = node.kind + " " + node.title + ", " + node.lifecycle;
+          return '<g class="node-card ' + node.kind + selected + hovered + dimmed + '" tabindex="0" role="button" aria-label="' + escapeAttribute(aria) + '" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
+            '<rect class="node-surface" x="' + position.x + '" y="' + position.y + '" width="' + width + '" height="' + height + '" rx="12"></rect>' +
+            '<rect class="accent-rail ' + node.kind + '" x="' + position.x + '" y="' + position.y + '" width="7" height="' + height + '" rx="3"></rect>' +
+            '<text class="node-kind" x="' + (position.x + 18) + '" y="' + (position.y + 20) + '">' + escapeHtml(node.kind) + '</text>' +
+            '<rect class="status-badge ' + badge.className + '" x="' + (position.x + width - badge.width - 14) + '" y="' + (position.y + 10) + '" width="' + badge.width + '" height="20" rx="10"></rect>' +
+            '<text class="badge-text" x="' + (position.x + width - badge.width - 4) + '" y="' + (position.y + 24) + '">' + escapeHtml(badge.label) + '</text>' +
+            '<text class="node-title" x="' + (position.x + 18) + '" y="' + (position.y + 43) + '">' + escapeHtml(truncate(node.title, 38)) + '</text>' +
+            '<text x="' + (position.x + 18) + '" y="' + (position.y + 63) + '">' + escapeHtml(truncate(node.subtitle, 48)) + '</text>' +
+            '<text class="node-meta" x="' + (position.x + 18) + '" y="' + (position.y + 84) + '">' + escapeHtml(meta) + '</text>' +
           '</g>';
+        }
+
+        function connectedNodeIds(graph, activeId) {
+          const ids = new Set();
+          if (!activeId) return ids;
+          ids.add(activeId);
+          graph.topicEdges.forEach((edge) => {
+            if (edge.srcId === activeId) ids.add(edge.dstId);
+            if (edge.dstId === activeId) ids.add(edge.srcId);
+          });
+          graph.memoryEdges.forEach((edge) => {
+            if (edge.sourceId === activeId) ids.add(edge.targetId);
+            if (edge.targetId === activeId) ids.add(edge.sourceId);
+          });
+          return ids;
+        }
+
+        function lifecycleBadge(lifecycle) {
+          const label = lifecycle || "active";
+          return {
+            label,
+            className: label,
+            width: Math.max(58, label.length * 7 + 18)
+          };
+        }
+
+        function graphNodeMeta(node) {
+          const raw = node.raw || {};
+          if (node.kind === "topic") {
+            const range = Array.isArray(raw.messageRange) ? raw.messageRange.join("-") : "unknown range";
+            return "range " + range + " · " + numberText((node.tags || []).length) + " tags";
+          }
+
+          const confidence = raw.confidence == null ? "unknown" : String(raw.confidence);
+          return (raw.memoryType || "memory") + " · confidence " + confidence;
         }
 
         function selectGraphNode(nodeId, graph) {
           if (!nodeId) return;
-          const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+          const entity = resolveGraphEntity(nodeId, graph);
           state.selectedGraphNodeId = nodeId;
-          state.selectedEntity = node
-            ? { kind: node.kind, id: node.id, source: "graph" }
+          state.selectedEntity = entity
+            ? { kind: entity.kind, id: entity.id, source: "graph" }
             : null;
+        }
+
+        function resolveGraphEntity(nodeId, graph) {
+          if (!nodeId) return null;
+
+          const displayNode = graph && graph.nodes
+            ? graph.nodes.find((candidate) => candidate.id === nodeId)
+            : null;
+          if (displayNode) return { kind: displayNode.kind, id: displayNode.id };
+
+          if (((state.graph && state.graph.nodes) || []).some((topic) => topic.id === nodeId)) {
+            return { kind: "topic", id: nodeId };
+          }
+
+          if (((state.graph && state.graph.memories) || []).some((memory) => memory.id === nodeId)) {
+            return { kind: "memory", id: nodeId };
+          }
+
+          return null;
         }
 
         function renderDetailsPanel() {
@@ -1897,12 +2158,17 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function resolveSelectedEntity() {
-          if (!state.selectedEntity) return null;
+          const selectedEntity = state.selectedEntity || (
+            state.activeTab === "graph" && state.selectedGraphNodeId
+              ? resolveGraphEntity(state.selectedGraphNodeId, null)
+              : null
+          );
+          if (!selectedEntity) return null;
           const tables = normalizeTables(state.tables);
 
-          if (state.selectedEntity.kind === "topic") {
-            const raw = ((state.graph && state.graph.nodes) || []).find((node) => node.id === state.selectedEntity.id)
-              || ((state.tables && state.tables.topics) || []).find((node) => node.id === state.selectedEntity.id);
+          if (selectedEntity.kind === "topic") {
+            const raw = ((state.graph && state.graph.nodes) || []).find((node) => node.id === selectedEntity.id)
+              || ((state.tables && state.tables.topics) || []).find((node) => node.id === selectedEntity.id);
             if (!raw) return null;
             return {
               id: raw.id,
@@ -1915,9 +2181,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             };
           }
 
-          if (state.selectedEntity.kind === "memory") {
-            const raw = ((state.graph && state.graph.memories) || []).find((memory) => memory.id === state.selectedEntity.id)
-              || ((state.tables && state.tables.memories) || []).find((memory) => memory.id === state.selectedEntity.id);
+          if (selectedEntity.kind === "memory") {
+            const raw = ((state.graph && state.graph.memories) || []).find((memory) => memory.id === selectedEntity.id)
+              || ((state.tables && state.tables.memories) || []).find((memory) => memory.id === selectedEntity.id);
             if (!raw) return null;
             return {
               id: raw.id,
@@ -1930,12 +2196,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             };
           }
 
-          if (state.selectedEntity.kind === "segment") {
-            return tables.segments.find((segment) => segment.id === state.selectedEntity.id) || null;
+          if (selectedEntity.kind === "segment") {
+            return tables.segments.find((segment) => segment.id === selectedEntity.id) || null;
           }
 
-          if (state.selectedEntity.kind === "message") {
-            return tables.messages.find((message) => message.id === state.selectedEntity.id) || null;
+          if (selectedEntity.kind === "message") {
+            return tables.messages.find((message) => message.id === selectedEntity.id) || null;
           }
 
           return null;
