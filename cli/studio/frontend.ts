@@ -134,6 +134,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         padding: 16px 20px 10px;
       }
 
+      .session-search {
+        padding: 0 20px 12px;
+      }
+
       .section-title {
         font-size: 13px;
         font-weight: 750;
@@ -194,6 +198,20 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         overflow-wrap: anywhere;
       }
 
+      .session-label {
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      .session-secondary {
+        color: #607086;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+
       .session-meta {
         color: #607086;
         display: flex;
@@ -226,10 +244,66 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         margin-bottom: 18px;
       }
 
+      .topbar-actions {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
       h1 {
         font-size: 23px;
         line-height: 1.2;
         margin: 0 0 6px;
+      }
+
+      .title-editor {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 6px;
+      }
+
+      .title-button {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: #17202d;
+        font-size: 23px;
+        font-weight: 750;
+        line-height: 1.2;
+        min-height: 34px;
+        padding: 2px 4px;
+        text-align: left;
+      }
+
+      .title-button:not(:disabled):hover {
+        background: #eef3fa;
+        border-color: #d5dfed;
+      }
+
+      .title-input {
+        background: #ffffff;
+        border: 1px solid #3d6fb6;
+        border-radius: 7px;
+        color: #17202d;
+        font-size: 20px;
+        font-weight: 750;
+        min-height: 36px;
+        min-width: min(560px, 100%);
+        padding: 4px 8px;
+      }
+
+      .title-save {
+        min-width: 36px;
+        justify-content: center;
+      }
+
+      .title-status {
+        color: #66758a;
+        font-size: 12px;
       }
 
       .subtle {
@@ -888,15 +962,23 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           <p class="section-title">Sessions</p>
           <button class="icon-button" id="refresh-sessions" type="button" title="Refresh sessions">Refresh</button>
         </div>
+        <div class="session-search field">
+          <label for="session-search">Search sessions</label>
+          <input id="session-search" type="search" placeholder="Label or session id">
+        </div>
         <ul class="session-list" id="session-list" aria-label="Sessions"></ul>
       </aside>
       <main class="main">
         <div class="topbar">
           <div>
-            <h1 id="page-title">Select a session</h1>
+            <div class="title-editor" id="title-editor">
+              <button class="title-button" id="page-title" type="button" disabled>Select a session</button>
+            </div>
             <p class="subtle" id="page-subtitle">Graph data loads only after you choose a session.</p>
           </div>
-          <button class="primary-button" id="refresh-graph" type="button" disabled>Refresh graph</button>
+          <div class="topbar-actions">
+            <button class="primary-button" id="refresh-graph" type="button" disabled>Refresh graph</button>
+          </div>
         </div>
 
         <div class="workspace-tabs" role="tablist" aria-label="Session workspace tabs">
@@ -960,6 +1042,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         const initialState = JSON.parse(document.getElementById("studio-state").textContent);
         const state = {
           sessions: [],
+          sessionSearchQuery: "",
+          editingSessionTitle: false,
+          sessionTitleDraft: "",
+          sessionTitleSaving: false,
           selectedSessionId: null,
           activeTab: "graph",
           graph: null,
@@ -1003,8 +1089,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           databaseStatus: document.getElementById("database-status"),
           studioUrl: document.getElementById("studio-url"),
           sessionList: document.getElementById("session-list"),
+          sessionSearch: document.getElementById("session-search"),
           refreshSessions: document.getElementById("refresh-sessions"),
           refreshGraph: document.getElementById("refresh-graph"),
+          titleEditor: document.getElementById("title-editor"),
           pageTitle: document.getElementById("page-title"),
           pageSubtitle: document.getElementById("page-subtitle"),
           tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
@@ -1025,6 +1113,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.studioUrl.textContent = initialState.studioUrl;
 
         elements.refreshSessions.addEventListener("click", () => loadSessions());
+        elements.sessionSearch.addEventListener("input", () => {
+          state.sessionSearchQuery = elements.sessionSearch.value.trim().toLowerCase();
+          renderSessions();
+        });
+        elements.pageTitle.addEventListener("click", () => startSessionTitleEdit());
         elements.refreshGraph.addEventListener("click", () => refreshActiveTab());
         elements.tabButtons.forEach((button) => {
           button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
@@ -1196,7 +1289,97 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           return body;
         }
 
+        function startSessionTitleEdit() {
+          const session = selectedSession();
+          if (!session || state.sessionTitleSaving) return;
+          state.editingSessionTitle = true;
+          state.sessionTitleDraft = session.label || sessionDisplayLabel(session);
+          renderHeader();
+          const input = elements.titleEditor.querySelector("[data-session-title-input]");
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }
+
+        function cancelSessionTitleEdit() {
+          state.editingSessionTitle = false;
+          state.sessionTitleDraft = "";
+          renderHeader();
+        }
+
+        async function saveSessionTitleEdit() {
+          const session = selectedSession();
+          if (!session || state.sessionTitleSaving) return;
+
+          const nextLabel = state.sessionTitleDraft.trim();
+          state.sessionTitleSaving = true;
+          renderHeader();
+
+          try {
+            await fetchJson("/api/sessions/" + encodeURIComponent(session.id), {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ label: nextLabel })
+            });
+            state.editingSessionTitle = false;
+            state.sessionTitleDraft = "";
+            await loadSessions();
+          } catch (error) {
+            state.error = error.message || String(error);
+            renderSessions();
+            renderHeader();
+          } finally {
+            state.sessionTitleSaving = false;
+            renderHeader();
+          }
+        }
+
+        function handleSessionTitleKeydown(event) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void saveSessionTitleEdit();
+            return;
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelSessionTitleEdit();
+          }
+        }
+
+        function filteredSessions() {
+          const query = state.sessionSearchQuery;
+          if (!query) return state.sessions;
+
+          return state.sessions.filter((session) => sessionSearchText(session).includes(query));
+        }
+
+        function sessionSearchText(session) {
+          return [
+            session.id,
+            shortSessionId(session.id),
+            session.label,
+            session.displayLabel,
+            sessionDisplayLabel(session)
+          ].filter(Boolean).join(" ").toLowerCase();
+        }
+
+        function selectedSession() {
+          return state.sessions.find((session) => session.id === state.selectedSessionId) || null;
+        }
+
+        function sessionDisplayLabel(session) {
+          return (session && (session.displayLabel || session.label)) || shortSessionId(session && session.id);
+        }
+
+        function shortSessionId(sessionId) {
+          const value = String(sessionId || "");
+          return value.length <= 12 ? value : value.slice(0, 8) + "...";
+        }
+
         function renderSessions() {
+          const visibleSessions = filteredSessions();
           if (state.loadingSessions && state.sessions.length === 0) {
             elements.sessionList.innerHTML = '<li class="subtle" style="padding: 12px;">Loading sessions...</li>';
             return;
@@ -1212,13 +1395,22 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             return;
           }
 
-          elements.sessionList.innerHTML = state.sessions.map((session) => {
+          if (visibleSessions.length === 0) {
+            elements.sessionList.innerHTML = '<li class="subtle" style="padding: 12px;">No sessions match this search.</li>';
+            return;
+          }
+
+          elements.sessionList.innerHTML = visibleSessions.map((session) => {
             const active = session.id === state.selectedSessionId ? "true" : "false";
+            const displayLabel = sessionDisplayLabel(session);
+            const shortId = session.id;
             return '<li><button class="session-button" type="button" aria-current="' + active + '" data-session-id="' + escapeAttribute(session.id) + '">' +
-              '<span class="session-id">' + escapeHtml(session.id) + '</span>' +
+              '<span class="session-label">' + escapeHtml(displayLabel) + '</span>' +
+              '<span class="session-secondary">' + escapeHtml(shortId) + '</span>' +
               '<span class="session-meta">' +
                 '<span>' + numberText(session.topicCount) + ' topics</span>' +
                 '<span>' + numberText(session.memoryCount) + ' memories</span>' +
+                '<span>' + numberText(session.messageCount) + ' messages</span>' +
                 '<span>' + formatDate(session.lastUpdatedAt) + '</span>' +
               '</span>' +
               '<span class="tag-row">' + sessionBadges(session).map((label) => '<span class="badge">' + escapeHtml(label) + '</span>').join("") + '</span>' +
@@ -1235,15 +1427,45 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           elements.refreshGraph.disabled = !state.selectedSessionId || activeTabState.loading;
           elements.refreshGraph.textContent = "Refresh " + tabLabel(state.activeTab);
           if (!state.selectedSessionId) {
-            elements.pageTitle.textContent = "Select a session";
+            state.editingSessionTitle = false;
+            elements.titleEditor.innerHTML = '<button class="title-button" id="page-title" type="button" disabled>Select a session</button>';
+            elements.pageTitle = document.getElementById("page-title");
             elements.pageSubtitle.textContent = "Workspace data loads only after you choose a session.";
             return;
           }
 
-          elements.pageTitle.textContent = "Session " + state.selectedSessionId;
+          const session = selectedSession();
+          const title = session ? sessionDisplayLabel(session) : "Session " + state.selectedSessionId;
+          renderTitleEditor(title);
           elements.pageSubtitle.textContent = activeTabState.loading
             ? "Loading " + tabLabel(state.activeTab).toLowerCase() + " data..."
-            : "Inspect graph, table, and prompt-preview data without editing stored memory.";
+            : state.selectedSessionId;
+        }
+
+        function renderTitleEditor(title) {
+          if (state.editingSessionTitle) {
+            elements.titleEditor.innerHTML =
+              '<input class="title-input" data-session-title-input value="' + escapeAttribute(state.sessionTitleDraft) + '" aria-label="Session label">' +
+              '<button class="icon-button title-save" type="button" data-session-title-save title="Save session label"' + (state.sessionTitleSaving ? " disabled" : "") + '>&#10003;</button>' +
+              '<span class="title-status">' + escapeHtml(state.sessionTitleSaving ? "Saving..." : "Enter to save / Esc to cancel") + '</span>';
+            const input = elements.titleEditor.querySelector("[data-session-title-input]");
+            const save = elements.titleEditor.querySelector("[data-session-title-save]");
+            if (input) {
+              input.addEventListener("input", () => {
+                state.sessionTitleDraft = input.value;
+              });
+              input.addEventListener("keydown", handleSessionTitleKeydown);
+            }
+            if (save) {
+              save.addEventListener("click", () => saveSessionTitleEdit());
+            }
+            return;
+          }
+
+          elements.titleEditor.innerHTML =
+            '<button class="title-button" id="page-title" type="button" title="Edit session label">' + escapeHtml(title) + '</button>';
+          elements.pageTitle = document.getElementById("page-title");
+          elements.pageTitle.addEventListener("click", () => startSessionTitleEdit());
         }
 
         function tabLabel(tab) {
@@ -1471,6 +1693,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             mg_memory_edges: ["id", "source_id", "target_id", "edge_type", "weight", "created_at"],
             mg_fleets: ["id", "name", "created_at"],
             mg_fleet_agents: ["id", "fleet_id", "session_id", "agent_color", "created_at"],
+            mg_sessions: ["session_id", "label", "description", "tags", "created_at", "updated_at"],
             mg_session_ingest_state: ["session_id", "last_ingested_message_index", "updated_at"],
             mg_graft_registry: ["id", "session_id", "node_id", "source_session_id", "source_node_id", "grafted_at"]
           };

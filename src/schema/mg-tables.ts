@@ -134,6 +134,18 @@ export const memoGrafterTables = [
     constraints: ["UNIQUE (fleet_id, agent_color)"],
   }),
   mgTable({
+    name: "mg_sessions",
+    description: "Human-friendly metadata for MemoGrafter sessions.",
+    columns: [
+      { name: "session_id", type: "text", primaryKey: true },
+      { name: "label", type: "text", nullable: true },
+      { name: "description", type: "text", nullable: true },
+      { name: "tags", type: "text[]", default: "'{}'" },
+      { name: "created_at", type: "timestamptz", default: "now()" },
+      { name: "updated_at", type: "timestamptz", default: "now()" },
+    ],
+  }),
+  mgTable({
     name: "mg_session_ingest_state",
     description: "Incremental ingestion checkpoints by session.",
     columns: [
@@ -164,6 +176,7 @@ export const memoGrafterIndexes = [
   mgIndex({ name: "mg_topic_nodes_tags_idx", table: "mg_topic_nodes", description: "Topic tag lookup." }),
   mgIndex({ name: "mg_nodes_fleet_idx", table: "mg_topic_nodes", description: "Fleet topic lookup by color." }),
   mgIndex({ name: "mg_fleet_agents_fleet_idx", table: "mg_fleet_agents", description: "Fleet agent lookup by color." }),
+  mgIndex({ name: "mg_sessions_label_lower_idx", table: "mg_sessions", description: "Case-insensitive session label lookup." }),
   mgIndex({ name: "mg_session_ingest_state_updated_idx", table: "mg_session_ingest_state", description: "Ingest state freshness lookup." }),
   mgIndex({ name: "idx_graft_registry_session", table: "mg_graft_registry", description: "Graft registry lookup by session." }),
   mgIndex({ name: "idx_graft_registry_node_unique", table: "mg_graft_registry", description: "Unique graft registry node ownership." }),

@@ -180,6 +180,7 @@ export async function cleanupDatabase(): Promise<void> {
   await sql`DELETE FROM mg_segments`;
   await sql`DELETE FROM mg_message_buffer`;
   await sql`DELETE FROM mg_session_ingest_state`;
+  await sql`DELETE FROM mg_sessions`;
   await sql`DELETE FROM mg_fleet_agents`;
   await sql`DELETE FROM mg_fleets`;
   await sql.end();

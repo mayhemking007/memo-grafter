@@ -2,6 +2,8 @@ import type { Sql } from "postgres";
 
 export interface StudioSessionSummary {
   id: string;
+  label: string | null;
+  displayLabel: string;
   messageCount: number;
   topicCount: number;
   memoryCount: number;
@@ -57,6 +59,9 @@ export interface StudioTableBrowserTable {
 
 interface SessionSummaryRow {
   id: string;
+  label: string | null;
+  first_topic_label: string | null;
+  first_message_content: string | null;
   message_count: number | null;
   topic_count: number | null;
   memory_count: number | null;
@@ -108,9 +113,13 @@ interface MemoryEdgeRow {
 export class StudioRepository {
   constructor(private readonly sql: Sql) {}
 
-  async listSessions(): Promise<StudioSessionSummary[]> {
+  async listSessions(query?: string): Promise<StudioSessionSummary[]> {
+    const normalizedQuery = query?.trim() ?? "";
+    const pattern = `%${normalizedQuery}%`;
     const rows = await this.sql<SessionSummaryRow[]>`
       WITH sessions AS (
+        SELECT session_id FROM mg_sessions
+        UNION
         SELECT session_id FROM mg_message_buffer
         UNION
         SELECT session_id FROM mg_segments
@@ -140,23 +149,53 @@ export class StudioRepository {
         SELECT session_id, MAX(updated_at) AS last_ingest_at
         FROM mg_session_ingest_state
         GROUP BY session_id
+      ),
+      first_topics AS (
+        SELECT DISTINCT ON (session_id)
+          session_id,
+          label AS first_topic_label
+        FROM mg_topic_nodes
+        WHERE label IS NOT NULL AND trim(label) != ''
+        ORDER BY session_id ASC, topic_order ASC, created_at ASC, id ASC
+      ),
+      first_messages AS (
+        SELECT DISTINCT ON (session_id)
+          session_id,
+          content AS first_message_content
+        FROM mg_message_buffer
+        WHERE role = 'user' AND trim(content) != ''
+        ORDER BY session_id ASC, message_index ASC
       )
       SELECT
         sessions.session_id AS id,
+        meta.label AS label,
+        first_topics.first_topic_label,
+        first_messages.first_message_content,
         COALESCE(message_counts.message_count, 0)::int AS message_count,
         COALESCE(topic_counts.topic_count, 0)::int AS topic_count,
         COALESCE(memory_counts.memory_count, 0)::int AS memory_count,
-        GREATEST(topic_counts.last_topic_at, memory_counts.last_memory_at, ingest_updates.last_ingest_at) AS last_updated_at
+        GREATEST(topic_counts.last_topic_at, memory_counts.last_memory_at, ingest_updates.last_ingest_at, meta.updated_at) AS last_updated_at
       FROM sessions
+      LEFT JOIN mg_sessions meta ON meta.session_id = sessions.session_id
       LEFT JOIN message_counts ON message_counts.session_id = sessions.session_id
       LEFT JOIN topic_counts ON topic_counts.session_id = sessions.session_id
       LEFT JOIN memory_counts ON memory_counts.session_id = sessions.session_id
       LEFT JOIN ingest_updates ON ingest_updates.session_id = sessions.session_id
+      LEFT JOIN first_topics ON first_topics.session_id = sessions.session_id
+      LEFT JOIN first_messages ON first_messages.session_id = sessions.session_id
+      WHERE ${normalizedQuery ? this.sql`
+        sessions.session_id ILIKE ${pattern}
+        OR meta.label ILIKE ${pattern}
+        OR first_topics.first_topic_label ILIKE ${pattern}
+        OR first_messages.first_message_content ILIKE ${pattern}
+      ` : this.sql`TRUE`}
       ORDER BY last_updated_at DESC NULLS LAST, sessions.session_id ASC
     `;
 
     return rows.map((row) => ({
       id: row.id,
+      label: row.label,
+      displayLabel: this.resolveDisplayLabel(row),
       messageCount: row.message_count ?? 0,
       topicCount: row.topic_count ?? 0,
       memoryCount: row.memory_count ?? 0,
@@ -167,6 +206,8 @@ export class StudioRepository {
   async sessionExists(sessionId: string): Promise<boolean> {
     const rows = await this.sql<{ exists: boolean }[]>`
       SELECT EXISTS (
+        SELECT 1 FROM mg_sessions WHERE session_id = ${sessionId}
+        UNION
         SELECT 1 FROM mg_message_buffer WHERE session_id = ${sessionId}
         UNION
         SELECT 1 FROM mg_segments WHERE session_id = ${sessionId}
@@ -180,6 +221,17 @@ export class StudioRepository {
     `;
 
     return rows[0]?.exists ?? false;
+  }
+
+  async upsertSessionLabel(sessionId: string, label: string | null): Promise<void> {
+    await this.sql`
+      INSERT INTO mg_sessions (session_id, label, updated_at)
+      VALUES (${sessionId}, ${label}, NOW())
+      ON CONFLICT (session_id)
+      DO UPDATE SET
+        label = EXCLUDED.label,
+        updated_at = EXCLUDED.updated_at
+    `;
   }
 
   async nodeBelongsToSession(sessionId: string, nodeId: string): Promise<boolean> {
@@ -244,6 +296,7 @@ export class StudioRepository {
       memoryEdges,
       fleets,
       fleetAgents,
+      sessionMetadata,
       ingestState,
       graftRegistry,
     ] = await Promise.all([
@@ -344,6 +397,12 @@ export class StudioRepository {
         ORDER BY created_at ASC, id ASC
       `,
       this.sql<Record<string, unknown>[]>`
+        SELECT session_id, label, description, tags, created_at, updated_at
+        FROM mg_sessions
+        WHERE session_id = ${sessionId}
+        ORDER BY updated_at DESC, session_id ASC
+      `,
+      this.sql<Record<string, unknown>[]>`
         SELECT session_id, last_ingested_message_index, updated_at
         FROM mg_session_ingest_state
         WHERE session_id = ${sessionId}
@@ -366,6 +425,7 @@ export class StudioRepository {
       { name: "mg_memory_edges", rows: memoryEdges },
       { name: "mg_fleets", rows: fleets },
       { name: "mg_fleet_agents", rows: fleetAgents },
+      { name: "mg_sessions", rows: sessionMetadata },
       { name: "mg_session_ingest_state", rows: ingestState },
       { name: "mg_graft_registry", rows: graftRegistry },
     ];
@@ -421,5 +481,27 @@ export class StudioRepository {
       fleetId: row.fleet_id,
       createdAt: row.created_at,
     };
+  }
+
+  private resolveDisplayLabel(row: SessionSummaryRow): string {
+    const explicitLabel = row.label?.trim();
+    if (explicitLabel) return explicitLabel;
+
+    const topicLabel = row.first_topic_label?.trim();
+    if (topicLabel) return topicLabel;
+
+    const messagePreview = row.first_message_content?.trim();
+    if (messagePreview) return this.truncateLabel(messagePreview);
+
+    return this.shortSessionId(row.id);
+  }
+
+  private truncateLabel(value: string): string {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    return normalized.length <= 72 ? normalized : `${normalized.slice(0, 71)}...`;
+  }
+
+  private shortSessionId(sessionId: string): string {
+    return sessionId.length <= 12 ? sessionId : `${sessionId.slice(0, 8)}...`;
   }
 }
