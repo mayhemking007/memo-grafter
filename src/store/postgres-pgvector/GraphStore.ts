@@ -315,6 +315,17 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql`
+      CREATE TABLE IF NOT EXISTS mg_sessions (
+        session_id  TEXT PRIMARY KEY,
+        label       TEXT,
+        description TEXT,
+        tags        TEXT[] NOT NULL DEFAULT '{}',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    await this.sql`
       CREATE TABLE IF NOT EXISTS mg_session_ingest_state (
         session_id                  TEXT PRIMARY KEY,
         last_ingested_message_index INT NOT NULL DEFAULT -1,
@@ -1896,6 +1907,11 @@ export class PostgresGraphStore implements GraphStore {
     await this.sql`
       CREATE INDEX IF NOT EXISTS mg_fleet_agents_fleet_idx
       ON mg_fleet_agents(fleet_id, agent_color)
+    `;
+
+    await this.sql`
+      CREATE INDEX IF NOT EXISTS mg_sessions_label_lower_idx
+      ON mg_sessions(lower(label))
     `;
 
     await this.sql`

@@ -13,6 +13,7 @@ describe("MemoGrafter Studio API", () => {
 
     try {
       const sessions = await requestJson(port, "/api/sessions");
+      const filteredSessions = await requestJson(port, "/api/sessions?q=alpha");
       const graph = await requestJson(port, "/sessions/session-1/graph");
       const tables = await requestJson(port, "/api/sessions/session-1/tables");
       const memories = await requestJson(port, "/api/sessions/session-1/memories");
@@ -20,8 +21,16 @@ describe("MemoGrafter Studio API", () => {
 
       expect(sessions.status).toBe(200);
       expect(sessions.body).toMatchObject({
-        sessions: [{ id: "session-1", messageCount: 2, topicCount: 1, memoryCount: 1 }],
+        sessions: [{
+          id: "session-1",
+          label: "Alpha session",
+          displayLabel: "Alpha session",
+          messageCount: 2,
+          topicCount: 1,
+          memoryCount: 1,
+        }],
       });
+      expect(filteredSessions.status).toBe(200);
       expect(graph.status).toBe(200);
       expect(graph.body).toMatchObject({
         sessionId: "session-1",
@@ -54,6 +63,8 @@ describe("MemoGrafter Studio API", () => {
       });
       expect(context.store.getNodesBySession).toHaveBeenCalledWith("session-1", { includeSuppressed: true });
       expect(context.store.getMessagesBySession).toHaveBeenCalledWith("session-1");
+      expect(context.repository.listSessions).toHaveBeenCalledWith(undefined);
+      expect(context.repository.listSessions).toHaveBeenCalledWith("alpha");
       expect(context.repository.getTablesBySession).toHaveBeenCalledWith("session-1");
       expect(context.repository.searchMemories).toHaveBeenCalledWith("session-1", "alpha", undefined);
     } finally {
@@ -184,6 +195,45 @@ describe("MemoGrafter Studio API", () => {
     }
   });
 
+  it("updates session labels after verifying the session exists", async () => {
+    const context = makeContext();
+    const server = createApiServer(context);
+    const port = await listenOnAvailablePort(server, "127.0.0.1", 0);
+
+    try {
+      const rename = await requestJson(port, "/api/sessions/session-1", {
+        method: "PATCH",
+        body: JSON.stringify({ label: " Wedding planning " }),
+      });
+      const clear = await requestJson(port, "/api/sessions/session-1", {
+        method: "PATCH",
+        body: JSON.stringify({ label: " " }),
+      });
+      const invalid = await requestJson(port, "/api/sessions/session-1", {
+        method: "PATCH",
+        body: JSON.stringify({ label: 42 }),
+      });
+      const missing = await requestJson(port, "/api/sessions/missing", {
+        method: "PATCH",
+        body: JSON.stringify({ label: "Missing" }),
+      });
+
+      expect(rename.status).toBe(200);
+      expect(rename.body).toMatchObject({
+        sessionId: "session-1",
+        label: "Wedding planning",
+        displayLabel: "Alpha session",
+      });
+      expect(clear.status).toBe(200);
+      expect(invalid.status).toBe(400);
+      expect(missing.status).toBe(404);
+      expect(context.repository.upsertSessionLabel).toHaveBeenCalledWith("session-1", "Wedding planning");
+      expect(context.repository.upsertSessionLabel).toHaveBeenCalledWith("session-1", null);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it("returns route errors as JSON", async () => {
     const context = makeContext({
       sessionExists: vi.fn(async (sessionId: string) => sessionId === "session-1"),
@@ -196,12 +246,14 @@ describe("MemoGrafter Studio API", () => {
       const missingQuery = await requestJson(port, "/api/sessions/session-1/search");
       const missingSession = await requestJson(port, "/api/sessions/missing/graph");
       const wrongMethod = await requestJson(port, "/api/sessions", { method: "POST" });
+      const wrongSessionMethod = await requestJson(port, "/api/sessions/session-1", { method: "GET" });
       const missingNode = await requestJson(port, "/api/sessions/session-1/nodes/topic-2/suppress", { method: "POST" });
       const wrongPreviewMethod = await requestJson(port, "/api/sessions/session-1/preview");
 
       expect(missingQuery.status).toBe(400);
       expect(missingSession.status).toBe(404);
       expect(wrongMethod.status).toBe(405);
+      expect(wrongSessionMethod.status).toBe(405);
       expect(missingNode.status).toBe(404);
       expect(wrongPreviewMethod.status).toBe(405);
     } finally {
@@ -250,6 +302,8 @@ function makeContext(repositoryOverrides: Partial<StudioApiContext["repository"]
     repository: {
       listSessions: vi.fn(async () => [{
         id: "session-1",
+        label: "Alpha session",
+        displayLabel: "Alpha session",
         messageCount: 2,
         topicCount: 1,
         memoryCount: 1,
@@ -271,6 +325,7 @@ function makeContext(repositoryOverrides: Partial<StudioApiContext["repository"]
         { name: "mg_message_buffer", rows: [{ session_id: "session-1", message_index: 0, role: "user", content: "hello" }] },
       ]),
       searchMemories: vi.fn(async () => [memory]),
+      upsertSessionLabel: vi.fn(async () => undefined),
       ...repositoryOverrides,
     },
     preview: {

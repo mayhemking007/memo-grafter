@@ -23,6 +23,9 @@ describe("memo-grafter studio", () => {
       expect(html.status).toBe(200);
       expect(html.body).toContain("MemoGrafter Studio");
       expect(html.body).toContain("session-list");
+      expect(html.body).toContain("session-search");
+      expect(html.body).toContain("title-editor");
+      expect(html.body).toContain("title-button");
       expect(html.body).toContain("graph-stage");
       expect(html.body).toContain("tab-graph");
       expect(html.body).toContain("tab-tables");
@@ -35,6 +38,7 @@ describe("memo-grafter studio", () => {
       expect(html.body).toContain("refresh-sessions");
       expect(html.body).toContain("refresh-graph");
       expect(html.body).toContain('fetchJson("/api/sessions")');
+      expect(html.body).toContain('method: "PATCH"');
       expect(html.body).toContain('"/api/sessions/" + encodeURIComponent(sessionId) + "/graph"');
       expect(html.body).toContain('"/api/sessions/" + encodeURIComponent(sessionId) + "/tables"');
       expect(status.status).toBe(200);
@@ -103,6 +107,7 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("mg_topic_nodes");
     expect(html).toContain("mg_memory_nodes");
     expect(html).toContain("mg_message_buffer");
+    expect(html).toContain("mg_sessions");
     expect(html).toContain("mg_session_ingest_state");
     expect(html).toContain("data-db-cell-column");
     expect(html).not.toContain("cell-inspector");
@@ -123,6 +128,13 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("Memory type");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Suppress topic");
+    expect(html).toContain("sessionDisplayLabel");
+    expect(html).toContain("filteredSessions");
+    expect(html).toContain("startSessionTitleEdit");
+    expect(html).toContain("saveSessionTitleEdit");
+    expect(html).toContain("data-session-title-save");
+    expect(html).toContain("Enter to save / Esc to cancel");
+    expect(html).toContain("No sessions match this search.");
     expect(html).toContain('data-lifecycle-action="');
     expect(html).toContain('fetchJson(url, { method: "POST" })');
     expect(html).not.toContain("Restore topic");

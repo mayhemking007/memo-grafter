@@ -402,6 +402,42 @@ export const memoGrafterTables = {
     },
     constraints: ["UNIQUE (fleet_id, agent_color)"]
   },
+  mg_sessions: {
+    name: "mg_sessions",
+    description: "Human-friendly metadata for MemoGrafter sessions.",
+    columns: {
+      session_id: {
+        name: "session_id",
+        type: "text",
+        primaryKey: true,
+      },
+      label: {
+        name: "label",
+        type: "text",
+        nullable: true,
+      },
+      description: {
+        name: "description",
+        type: "text",
+        nullable: true,
+      },
+      tags: {
+        name: "tags",
+        type: "text[]",
+        default: "'{}'",
+      },
+      created_at: {
+        name: "created_at",
+        type: "timestamptz",
+        default: "now()",
+      },
+      updated_at: {
+        name: "updated_at",
+        type: "timestamptz",
+        default: "now()",
+      },
+    }
+  },
   mg_session_ingest_state: {
     name: "mg_session_ingest_state",
     description: "Incremental ingestion checkpoints by session.",
@@ -494,6 +530,11 @@ export const memoGrafterIndexes = [
     "name": "mg_fleet_agents_fleet_idx",
     "table": "mg_fleet_agents",
     "description": "Fleet agent lookup by color."
+  },
+  {
+    "name": "mg_sessions_label_lower_idx",
+    "table": "mg_sessions",
+    "description": "Case-insensitive session label lookup."
   },
   {
     "name": "mg_session_ingest_state_updated_idx",

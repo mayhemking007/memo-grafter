@@ -22,6 +22,7 @@ if (!(await skipWithoutDatabase("core/database-init"))) {
     "mg_memory_nodes",
     "mg_message_buffer",
     "mg_segments",
+    "mg_sessions",
     "mg_session_ingest_state",
     "mg_topic_edges",
     "mg_topic_nodes",

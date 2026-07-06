@@ -125,6 +125,8 @@ export async function startStudioServer(options: StudioStartOptions): Promise<St
 export async function readSessionCount(sql: Sql): Promise<number> {
   const rows = await sql<{ count: number }[]>`
     WITH sessions AS (
+      SELECT session_id FROM mg_sessions
+      UNION
       SELECT session_id FROM mg_message_buffer
       UNION
       SELECT session_id FROM mg_segments

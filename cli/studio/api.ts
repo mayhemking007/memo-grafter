@@ -29,13 +29,14 @@ export interface StudioPreviewRequest {
 }
 
 export interface StudioApiRepository {
-  listSessions(): Promise<StudioSessionSummary[]>;
+  listSessions(query?: string): Promise<StudioSessionSummary[]>;
   sessionExists(sessionId: string): Promise<boolean>;
   nodeBelongsToSession(sessionId: string, nodeId: string): Promise<boolean>;
   getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<StudioMemoryEdge[]>;
   getTablesBySession(sessionId: string): Promise<StudioTableBrowserTable[]>;
   searchMemories(sessionId: string, query: string, limit?: number): Promise<StudioMemorySearchResult[]>;
+  upsertSessionLabel(sessionId: string, label: string | null): Promise<void>;
 }
 
 export interface StudioApiContext {
@@ -84,13 +85,23 @@ export async function handleStudioApiRequest(
         return;
       }
 
-      const sessions = await context.repository.listSessions();
+      const sessions = await context.repository.listSessions(route.url.searchParams.get("q") ?? undefined);
       sendJson(response, 200, { sessions });
       return;
     }
 
     if (!sessionId) {
       sendJson(response, 404, { error: "Studio API route not found." });
+      return;
+    }
+
+    if (route.segments.length === 2) {
+      if (method !== "PATCH") {
+        sendMethodNotAllowed(response, ["PATCH"]);
+        return;
+      }
+
+      await updateSession(response, request, context, sessionId);
       return;
     }
 
@@ -161,6 +172,49 @@ export async function handleStudioApiRequest(
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+async function updateSession(
+  response: ServerResponse,
+  request: IncomingMessage,
+  context: StudioApiContext,
+  sessionId: string,
+): Promise<void> {
+  if (!await context.repository.sessionExists(sessionId)) {
+    sendJson(response, 404, { error: `Session '${sessionId}' was not found.` });
+    return;
+  }
+
+  const body = await readJsonBody(request);
+  if (!isObject(body)) {
+    sendJson(response, 400, { error: "Session update requires a JSON object body." });
+    return;
+  }
+
+  if (!("label" in body)) {
+    sendJson(response, 400, { error: "Session update requires a 'label' field." });
+    return;
+  }
+
+  if (body.label !== null && typeof body.label !== "string") {
+    sendJson(response, 400, { error: "Session label must be a string or null." });
+    return;
+  }
+
+  const label = typeof body.label === "string" ? body.label.trim() : null;
+  if (label && label.length > 120) {
+    sendJson(response, 400, { error: "Session label must be 120 characters or fewer." });
+    return;
+  }
+
+  await context.repository.upsertSessionLabel(sessionId, label || null);
+  const [summary] = await context.repository.listSessions(sessionId);
+
+  sendJson(response, 200, {
+    sessionId,
+    label: label || null,
+    displayLabel: summary?.displayLabel ?? label ?? sessionId,
+  });
 }
 
 async function sendSessionGraph(
