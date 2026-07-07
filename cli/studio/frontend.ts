@@ -321,6 +321,51 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         margin-bottom: 16px;
       }
 
+      .graph-search {
+        align-items: end;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(220px, 1fr) auto auto;
+        margin-bottom: 12px;
+      }
+
+      .graph-search-count {
+        color: #66758a;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .graph-search-results {
+        border-bottom: 1px solid #e4e8f0;
+        display: grid;
+        gap: 8px;
+        padding: 10px 12px;
+      }
+
+      .graph-search-result-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .graph-search-result {
+        background: #ffffff;
+        border: 1px solid #dbe3ef;
+        border-radius: 7px;
+        color: #253246;
+        display: inline-flex;
+        gap: 6px;
+        max-width: 340px;
+        min-height: 30px;
+        padding: 5px 8px;
+        text-align: left;
+      }
+
+      .graph-search-result.active {
+        border-color: #3d6fb6;
+        box-shadow: 0 0 0 2px rgba(61, 111, 182, 0.16);
+      }
+
       .workspace-tabs {
         align-items: center;
         border-bottom: 1px solid #d8dee9;
@@ -698,6 +743,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         stroke-width: 2.4;
       }
 
+      .node-card.search-match .node-surface {
+        stroke: #d97706;
+        stroke-width: 2.3;
+      }
+
+      .node-card.search-parent .node-surface {
+        stroke: #8b5cf6;
+        stroke-width: 2;
+      }
+
+      .node-card.search-active .node-surface {
+        stroke: #dc2626;
+        stroke-width: 3;
+      }
+
       .node-card.dimmed {
         opacity: 0.34;
       }
@@ -933,6 +993,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         .filters {
           grid-template-columns: 1fr 1fr;
         }
+
+        .graph-search {
+          grid-template-columns: 1fr;
+        }
       }
 
       @media (max-width: 640px) {
@@ -985,6 +1049,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           <button class="tab-button" id="tab-graph" type="button" role="tab" aria-controls="workspace-panel" aria-selected="true" data-tab="graph">Graph</button>
           <button class="tab-button" id="tab-tables" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="tables">Tables</button>
           <button class="tab-button" id="tab-preview" type="button" role="tab" aria-controls="workspace-panel" aria-selected="false" data-tab="preview">Prompt Preview</button>
+        </div>
+
+        <div class="graph-search" id="graph-search" aria-label="Graph search">
+          <div class="field">
+            <label for="graph-search-input">Graph search</label>
+            <input id="graph-search-input" type="search" placeholder="Search topics or memories">
+          </div>
+          <span class="graph-search-count" id="graph-search-count" aria-live="polite"></span>
+          <button class="icon-button" id="graph-search-clear" type="button" disabled>Clear</button>
         </div>
 
         <div class="filters" id="graph-filters" aria-label="Graph filters">
@@ -1059,6 +1132,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             pageSize: 25,
             expandedCell: null
           },
+          graphSearch: {
+            query: "",
+            activeMatchIndex: 0
+          },
           preview: {
             query: "",
             mode: "graft",
@@ -1096,6 +1173,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           pageTitle: document.getElementById("page-title"),
           pageSubtitle: document.getElementById("page-subtitle"),
           tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
+          graphSearch: document.getElementById("graph-search"),
+          graphSearchInput: document.getElementById("graph-search-input"),
+          graphSearchCount: document.getElementById("graph-search-count"),
+          graphSearchClear: document.getElementById("graph-search-clear"),
           graphFilters: document.getElementById("graph-filters"),
           contentGrid: document.getElementById("content-grid"),
           workspaceTitle: document.getElementById("workspace-title"),
@@ -1119,6 +1200,14 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         });
         elements.pageTitle.addEventListener("click", () => startSessionTitleEdit());
         elements.refreshGraph.addEventListener("click", () => refreshActiveTab());
+        elements.graphSearchInput.addEventListener("input", () => {
+          state.graphSearch.query = elements.graphSearchInput.value.trim();
+          state.graphSearch.activeMatchIndex = 0;
+          renderGraph();
+        });
+        elements.graphSearchInput.addEventListener("keydown", handleGraphSearchKeydown);
+        elements.graphSearchClear.addEventListener("click", () => clearGraphSearch());
+        elements.graphStage.addEventListener("click", handleGraphStageClick);
         elements.tabButtons.forEach((button) => {
           button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
           button.addEventListener("keydown", (event) => handleTabKeydown(event, button));
@@ -1146,17 +1235,25 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         loadSessions();
 
         async function loadSessions() {
+          const hadSelectedSession = Boolean(state.selectedSessionId);
+          let autoSelectSessionId = null;
           state.loadingSessions = true;
           renderSessions();
           try {
             const data = await fetchJson("/api/sessions");
             state.sessions = data.sessions || [];
+            if (!hadSelectedSession && state.sessions.length > 0) {
+              autoSelectSessionId = state.sessions[0].id;
+            }
             state.error = null;
           } catch (error) {
             state.error = error.message || String(error);
           } finally {
             state.loadingSessions = false;
             renderSessions();
+          }
+          if (autoSelectSessionId) {
+            void loadGraph(autoSelectSessionId);
           }
         }
 
@@ -1170,6 +1267,8 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             state.tables = null;
             state.selectedEntity = null;
             state.actionStatus = null;
+            state.graphSearch = { query: "", activeMatchIndex: 0 };
+            elements.graphSearchInput.value = "";
           }
           state.selectedGraphNodeId = selectedGraphNodeId;
           state.loadingGraph = true;
@@ -1485,6 +1584,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             elements.graphStage.parentElement.setAttribute("aria-labelledby", activeTabButton.id);
           }
           elements.graphFilters.classList.toggle("hidden", state.activeTab !== "graph");
+          elements.graphSearch.classList.toggle("hidden", state.activeTab !== "graph");
           const singlePane = state.activeTab === "tables" || state.activeTab === "preview";
           elements.contentGrid.classList.toggle("single-pane", singlePane);
           elements.detailsSection.classList.toggle("hidden", singlePane);
@@ -2086,6 +2186,107 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           return numberText(nodes) + " nodes" + (memories ? " · " + numberText(memories) + " memories" : "");
         }
 
+        function handleGraphSearchKeydown(event) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            navigateGraphSearch(event.shiftKey ? -1 : 1);
+            return;
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault();
+            clearGraphSearch();
+          }
+        }
+
+        function clearGraphSearch() {
+          state.graphSearch = { query: "", activeMatchIndex: 0 };
+          elements.graphSearchInput.value = "";
+          renderGraph();
+        }
+
+        function navigateGraphSearch(direction) {
+          if (!state.graph) return;
+          const matches = graphSearchMatches(state.graph);
+          if (matches.length === 0) return;
+
+          const nextIndex = (state.graphSearch.activeMatchIndex + direction + matches.length) % matches.length;
+          state.graphSearch.activeMatchIndex = nextIndex;
+          selectGraphSearchMatch(matches[nextIndex]);
+          renderGraph();
+        }
+
+        function selectGraphSearchMatch(match) {
+          if (!match) return;
+          selectGraphNode(match.id, null);
+          state.actionStatus = null;
+        }
+
+        function graphSearchMatches(raw) {
+          const query = state.graphSearch.query.trim().toLowerCase();
+          if (!query) return [];
+
+          const matches = [];
+          const topicsById = new Map((raw.nodes || []).map((topic) => [topic.id, topic]));
+
+          (raw.nodes || []).forEach((topic) => {
+            const text = graphTopicSearchText(topic);
+            if (!text.includes(query)) return;
+            matches.push({
+              id: topic.id,
+              kind: "topic",
+              title: topic.label || topic.id,
+              snippet: topic.summary || topic.id,
+              parentTopicId: topic.id,
+              matchType: "topic"
+            });
+          });
+
+          (raw.memories || []).forEach((memory) => {
+            const text = graphMemorySearchText(memory);
+            if (!text.includes(query)) return;
+            const parentTopic = topicsById.get(memory.topicNodeId);
+            matches.push({
+              id: memory.id,
+              kind: "memory",
+              title: memory.subject ? memory.subject + " " + memory.predicate : memory.id,
+              snippet: memory.value || memory.id,
+              parentTopicId: memory.topicNodeId,
+              parentTitle: parentTopic ? parentTopic.label || parentTopic.id : memory.topicNodeId,
+              matchType: "memory"
+            });
+          });
+
+          return matches;
+        }
+
+        function graphTopicSearchText(topic) {
+          return [
+            topic.id,
+            topic.label,
+            topic.summary,
+            topic.source,
+            topic.suppressed ? "suppressed" : "active",
+            Array.isArray(topic.tags) ? topic.tags.join(" ") : "",
+            Array.isArray(topic.messageRange) ? topic.messageRange.join(" ") : ""
+          ].filter(Boolean).join(" ").toLowerCase();
+        }
+
+        function graphMemorySearchText(memory) {
+          return [
+            memory.id,
+            memory.subject,
+            memory.predicate,
+            memory.value,
+            memory.memoryType,
+            memory.sourceType,
+            memory.source,
+            memory.confidence == null ? "" : String(memory.confidence),
+            memoryLifecycle(memory),
+            Array.isArray(memory.tags) ? memory.tags.join(" ") : ""
+          ].filter(Boolean).join(" ").toLowerCase();
+        }
+
         function renderGraph() {
           renderHeader();
 
@@ -2111,6 +2312,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           }
 
           const graph = buildDisplayGraph(state.graph);
+          const searchMatches = graphSearchMatches(state.graph);
+          normalizeGraphSearchIndex(searchMatches);
+          const visibleNodeIds = new Set(graph.nodes.map((node) => node.id));
+          const hiddenMatches = searchMatches.filter((match) => !visibleNodeIds.has(match.id)).length;
+          updateGraphSearchControls(searchMatches, hiddenMatches);
           elements.graphSummary.innerHTML =
             '<span>' + numberText(graph.topicNodes.length) + ' topics</span>' +
             '<span>' + numberText(graph.memoryNodes.length) + ' memories</span>' +
@@ -2123,10 +2329,13 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             return;
           }
 
-          const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || graph.nodes[0];
-          if (selected && selected.id !== state.selectedGraphNodeId) selectGraphNode(selected.id, graph);
+          const selected = graph.nodes.find((node) => node.id === state.selectedGraphNodeId) || null;
+          if (state.selectedGraphNodeId && !selected) {
+            const entity = resolveGraphEntity(state.selectedGraphNodeId, graph);
+            state.selectedEntity = entity ? { kind: entity.kind, id: entity.id, source: "graph" } : null;
+          }
 
-          elements.graphStage.innerHTML = renderGraphSvg(graph);
+          elements.graphStage.innerHTML = renderGraphSearchResults(searchMatches, hiddenMatches) + renderGraphSvg(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             const selectNode = () => {
               selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
@@ -2156,11 +2365,97 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               renderGraph();
             });
           });
+          elements.graphStage.querySelectorAll("[data-graph-search-result-id]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const id = button.getAttribute("data-graph-search-result-id");
+              const index = Number.parseInt(button.getAttribute("data-graph-search-result-index") || "0", 10);
+              const match = searchMatches[index] || searchMatches.find((candidate) => candidate.id === id);
+              if (!match) return;
+              state.graphSearch.activeMatchIndex = index;
+              selectGraphSearchMatch(match);
+              renderGraph();
+            });
+          });
 
           renderDetailsPanel();
         }
 
+        function normalizeGraphSearchIndex(matches) {
+          if (matches.length === 0) {
+            state.graphSearch.activeMatchIndex = 0;
+            return;
+          }
+
+          state.graphSearch.activeMatchIndex = Math.min(Math.max(0, state.graphSearch.activeMatchIndex), matches.length - 1);
+        }
+
+        function updateGraphSearchControls(matches, hiddenMatches) {
+          const hasQuery = Boolean(state.graphSearch.query.trim());
+          const hasMatches = matches.length > 0;
+          elements.graphSearchClear.disabled = !hasQuery;
+
+          if (!hasQuery) {
+            elements.graphSearchCount.textContent = "";
+            return;
+          }
+
+          if (!hasMatches) {
+            elements.graphSearchCount.textContent = "0 matches";
+            return;
+          }
+
+          const hiddenText = hiddenMatches > 0 ? ", " + numberText(hiddenMatches) + " hidden by filters" : "";
+          elements.graphSearchCount.textContent = numberText(state.graphSearch.activeMatchIndex + 1) + " of " + numberText(matches.length) + hiddenText;
+        }
+
+        function renderGraphSearchResults(matches, hiddenMatches) {
+          if (!state.graphSearch.query.trim() || matches.length === 0) return "";
+          const hiddenHint = hiddenMatches > 0
+            ? '<span class="subtle">' + numberText(hiddenMatches) + ' hidden by filters</span>'
+            : "";
+          return '<div class="graph-search-results">' +
+            '<div class="summary-strip"><span>' + numberText(matches.length) + ' graph matches</span>' + hiddenHint + '</div>' +
+            '<div class="graph-search-result-list">' + matches.slice(0, 12).map((match, index) => renderGraphSearchResult(match, index)).join("") + '</div>' +
+          '</div>';
+        }
+
+        function renderGraphSearchResult(match, index) {
+          const active = index === state.graphSearch.activeMatchIndex ? " active" : "";
+          const parent = match.kind === "memory" && match.parentTitle ? " in " + match.parentTitle : "";
+          return '<button class="graph-search-result' + active + '" type="button" data-graph-search-result-id="' + escapeAttribute(match.id) + '" data-graph-search-result-index="' + index + '">' +
+            '<span class="badge">' + escapeHtml(match.kind) + '</span>' +
+            '<span>' + escapeHtml(truncate(match.title + parent + ": " + match.snippet, 72)) + '</span>' +
+          '</button>';
+        }
+
+        function handleGraphStageClick(event) {
+          if (state.activeTab !== "graph" || !state.graph) return;
+          const target = event.target;
+          if (!target || typeof target.closest !== "function") return;
+          if (target.closest("[data-graph-node-id]") || target.closest("[data-graph-search-result-id]")) return;
+
+          const isGraphWhitespace = target === elements.graphStage || target.classList.contains("graph-svg");
+          if (!isGraphWhitespace) return;
+
+          resetGraphSelection();
+        }
+
+        function resetGraphSelection() {
+          if (!state.selectedGraphNodeId && !state.selectedEntity && !state.hoveredGraphNodeId) return;
+          state.selectedGraphNodeId = null;
+          state.hoveredGraphNodeId = null;
+          state.selectedEntity = null;
+          state.actionStatus = null;
+          renderGraph();
+        }
+
         function buildDisplayGraph(raw) {
+          const searchMatches = graphSearchMatches(raw);
+          const activeSearchMatch = searchMatches[state.graphSearch.activeMatchIndex] || null;
+          const searchMatchIds = new Set(searchMatches.map((match) => match.id));
+          const searchParentIds = new Set(searchMatches
+            .filter((match) => match.kind === "memory")
+            .map((match) => match.parentTopicId));
           const topics = (raw.nodes || []).map((node) => ({
             id: node.id,
             kind: "topic",
@@ -2182,12 +2477,14 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
           const topicNodes = topics.filter(matchesFilters);
           const memoryCandidates = memories.filter(matchesFilters);
-          let selectedTopicId = selectedTopicIdForGraph(raw);
-          if (!selectedTopicId && topicNodes.length > 0 && state.filters.nodeType !== "memories") {
-            selectedTopicId = topicNodes[0].id;
-          }
-          const memoryNodes = selectedTopicId && state.filters.nodeType !== "topics"
-            ? memoryCandidates.filter((memory) => memory.raw.topicNodeId === selectedTopicId)
+          const selectedTopicId = selectedTopicIdForGraph(raw);
+          const showAllMemories = state.filters.nodeType === "memories" && !selectedTopicId;
+          const memoryNodes = state.filters.nodeType !== "topics"
+            ? showAllMemories
+              ? memoryCandidates
+              : selectedTopicId
+                ? memoryCandidates.filter((memory) => memory.raw.topicNodeId === selectedTopicId)
+                : []
             : [];
           const visibleIds = new Set(topicNodes.concat(memoryNodes).map((node) => node.id));
           const topicEdges = (raw.edges || []).filter((edge) => visibleIds.has(edge.srcId) && visibleIds.has(edge.dstId));
@@ -2202,7 +2499,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             nodes: topicNodes.concat(memoryNodes),
             selectedTopicId,
             topicEdges: topicEdges.concat(attachmentEdges.filter((edge) => visibleIds.has(edge.srcId))),
-            memoryEdges
+            memoryEdges,
+            searchMatchIds,
+            searchParentIds,
+            activeSearchId: activeSearchMatch ? activeSearchMatch.id : null
           };
         }
 
@@ -2234,7 +2534,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const nodeWidth = 330;
           const nodeHeight = 96;
           const topicX = 56;
-          const memoryX = 520;
+          const memoryX = graph.topicNodes.length === 0 ? topicX : 520;
           const topicPositions = new Map();
           const memoryPositions = new Map();
 
@@ -2256,7 +2556,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             graph.topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
             .concat(graph.memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
             .join("");
-          const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight, activeId, connectedIds)).join("");
+          const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight, activeId, connectedIds, graph)).join("");
 
           return '<svg class="graph-svg" role="img" aria-label="Session memory graph" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">' +
             edgeMarkup +
@@ -2286,15 +2586,18 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           return '<path class="edge-line ' + edgeKind + highlightClass + '" d="M ' + x1 + ' ' + y1 + ' C ' + (x1 + curve) + ' ' + y1 + ', ' + (x2 - curve) + ' ' + y2 + ', ' + x2 + ' ' + y2 + '"></path>';
         }
 
-        function renderNode(node, position, width, height, activeId, connectedIds) {
+        function renderNode(node, position, width, height, activeId, connectedIds, graph) {
           if (!position) return "";
           const selected = node.id === state.selectedGraphNodeId ? " selected" : "";
           const hovered = node.id === state.hoveredGraphNodeId ? " hovered" : "";
+          const searchMatch = graph.searchMatchIds.has(node.id) ? " search-match" : "";
+          const searchParent = graph.searchParentIds.has(node.id) && !searchMatch ? " search-parent" : "";
+          const searchActive = graph.activeSearchId === node.id ? " search-active" : "";
           const dimmed = activeId && !connectedIds.has(node.id) ? " dimmed" : "";
           const badge = lifecycleBadge(node.lifecycle);
           const meta = graphNodeMeta(node);
           const aria = node.kind + " " + node.title + ", " + node.lifecycle;
-          return '<g class="node-card ' + node.kind + selected + hovered + dimmed + '" tabindex="0" role="button" aria-label="' + escapeAttribute(aria) + '" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
+          return '<g class="node-card ' + node.kind + selected + hovered + searchMatch + searchParent + searchActive + dimmed + '" tabindex="0" role="button" aria-label="' + escapeAttribute(aria) + '" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
             '<rect class="node-surface" x="' + position.x + '" y="' + position.y + '" width="' + width + '" height="' + height + '" rx="12"></rect>' +
             '<rect class="accent-rail ' + node.kind + '" x="' + position.x + '" y="' + position.y + '" width="7" height="' + height + '" rx="3"></rect>' +
             '<text class="node-kind" x="' + (position.x + 18) + '" y="' + (position.y + 20) + '">' + escapeHtml(node.kind) + '</text>' +

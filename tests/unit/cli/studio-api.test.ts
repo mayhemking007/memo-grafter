@@ -59,6 +59,7 @@ describe("MemoGrafter Studio API", () => {
       expect(search.body).toMatchObject({
         sessionId: "session-1",
         query: "alpha",
+        topics: [{ id: "topic-1", label: "Alpha topic" }],
         memories: [{ id: memoryId, value: "alpha memory" }],
       });
       expect(context.store.getNodesBySession).toHaveBeenCalledWith("session-1", { includeSuppressed: true });
@@ -66,6 +67,7 @@ describe("MemoGrafter Studio API", () => {
       expect(context.repository.listSessions).toHaveBeenCalledWith(undefined);
       expect(context.repository.listSessions).toHaveBeenCalledWith("alpha");
       expect(context.repository.getTablesBySession).toHaveBeenCalledWith("session-1");
+      expect(context.repository.searchTopics).toHaveBeenCalledWith("session-1", "alpha", undefined);
       expect(context.repository.searchMemories).toHaveBeenCalledWith("session-1", "alpha", undefined);
     } finally {
       await closeServer(server);
@@ -290,10 +292,16 @@ function makeContext(repositoryOverrides: Partial<StudioApiContext["repository"]
     sessionId: "session-1",
     value: "alpha memory",
   };
+  const topic = {
+    id: "topic-1",
+    sessionId: "session-1",
+    label: "Alpha topic",
+    summary: "alpha topic summary",
+  };
 
   return {
     store: {
-      getNodesBySession: vi.fn(async () => [{ id: "topic-1", sessionId: "session-1" }]),
+      getNodesBySession: vi.fn(async () => [topic]),
       getSegmentsBySession: vi.fn(async () => [{ id: "segment-1", sessionId: "session-1" }]),
       getMemoriesBySession: vi.fn(async () => [memory]),
       getMessagesBySession: vi.fn(async () => [{ role: "user", content: "hello" }]),
@@ -324,6 +332,7 @@ function makeContext(repositoryOverrides: Partial<StudioApiContext["repository"]
         { name: "mg_topic_nodes", rows: [{ id: "topic-1", session_id: "session-1" }] },
         { name: "mg_message_buffer", rows: [{ session_id: "session-1", message_index: 0, role: "user", content: "hello" }] },
       ]),
+      searchTopics: vi.fn(async () => [topic]),
       searchMemories: vi.fn(async () => [memory]),
       upsertSessionLabel: vi.fn(async () => undefined),
       ...repositoryOverrides,

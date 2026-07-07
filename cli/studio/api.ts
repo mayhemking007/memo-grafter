@@ -5,6 +5,7 @@ import type {
   StudioSessionSummary,
   StudioTableBrowserTable,
   StudioTopicEdge,
+  StudioTopicSearchResult,
 } from "./repository.js";
 
 export interface StudioApiStore {
@@ -35,6 +36,7 @@ export interface StudioApiRepository {
   getTopicEdgesBySession(sessionId: string): Promise<StudioTopicEdge[]>;
   getMemoryEdgesBySession(sessionId: string): Promise<StudioMemoryEdge[]>;
   getTablesBySession(sessionId: string): Promise<StudioTableBrowserTable[]>;
+  searchTopics(sessionId: string, query: string, limit?: number): Promise<StudioTopicSearchResult[]>;
   searchMemories(sessionId: string, query: string, limit?: number): Promise<StudioMemorySearchResult[]>;
   upsertSessionLabel(sessionId: string, label: string | null): Promise<void>;
 }
@@ -151,7 +153,7 @@ export async function handleStudioApiRequest(
         return;
       }
 
-      await sendMemorySearch(response, context, sessionId, route.url);
+      await sendSessionSearch(response, context, sessionId, route.url);
       return;
     }
 
@@ -340,7 +342,7 @@ async function sendPromptPreview(
   sendJson(response, 200, result);
 }
 
-async function sendMemorySearch(
+async function sendSessionSearch(
   response: ServerResponse,
   context: StudioApiContext,
   sessionId: string,
@@ -358,8 +360,11 @@ async function sendMemorySearch(
   }
 
   const limit = parseLimit(url.searchParams.get("limit"));
-  const memories = await context.repository.searchMemories(sessionId, query, limit);
-  sendJson(response, 200, { sessionId, query, memories });
+  const [topics, memories] = await Promise.all([
+    context.repository.searchTopics(sessionId, query, limit),
+    context.repository.searchMemories(sessionId, query, limit),
+  ]);
+  sendJson(response, 200, { sessionId, query, topics, memories });
 }
 
 async function sendSuppressTopic(
