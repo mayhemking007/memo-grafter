@@ -43,6 +43,25 @@ export interface StudioMemorySearchResult {
   createdAt: Date;
 }
 
+export interface StudioTopicSearchResult {
+  id: string;
+  sessionId: string;
+  segmentId: string;
+  label: string;
+  summary: string;
+  tags?: string[];
+  source: string | null;
+  messageRange: number[] | null;
+  topicOrder: number;
+  driftScore: number;
+  agentColor: string | null;
+  fleetId: string | null;
+  agentId: string | null;
+  suppressed: boolean;
+  suppressedAt: Date | null;
+  createdAt: Date;
+}
+
 export interface StudioMemoryEdge {
   id: string;
   sourceId: string;
@@ -73,6 +92,25 @@ interface TopicEdgeRow {
   dst_id: string;
   weight: number;
   type: string;
+}
+
+interface TopicSearchRow {
+  id: string;
+  session_id: string;
+  segment_id: string;
+  label: string;
+  summary: string;
+  tags: string[] | null;
+  source: string | null;
+  message_range: number[] | null;
+  topic_order: number | null;
+  drift_score: number | null;
+  agent_color: string | null;
+  fleet_id: string | null;
+  agent_id: string | null;
+  suppressed: boolean | null;
+  suppressed_at: Date | null;
+  created_at: Date;
 }
 
 interface MemoryRow {
@@ -453,6 +491,52 @@ export class StudioRepository {
     `;
 
     return rows.map((row) => this.rowToMemory(row));
+  }
+
+  async searchTopics(sessionId: string, query: string, limit = 25): Promise<StudioTopicSearchResult[]> {
+    const boundedLimit = Math.max(1, Math.min(limit, 100));
+    const pattern = `%${query}%`;
+    const rows = await this.sql<TopicSearchRow[]>`
+      SELECT topic.*
+      FROM mg_topic_nodes topic
+      WHERE topic.session_id = ${sessionId}
+        AND (
+          topic.id ILIKE ${pattern}
+          OR topic.label ILIKE ${pattern}
+          OR topic.summary ILIKE ${pattern}
+          OR topic.source ILIKE ${pattern}
+          OR EXISTS (
+            SELECT 1
+            FROM unnest(topic.tags) tag
+            WHERE tag ILIKE ${pattern}
+          )
+        )
+      ORDER BY topic.topic_order ASC, topic.created_at DESC, topic.id ASC
+      LIMIT ${boundedLimit}
+    `;
+
+    return rows.map((row) => this.rowToTopicSearchResult(row));
+  }
+
+  private rowToTopicSearchResult(row: TopicSearchRow): StudioTopicSearchResult {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      segmentId: row.segment_id,
+      label: row.label,
+      summary: row.summary,
+      tags: row.tags ?? [],
+      source: row.source,
+      messageRange: row.message_range,
+      topicOrder: row.topic_order ?? 0,
+      driftScore: row.drift_score ?? 0,
+      agentColor: row.agent_color,
+      fleetId: row.fleet_id,
+      agentId: row.agent_id,
+      suppressed: row.suppressed ?? false,
+      suppressedAt: row.suppressed_at,
+      createdAt: row.created_at,
+    };
   }
 
   private rowToMemory(row: MemoryRow): StudioMemorySearchResult {
