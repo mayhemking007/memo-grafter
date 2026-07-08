@@ -720,6 +720,179 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         min-width: 980px;
       }
 
+      .graph-overview {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .graph-overview-header {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+      }
+
+      .graph-overview-title {
+        color: #1c2737;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .graph-overview-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      }
+
+      .overview-node {
+        align-items: stretch;
+        background: #ffffff;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        color: #1f2a3a;
+        display: grid;
+        grid-template-columns: 7px minmax(0, 1fr);
+        min-height: 116px;
+        overflow: hidden;
+        padding: 0;
+        text-align: left;
+      }
+
+      .overview-node.topic {
+        background: #f0fdfa;
+        border-color: #99d8cf;
+      }
+
+      .overview-node.memory {
+        background: #fff7ed;
+        border-color: #f2c38b;
+      }
+
+      .overview-node:hover,
+      .overview-node.selected,
+      .overview-node.hovered {
+        border-color: #1d4ed8;
+        box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.12);
+      }
+
+      .overview-node.search-match {
+        border-color: #d97706;
+        box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.14);
+      }
+
+      .overview-node.search-parent {
+        border-color: #8b5cf6;
+      }
+
+      .overview-node.search-active {
+        border-color: #dc2626;
+        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+      }
+
+      .overview-node:focus-visible {
+        outline: 3px solid rgba(37, 99, 235, 0.35);
+        outline-offset: 2px;
+      }
+
+      .overview-accent.topic {
+        background: #0f766e;
+      }
+
+      .overview-accent.memory {
+        background: #b45309;
+      }
+
+      .overview-node-body {
+        display: grid;
+        gap: 7px;
+        padding: 10px 12px;
+      }
+
+      .overview-node-topline {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .overview-node-kind {
+        color: #617086;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .overview-node-title {
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .overview-node-summary {
+        color: #43536a;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .overview-node-meta {
+        color: #617086;
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 11px;
+        gap: 7px;
+      }
+
+      .graph-navigator {
+        align-items: center;
+        border-bottom: 1px solid #e4e8f0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: space-between;
+        padding: 10px 14px;
+      }
+
+      .graph-nav-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .graph-cluster-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .graph-cluster {
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .graph-cluster-header {
+        align-items: center;
+        background: #f8fafc;
+        border: 0;
+        border-bottom: 1px solid #dbe3ef;
+        color: #1f2a3a;
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 12px;
+        text-align: left;
+        width: 100%;
+      }
+
+      .graph-cluster-title {
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .graph-cluster-body {
+        padding: 10px;
+      }
+
       .node-card .node-surface {
         fill: #ffffff;
         filter: drop-shadow(0 8px 18px rgba(17, 24, 39, 0.08));
@@ -1062,6 +1235,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         <div class="filters" id="graph-filters" aria-label="Graph filters">
           <div class="field">
+            <label for="graph-view-mode">View</label>
+            <select id="graph-view-mode">
+              <option value="overview">Overview</option>
+              <option value="clusters">Clusters</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="graph-edge-mode">Edges</label>
+            <select id="graph-edge-mode">
+              <option value="focused">Focused</option>
+              <option value="hidden">Hidden</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="field">
             <label for="node-type-filter">Node type</label>
             <select id="node-type-filter">
               <option value="all">All nodes</option>
@@ -1085,7 +1273,6 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               <option value="conflicting">Conflicting memories</option>
             </select>
           </div>
-          <button class="icon-button" id="clear-filters" type="button">Clear</button>
         </div>
 
         <div class="content-grid" id="content-grid">
@@ -1136,6 +1323,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             query: "",
             activeMatchIndex: 0
           },
+          graphViewMode: "overview",
+          graphEdgeMode: "focused",
+          collapsedGraphClusters: {},
           preview: {
             query: "",
             mode: "graft",
@@ -1184,10 +1374,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           graphSummary: document.getElementById("graph-summary"),
           detailsSection: document.getElementById("details-section"),
           detailsPanel: document.getElementById("details-panel"),
+          graphViewMode: document.getElementById("graph-view-mode"),
+          graphEdgeMode: document.getElementById("graph-edge-mode"),
           nodeTypeFilter: document.getElementById("node-type-filter"),
           tagFilter: document.getElementById("tag-filter"),
-          lifecycleFilter: document.getElementById("lifecycle-filter"),
-          clearFilters: document.getElementById("clear-filters")
+          lifecycleFilter: document.getElementById("lifecycle-filter")
         };
 
         elements.databaseStatus.textContent = initialState.databaseStatus;
@@ -1208,6 +1399,14 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.graphSearchInput.addEventListener("keydown", handleGraphSearchKeydown);
         elements.graphSearchClear.addEventListener("click", () => clearGraphSearch());
         elements.graphStage.addEventListener("click", handleGraphStageClick);
+        elements.graphViewMode.addEventListener("change", () => {
+          state.graphViewMode = elements.graphViewMode.value;
+          renderGraph();
+        });
+        elements.graphEdgeMode.addEventListener("change", () => {
+          state.graphEdgeMode = elements.graphEdgeMode.value;
+          renderGraph();
+        });
         elements.tabButtons.forEach((button) => {
           button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
           button.addEventListener("keydown", (event) => handleTabKeydown(event, button));
@@ -1222,13 +1421,6 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         });
         elements.lifecycleFilter.addEventListener("change", () => {
           state.filters.lifecycle = elements.lifecycleFilter.value;
-          renderGraph();
-        });
-        elements.clearFilters.addEventListener("click", () => {
-          state.filters = { nodeType: "all", tag: "", lifecycle: "all" };
-          elements.nodeTypeFilter.value = "all";
-          elements.tagFilter.value = "";
-          elements.lifecycleFilter.value = "all";
           renderGraph();
         });
 
@@ -2335,7 +2527,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             state.selectedEntity = entity ? { kind: entity.kind, id: entity.id, source: "graph" } : null;
           }
 
-          elements.graphStage.innerHTML = renderGraphSearchResults(searchMatches, hiddenMatches) + renderGraphSvg(graph);
+          elements.graphStage.innerHTML = renderGraphSearchResults(searchMatches, hiddenMatches) + renderGraphSurface(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             const selectNode = () => {
               selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
@@ -2375,6 +2567,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               selectGraphSearchMatch(match);
               renderGraph();
             });
+          });
+          elements.graphStage.querySelectorAll("[data-graph-nav-action]").forEach((button) => {
+            button.addEventListener("click", () => handleGraphNavigatorAction(button.getAttribute("data-graph-nav-action"), graph));
+          });
+          elements.graphStage.querySelectorAll("[data-graph-cluster-toggle]").forEach((button) => {
+            button.addEventListener("click", () => toggleGraphCluster(button.getAttribute("data-graph-cluster-toggle")));
           });
 
           renderDetailsPanel();
@@ -2432,9 +2630,15 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (state.activeTab !== "graph" || !state.graph) return;
           const target = event.target;
           if (!target || typeof target.closest !== "function") return;
-          if (target.closest("[data-graph-node-id]") || target.closest("[data-graph-search-result-id]")) return;
+          if (target.closest("[data-graph-node-id]")
+            || target.closest("[data-graph-search-result-id]")
+            || target.closest("[data-graph-nav-action]")
+            || target.closest("[data-graph-cluster-toggle]")) return;
 
-          const isGraphWhitespace = target === elements.graphStage || target.classList.contains("graph-svg");
+          const isGraphWhitespace = target === elements.graphStage
+            || target.classList.contains("graph-svg")
+            || target.classList.contains("graph-overview")
+            || target.classList.contains("graph-overview-grid");
           if (!isGraphWhitespace) return;
 
           resetGraphSelection();
@@ -2475,10 +2679,18 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             raw: memory
           }));
 
-          const topicNodes = topics.filter(matchesFilters);
+          const filteredTopicNodes = topics.filter(matchesFilters);
           const memoryCandidates = memories.filter(matchesFilters);
           const selectedTopicId = selectedTopicIdForGraph(raw);
-          const showAllMemories = state.filters.nodeType === "memories" && !selectedTopicId;
+          const selectedMemory = (raw.memories || []).find((memory) => memory.id === state.selectedGraphNodeId);
+          const mode = selectedMemory ? "memory-focus" : selectedTopicId ? "topic-focus" : "overview";
+          const topicMemoryCounts = countMemoriesByTopic(raw);
+          const topicEdgeCounts = countTopicEdges(raw);
+          const focusedTopicIds = focusedTopicIdsForGraph(raw, selectedTopicId);
+          const topicNodes = mode === "overview" || state.filters.nodeType === "memories"
+            ? filteredTopicNodes
+            : filteredTopicNodes.filter((topic) => focusedTopicIds.has(topic.id));
+          const showAllMemories = mode === "overview" && state.filters.nodeType === "memories" && !selectedTopicId;
           const memoryNodes = state.filters.nodeType !== "topics"
             ? showAllMemories
               ? memoryCandidates
@@ -2494,16 +2706,47 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             .map((memory) => ({ srcId: memory.raw.topicNodeId, dstId: memory.id, type: "contains", weight: 1, attachment: true }));
 
           return {
+            mode,
             topicNodes,
             memoryNodes,
             nodes: topicNodes.concat(memoryNodes),
             selectedTopicId,
+            topicMemoryCounts,
+            topicEdgeCounts,
             topicEdges: topicEdges.concat(attachmentEdges.filter((edge) => visibleIds.has(edge.srcId))),
             memoryEdges,
             searchMatchIds,
             searchParentIds,
             activeSearchId: activeSearchMatch ? activeSearchMatch.id : null
           };
+        }
+
+        function focusedTopicIdsForGraph(raw, selectedTopicId) {
+          const ids = new Set();
+          if (!selectedTopicId) return ids;
+          ids.add(selectedTopicId);
+          (raw.edges || []).forEach((edge) => {
+            if (edge.srcId === selectedTopicId) ids.add(edge.dstId);
+            if (edge.dstId === selectedTopicId) ids.add(edge.srcId);
+          });
+          return ids;
+        }
+
+        function countMemoriesByTopic(raw) {
+          const counts = new Map();
+          (raw.memories || []).forEach((memory) => {
+            counts.set(memory.topicNodeId, (counts.get(memory.topicNodeId) || 0) + 1);
+          });
+          return counts;
+        }
+
+        function countTopicEdges(raw) {
+          const counts = new Map();
+          (raw.edges || []).forEach((edge) => {
+            counts.set(edge.srcId, (counts.get(edge.srcId) || 0) + 1);
+            counts.set(edge.dstId, (counts.get(edge.dstId) || 0) + 1);
+          });
+          return counts;
         }
 
         function selectedTopicIdForGraph(raw) {
@@ -2529,6 +2772,149 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           return true;
         }
 
+        function renderGraphSurface(graph) {
+          const surface = graph.mode === "overview" ? renderGraphOverview(graph) : renderGraphSvg(graph);
+          return renderGraphNavigator(graph) + surface;
+        }
+
+        function renderGraphNavigator(graph) {
+          const selectedDisabled = state.selectedGraphNodeId ? "" : " disabled";
+          return '<div class="graph-navigator" data-graph-navigator>' +
+            '<div class="summary-strip">' +
+              '<span>' + escapeHtml(graphModeLabel(graph)) + '</span>' +
+              '<span>edges: ' + escapeHtml(state.graphEdgeMode) + '</span>' +
+              '<span>view: ' + escapeHtml(state.graphViewMode) + '</span>' +
+            '</div>' +
+            '<div class="graph-nav-actions">' +
+              '<button class="icon-button" type="button" data-graph-nav-action="overview" title="Clear graph selection and return to overview"' + selectedDisabled + '>Reset view</button>' +
+            '</div>' +
+          '</div>';
+        }
+
+        function graphModeLabel(graph) {
+          if (graph.mode === "topic-focus") return "Topic focus";
+          if (graph.mode === "memory-focus") return "Memory focus";
+          return state.graphViewMode === "clusters" ? "Cluster overview" : "Overview";
+        }
+
+        function handleGraphNavigatorAction(action) {
+          if (action === "overview") {
+            resetGraphSelection();
+          }
+        }
+
+        function renderGraphOverview(graph) {
+          const nodes = graph.topicNodes.length > 0 ? graph.topicNodes : graph.memoryNodes;
+          const title = graph.topicNodes.length > 0 ? "Topic overview" : "Memory overview";
+          const hint = graph.topicNodes.length > 0
+            ? "Select a topic to inspect its memory neighborhood."
+            : "Select a memory to inspect its source topic.";
+          if (state.graphViewMode === "clusters" && graph.topicNodes.length > 0) {
+            return renderGraphClusters(graph, title, hint);
+          }
+          return '<div class="graph-overview" data-graph-overview>' +
+            '<div class="graph-overview-header">' +
+              '<span class="graph-overview-title">' + title + '</span>' +
+              '<span class="subtle">' + hint + '</span>' +
+            '</div>' +
+            '<div class="graph-overview-grid">' + nodes.map((node) => renderOverviewNode(node, graph)).join("") + '</div>' +
+          '</div>';
+        }
+
+        function renderGraphClusters(graph, title, hint) {
+          const clusters = graphClusters(graph);
+          return '<div class="graph-overview" data-graph-overview>' +
+            '<div class="graph-overview-header">' +
+              '<span class="graph-overview-title">' + title + '</span>' +
+              '<span class="subtle">' + hint + '</span>' +
+            '</div>' +
+            '<div class="graph-cluster-list">' + clusters.map((cluster) => renderGraphCluster(cluster, graph)).join("") + '</div>' +
+          '</div>';
+        }
+
+        function graphClusters(graph) {
+          const clustersByKey = new Map();
+          graph.topicNodes.forEach((node) => {
+            const key = graphClusterKey(node);
+            const cluster = clustersByKey.get(key) || { key, label: key, nodes: [], memories: 0, suppressed: 0 };
+            cluster.nodes.push(node);
+            cluster.memories += graph.topicMemoryCounts.get(node.id) || 0;
+            if (node.lifecycle === "suppressed") cluster.suppressed += 1;
+            clustersByKey.set(key, cluster);
+          });
+          return Array.from(clustersByKey.values()).sort((left, right) => right.nodes.length - left.nodes.length || left.label.localeCompare(right.label));
+        }
+
+        function graphClusterKey(node) {
+          const tags = Array.isArray(node.tags) ? node.tags.filter(Boolean) : [];
+          if (tags.length > 0) return tags[0];
+          if (node.lifecycle) return node.lifecycle;
+          return "Untagged";
+        }
+
+        function renderGraphCluster(cluster, graph) {
+          const collapsed = Boolean(state.collapsedGraphClusters[cluster.key]);
+          return '<section class="graph-cluster">' +
+            '<button class="graph-cluster-header" type="button" data-graph-cluster-toggle="' + escapeAttribute(cluster.key) + '" aria-expanded="' + String(!collapsed) + '">' +
+              '<span class="graph-cluster-title">' + escapeHtml(cluster.label) + '</span>' +
+              '<span class="summary-strip">' +
+                '<span>' + numberText(cluster.nodes.length) + ' topics</span>' +
+                '<span>' + numberText(cluster.memories) + ' memories</span>' +
+                '<span>' + numberText(cluster.suppressed) + ' suppressed</span>' +
+              '</span>' +
+            '</button>' +
+            (collapsed ? "" : '<div class="graph-cluster-body"><div class="graph-overview-grid">' + cluster.nodes.map((node) => renderOverviewNode(node, graph)).join("") + '</div></div>') +
+          '</section>';
+        }
+
+        function toggleGraphCluster(key) {
+          if (!key) return;
+          state.collapsedGraphClusters[key] = !state.collapsedGraphClusters[key];
+          renderGraph();
+        }
+
+        function renderOverviewNode(node, graph) {
+          const selected = node.id === state.selectedGraphNodeId ? " selected" : "";
+          const hovered = node.id === state.hoveredGraphNodeId ? " hovered" : "";
+          const searchMatch = graph.searchMatchIds.has(node.id) ? " search-match" : "";
+          const searchParent = graph.searchParentIds.has(node.id) && !searchMatch ? " search-parent" : "";
+          const searchActive = graph.activeSearchId === node.id ? " search-active" : "";
+          const badge = lifecycleBadge(node.lifecycle);
+          const aria = node.kind + " " + node.title + ", " + node.lifecycle;
+          const meta = overviewNodeMeta(node, graph);
+          return '<button class="overview-node node-card ' + node.kind + selected + hovered + searchMatch + searchParent + searchActive + '" type="button" aria-label="' + escapeAttribute(aria) + '" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
+            '<span class="overview-accent ' + node.kind + '"></span>' +
+            '<span class="overview-node-body">' +
+              '<span class="overview-node-topline">' +
+                '<span class="overview-node-kind">' + escapeHtml(node.kind) + '</span>' +
+                '<span class="badge">' + escapeHtml(badge.label) + '</span>' +
+              '</span>' +
+              '<span class="overview-node-title">' + escapeHtml(truncate(node.title, 54)) + '</span>' +
+              '<span class="overview-node-summary">' + escapeHtml(truncate(node.subtitle, 96)) + '</span>' +
+              '<span class="overview-node-meta">' + meta.map((item) => '<span>' + escapeHtml(item) + '</span>').join("") + '</span>' +
+            '</span>' +
+          '</button>';
+        }
+
+        function overviewNodeMeta(node, graph) {
+          const raw = node.raw || {};
+          if (node.kind === "topic") {
+            const memoryCount = graph.topicMemoryCounts.get(node.id) || 0;
+            const edgeCount = graph.topicEdgeCounts.get(node.id) || 0;
+            const range = Array.isArray(raw.messageRange) ? raw.messageRange.join("-") : "unknown range";
+            return [
+              numberText(memoryCount) + " memories",
+              numberText(edgeCount) + " links",
+              "range " + range
+            ];
+          }
+
+          return [
+            raw.memoryType || "memory",
+            "confidence " + (raw.confidence == null ? "unknown" : String(raw.confidence))
+          ];
+        }
+
         function renderGraphSvg(graph) {
           const rowGap = 132;
           const nodeWidth = 330;
@@ -2552,9 +2938,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const width = 920;
           const activeId = state.hoveredGraphNodeId || state.selectedGraphNodeId;
           const connectedIds = connectedNodeIds(graph, activeId);
+          const topicEdges = graphEdgesForMode(graph.topicEdges, activeId, (edge) => [edge.srcId, edge.dstId]);
+          const memoryEdges = graphEdgesForMode(graph.memoryEdges, activeId, (edge) => [edge.sourceId, edge.targetId]);
           const edgeMarkup = renderGraphMarkers() +
-            graph.topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
-            .concat(graph.memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
+            topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
+            .concat(memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
             .join("");
           const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight, activeId, connectedIds, graph)).join("");
 
@@ -2562,6 +2950,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             edgeMarkup +
             nodeMarkup +
           '</svg>';
+        }
+
+        function graphEdgesForMode(edges, activeId, idsForEdge) {
+          if (state.graphEdgeMode === "hidden") return [];
+          if (state.graphEdgeMode === "all" || !activeId) return edges;
+          return edges.filter((edge) => idsForEdge(edge).includes(activeId));
         }
 
         function renderGraphMarkers() {
@@ -2675,12 +3069,36 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         function renderDetailsPanel() {
           const node = resolveSelectedEntity();
           if (!node) {
+            if (state.activeTab === "graph" && state.graph) {
+              renderGraphOverviewDetails();
+              return;
+            }
             const noun = state.activeTab === "graph" ? "node in the graph" : "entity";
             elements.detailsPanel.innerHTML = '<p class="subtle">Select a ' + noun + ' to inspect its metadata.</p>';
             return;
           }
 
           renderEntityDetails(node);
+        }
+
+        function renderGraphOverviewDetails() {
+          const topics = (state.graph.nodes || []).length;
+          const memories = (state.graph.memories || []).length;
+          const topicEdges = (state.graph.edges || []).length;
+          const memoryEdges = (state.graph.memoryEdges || []).length;
+          const suppressedTopics = (state.graph.nodes || []).filter((node) => node.suppressed).length;
+          const inactiveMemories = (state.graph.memories || []).filter((memory) => memoryLifecycle(memory) !== "active").length;
+          elements.detailsPanel.innerHTML =
+            detailSection("Session overview",
+              '<dl class="metadata-grid">' +
+                detailRow("Topics", numberText(topics)) +
+                detailRow("Memories", numberText(memories)) +
+                detailRow("Topic edges", numberText(topicEdges)) +
+                detailRow("Memory edges", numberText(memoryEdges)) +
+                detailRow("Suppressed topics", numberText(suppressedTopics)) +
+                detailRow("Inactive memories", numberText(inactiveMemories)) +
+              '</dl>') +
+            detailSection("Graph mode", '<p class="subtle">Overview mode shows compact cards first. Select a topic or memory to inspect its focused neighborhood.</p>');
         }
 
         function resolveSelectedEntity() {

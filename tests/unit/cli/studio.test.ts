@@ -32,6 +32,8 @@ describe("memo-grafter studio", () => {
       expect(html.body).toContain("tab-preview");
       expect(html.body).toContain("Prompt Preview");
       expect(html.body).toContain("workspace-panel");
+      expect(html.body).toContain("graph-view-mode");
+      expect(html.body).toContain("graph-edge-mode");
       expect(html.body).toContain("node-type-filter");
       expect(html.body).toContain("graph-search-input");
       expect(html.body).toContain("graph-search-clear");
@@ -78,11 +80,14 @@ describe("memo-grafter studio", () => {
       sessionCount: 1,
       studioUrl: "http://localhost:2891",
     });
+    const inlineScript = extractInlineScript(html);
 
+    expect(() => new Function(inlineScript)).not.toThrow();
     expect(html).toContain("Connected memories");
     expect(html).toContain("Source metadata");
     expect(html).toContain("Relationships");
     expect(html).toContain("renderDetailsPanel");
+    expect(html).toContain("renderGraphOverviewDetails");
     expect(html).toContain("selectedEntity");
     expect(html).toContain("resolveGraphEntity");
     expect(html).toContain("autoSelectSessionId");
@@ -110,6 +115,21 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("navigateGraphSearch");
     expect(html).toContain("handleGraphStageClick");
     expect(html).toContain("resetGraphSelection");
+    expect(html).toContain("renderGraphSurface");
+    expect(html).toContain("renderGraphNavigator");
+    expect(html).toContain("handleGraphNavigatorAction");
+    expect(html).toContain("graphEdgesForMode");
+    expect(html).toContain("renderGraphOverview");
+    expect(html).toContain("renderGraphClusters");
+    expect(html).toContain("graphClusters");
+    expect(html).toContain("toggleGraphCluster");
+    expect(html).toContain("renderOverviewNode");
+    expect(html).toContain("overviewNodeMeta");
+    expect(html).toContain("graphEdgeMode");
+    expect(html).toContain("graphViewMode");
+    expect(html).toContain('"topic-focus"');
+    expect(html).toContain('"memory-focus"');
+    expect(html).toContain('"overview"');
     expect(html).toContain("renderGraphSearchResults");
     expect(html).toContain("data-graph-search-result-id");
     expect(html).toContain("search-match");
@@ -169,6 +189,12 @@ async function fetchText(url: string): Promise<{ status: number; body: string }>
     status: response.status,
     body: await response.text(),
   };
+}
+
+function extractInlineScript(html: string): string {
+  const match = html.match(/<script>\n([\s\S]*)\n[ ]{4}<\/script>/);
+  if (!match) throw new Error("Studio inline script was not found.");
+  return match[1] ?? "";
 }
 
 async function fetchJson(url: string): Promise<{ status: number; body: unknown }> {
