@@ -720,6 +720,130 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         min-width: 980px;
       }
 
+      .graph-overview {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .graph-overview-header {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+      }
+
+      .graph-overview-title {
+        color: #1c2737;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .graph-overview-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      }
+
+      .overview-node {
+        align-items: stretch;
+        background: #ffffff;
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        color: #1f2a3a;
+        display: grid;
+        grid-template-columns: 7px minmax(0, 1fr);
+        min-height: 116px;
+        overflow: hidden;
+        padding: 0;
+        text-align: left;
+      }
+
+      .overview-node.topic {
+        background: #f0fdfa;
+        border-color: #99d8cf;
+      }
+
+      .overview-node.memory {
+        background: #fff7ed;
+        border-color: #f2c38b;
+      }
+
+      .overview-node:hover,
+      .overview-node.selected,
+      .overview-node.hovered {
+        border-color: #1d4ed8;
+        box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.12);
+      }
+
+      .overview-node.search-match {
+        border-color: #d97706;
+        box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.14);
+      }
+
+      .overview-node.search-parent {
+        border-color: #8b5cf6;
+      }
+
+      .overview-node.search-active {
+        border-color: #dc2626;
+        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+      }
+
+      .overview-node:focus-visible {
+        outline: 3px solid rgba(37, 99, 235, 0.35);
+        outline-offset: 2px;
+      }
+
+      .overview-accent.topic {
+        background: #0f766e;
+      }
+
+      .overview-accent.memory {
+        background: #b45309;
+      }
+
+      .overview-node-body {
+        display: grid;
+        gap: 7px;
+        padding: 10px 12px;
+      }
+
+      .overview-node-topline {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .overview-node-kind {
+        color: #617086;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .overview-node-title {
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .overview-node-summary {
+        color: #43536a;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .overview-node-meta {
+        color: #617086;
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 11px;
+        gap: 7px;
+      }
+
       .node-card .node-surface {
         fill: #ffffff;
         filter: drop-shadow(0 8px 18px rgba(17, 24, 39, 0.08));
@@ -2335,7 +2459,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             state.selectedEntity = entity ? { kind: entity.kind, id: entity.id, source: "graph" } : null;
           }
 
-          elements.graphStage.innerHTML = renderGraphSearchResults(searchMatches, hiddenMatches) + renderGraphSvg(graph);
+          elements.graphStage.innerHTML = renderGraphSearchResults(searchMatches, hiddenMatches) + renderGraphSurface(graph);
           elements.graphStage.querySelectorAll("[data-graph-node-id]").forEach((node) => {
             const selectNode = () => {
               selectGraphNode(node.getAttribute("data-graph-node-id"), graph);
@@ -2434,7 +2558,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (!target || typeof target.closest !== "function") return;
           if (target.closest("[data-graph-node-id]") || target.closest("[data-graph-search-result-id]")) return;
 
-          const isGraphWhitespace = target === elements.graphStage || target.classList.contains("graph-svg");
+          const isGraphWhitespace = target === elements.graphStage
+            || target.classList.contains("graph-svg")
+            || target.classList.contains("graph-overview")
+            || target.classList.contains("graph-overview-grid");
           if (!isGraphWhitespace) return;
 
           resetGraphSelection();
@@ -2475,10 +2602,18 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             raw: memory
           }));
 
-          const topicNodes = topics.filter(matchesFilters);
+          const filteredTopicNodes = topics.filter(matchesFilters);
           const memoryCandidates = memories.filter(matchesFilters);
           const selectedTopicId = selectedTopicIdForGraph(raw);
-          const showAllMemories = state.filters.nodeType === "memories" && !selectedTopicId;
+          const selectedMemory = (raw.memories || []).find((memory) => memory.id === state.selectedGraphNodeId);
+          const mode = selectedMemory ? "memory-focus" : selectedTopicId ? "topic-focus" : "overview";
+          const topicMemoryCounts = countMemoriesByTopic(raw);
+          const topicEdgeCounts = countTopicEdges(raw);
+          const focusedTopicIds = focusedTopicIdsForGraph(raw, selectedTopicId);
+          const topicNodes = mode === "overview" || state.filters.nodeType === "memories"
+            ? filteredTopicNodes
+            : filteredTopicNodes.filter((topic) => focusedTopicIds.has(topic.id));
+          const showAllMemories = mode === "overview" && state.filters.nodeType === "memories" && !selectedTopicId;
           const memoryNodes = state.filters.nodeType !== "topics"
             ? showAllMemories
               ? memoryCandidates
@@ -2494,16 +2629,47 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             .map((memory) => ({ srcId: memory.raw.topicNodeId, dstId: memory.id, type: "contains", weight: 1, attachment: true }));
 
           return {
+            mode,
             topicNodes,
             memoryNodes,
             nodes: topicNodes.concat(memoryNodes),
             selectedTopicId,
+            topicMemoryCounts,
+            topicEdgeCounts,
             topicEdges: topicEdges.concat(attachmentEdges.filter((edge) => visibleIds.has(edge.srcId))),
             memoryEdges,
             searchMatchIds,
             searchParentIds,
             activeSearchId: activeSearchMatch ? activeSearchMatch.id : null
           };
+        }
+
+        function focusedTopicIdsForGraph(raw, selectedTopicId) {
+          const ids = new Set();
+          if (!selectedTopicId) return ids;
+          ids.add(selectedTopicId);
+          (raw.edges || []).forEach((edge) => {
+            if (edge.srcId === selectedTopicId) ids.add(edge.dstId);
+            if (edge.dstId === selectedTopicId) ids.add(edge.srcId);
+          });
+          return ids;
+        }
+
+        function countMemoriesByTopic(raw) {
+          const counts = new Map();
+          (raw.memories || []).forEach((memory) => {
+            counts.set(memory.topicNodeId, (counts.get(memory.topicNodeId) || 0) + 1);
+          });
+          return counts;
+        }
+
+        function countTopicEdges(raw) {
+          const counts = new Map();
+          (raw.edges || []).forEach((edge) => {
+            counts.set(edge.srcId, (counts.get(edge.srcId) || 0) + 1);
+            counts.set(edge.dstId, (counts.get(edge.dstId) || 0) + 1);
+          });
+          return counts;
         }
 
         function selectedTopicIdForGraph(raw) {
@@ -2527,6 +2693,68 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             if (!haystack.includes(state.filters.tag)) return false;
           }
           return true;
+        }
+
+        function renderGraphSurface(graph) {
+          if (graph.mode === "overview") return renderGraphOverview(graph);
+          return renderGraphSvg(graph);
+        }
+
+        function renderGraphOverview(graph) {
+          const nodes = graph.topicNodes.length > 0 ? graph.topicNodes : graph.memoryNodes;
+          const title = graph.topicNodes.length > 0 ? "Topic overview" : "Memory overview";
+          const hint = graph.topicNodes.length > 0
+            ? "Select a topic to inspect its memory neighborhood."
+            : "Select a memory to inspect its source topic.";
+          return '<div class="graph-overview" data-graph-overview>' +
+            '<div class="graph-overview-header">' +
+              '<span class="graph-overview-title">' + title + '</span>' +
+              '<span class="subtle">' + hint + '</span>' +
+            '</div>' +
+            '<div class="graph-overview-grid">' + nodes.map((node) => renderOverviewNode(node, graph)).join("") + '</div>' +
+          '</div>';
+        }
+
+        function renderOverviewNode(node, graph) {
+          const selected = node.id === state.selectedGraphNodeId ? " selected" : "";
+          const hovered = node.id === state.hoveredGraphNodeId ? " hovered" : "";
+          const searchMatch = graph.searchMatchIds.has(node.id) ? " search-match" : "";
+          const searchParent = graph.searchParentIds.has(node.id) && !searchMatch ? " search-parent" : "";
+          const searchActive = graph.activeSearchId === node.id ? " search-active" : "";
+          const badge = lifecycleBadge(node.lifecycle);
+          const aria = node.kind + " " + node.title + ", " + node.lifecycle;
+          const meta = overviewNodeMeta(node, graph);
+          return '<button class="overview-node node-card ' + node.kind + selected + hovered + searchMatch + searchParent + searchActive + '" type="button" aria-label="' + escapeAttribute(aria) + '" data-graph-node-id="' + escapeAttribute(node.id) + '">' +
+            '<span class="overview-accent ' + node.kind + '"></span>' +
+            '<span class="overview-node-body">' +
+              '<span class="overview-node-topline">' +
+                '<span class="overview-node-kind">' + escapeHtml(node.kind) + '</span>' +
+                '<span class="badge">' + escapeHtml(badge.label) + '</span>' +
+              '</span>' +
+              '<span class="overview-node-title">' + escapeHtml(truncate(node.title, 54)) + '</span>' +
+              '<span class="overview-node-summary">' + escapeHtml(truncate(node.subtitle, 96)) + '</span>' +
+              '<span class="overview-node-meta">' + meta.map((item) => '<span>' + escapeHtml(item) + '</span>').join("") + '</span>' +
+            '</span>' +
+          '</button>';
+        }
+
+        function overviewNodeMeta(node, graph) {
+          const raw = node.raw || {};
+          if (node.kind === "topic") {
+            const memoryCount = graph.topicMemoryCounts.get(node.id) || 0;
+            const edgeCount = graph.topicEdgeCounts.get(node.id) || 0;
+            const range = Array.isArray(raw.messageRange) ? raw.messageRange.join("-") : "unknown range";
+            return [
+              numberText(memoryCount) + " memories",
+              numberText(edgeCount) + " links",
+              "range " + range
+            ];
+          }
+
+          return [
+            raw.memoryType || "memory",
+            "confidence " + (raw.confidence == null ? "unknown" : String(raw.confidence))
+          ];
         }
 
         function renderGraphSvg(graph) {
@@ -2675,12 +2903,36 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         function renderDetailsPanel() {
           const node = resolveSelectedEntity();
           if (!node) {
+            if (state.activeTab === "graph" && state.graph) {
+              renderGraphOverviewDetails();
+              return;
+            }
             const noun = state.activeTab === "graph" ? "node in the graph" : "entity";
             elements.detailsPanel.innerHTML = '<p class="subtle">Select a ' + noun + ' to inspect its metadata.</p>';
             return;
           }
 
           renderEntityDetails(node);
+        }
+
+        function renderGraphOverviewDetails() {
+          const topics = (state.graph.nodes || []).length;
+          const memories = (state.graph.memories || []).length;
+          const topicEdges = (state.graph.edges || []).length;
+          const memoryEdges = (state.graph.memoryEdges || []).length;
+          const suppressedTopics = (state.graph.nodes || []).filter((node) => node.suppressed).length;
+          const inactiveMemories = (state.graph.memories || []).filter((memory) => memoryLifecycle(memory) !== "active").length;
+          elements.detailsPanel.innerHTML =
+            detailSection("Session overview",
+              '<dl class="metadata-grid">' +
+                detailRow("Topics", numberText(topics)) +
+                detailRow("Memories", numberText(memories)) +
+                detailRow("Topic edges", numberText(topicEdges)) +
+                detailRow("Memory edges", numberText(memoryEdges)) +
+                detailRow("Suppressed topics", numberText(suppressedTopics)) +
+                detailRow("Inactive memories", numberText(inactiveMemories)) +
+              '</dl>') +
+            detailSection("Graph mode", '<p class="subtle">Overview mode shows compact cards first. Select a topic or memory to inspect its focused neighborhood.</p>');
         }
 
         function resolveSelectedEntity() {

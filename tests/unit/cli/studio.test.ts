@@ -83,6 +83,7 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("Source metadata");
     expect(html).toContain("Relationships");
     expect(html).toContain("renderDetailsPanel");
+    expect(html).toContain("renderGraphOverviewDetails");
     expect(html).toContain("selectedEntity");
     expect(html).toContain("resolveGraphEntity");
     expect(html).toContain("autoSelectSessionId");
@@ -110,6 +111,13 @@ describe("memo-grafter studio", () => {
     expect(html).toContain("navigateGraphSearch");
     expect(html).toContain("handleGraphStageClick");
     expect(html).toContain("resetGraphSelection");
+    expect(html).toContain("renderGraphSurface");
+    expect(html).toContain("renderGraphOverview");
+    expect(html).toContain("renderOverviewNode");
+    expect(html).toContain("overviewNodeMeta");
+    expect(html).toContain('"topic-focus"');
+    expect(html).toContain('"memory-focus"');
+    expect(html).toContain('"overview"');
     expect(html).toContain("renderGraphSearchResults");
     expect(html).toContain("data-graph-search-result-id");
     expect(html).toContain("search-match");
