@@ -192,7 +192,7 @@ async function fetchText(url: string): Promise<{ status: number; body: string }>
 }
 
 function extractInlineScript(html: string): string {
-  const match = html.match(/<script>\n([\s\S]*)\n    <\/script>/);
+  const match = html.match(/<script>\n([\s\S]*)\n[ ]{4}<\/script>/);
   if (!match) throw new Error("Studio inline script was not found.");
   return match[1] ?? "";
 }
