@@ -844,6 +844,55 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         gap: 7px;
       }
 
+      .graph-navigator {
+        align-items: center;
+        border-bottom: 1px solid #e4e8f0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: space-between;
+        padding: 10px 14px;
+      }
+
+      .graph-nav-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .graph-cluster-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .graph-cluster {
+        border: 1px solid #dbe3ef;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .graph-cluster-header {
+        align-items: center;
+        background: #f8fafc;
+        border: 0;
+        border-bottom: 1px solid #dbe3ef;
+        color: #1f2a3a;
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 12px;
+        text-align: left;
+        width: 100%;
+      }
+
+      .graph-cluster-title {
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .graph-cluster-body {
+        padding: 10px;
+      }
+
       .node-card .node-surface {
         fill: #ffffff;
         filter: drop-shadow(0 8px 18px rgba(17, 24, 39, 0.08));
@@ -1186,6 +1235,21 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         <div class="filters" id="graph-filters" aria-label="Graph filters">
           <div class="field">
+            <label for="graph-view-mode">View</label>
+            <select id="graph-view-mode">
+              <option value="overview">Overview</option>
+              <option value="clusters">Clusters</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="graph-edge-mode">Edges</label>
+            <select id="graph-edge-mode">
+              <option value="focused">Focused</option>
+              <option value="hidden">Hidden</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="field">
             <label for="node-type-filter">Node type</label>
             <select id="node-type-filter">
               <option value="all">All nodes</option>
@@ -1209,7 +1273,6 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               <option value="conflicting">Conflicting memories</option>
             </select>
           </div>
-          <button class="icon-button" id="clear-filters" type="button">Clear</button>
         </div>
 
         <div class="content-grid" id="content-grid">
@@ -1260,6 +1323,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             query: "",
             activeMatchIndex: 0
           },
+          graphViewMode: "overview",
+          graphEdgeMode: "focused",
+          collapsedGraphClusters: {},
           preview: {
             query: "",
             mode: "graft",
@@ -1308,10 +1374,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           graphSummary: document.getElementById("graph-summary"),
           detailsSection: document.getElementById("details-section"),
           detailsPanel: document.getElementById("details-panel"),
+          graphViewMode: document.getElementById("graph-view-mode"),
+          graphEdgeMode: document.getElementById("graph-edge-mode"),
           nodeTypeFilter: document.getElementById("node-type-filter"),
           tagFilter: document.getElementById("tag-filter"),
-          lifecycleFilter: document.getElementById("lifecycle-filter"),
-          clearFilters: document.getElementById("clear-filters")
+          lifecycleFilter: document.getElementById("lifecycle-filter")
         };
 
         elements.databaseStatus.textContent = initialState.databaseStatus;
@@ -1332,6 +1399,14 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         elements.graphSearchInput.addEventListener("keydown", handleGraphSearchKeydown);
         elements.graphSearchClear.addEventListener("click", () => clearGraphSearch());
         elements.graphStage.addEventListener("click", handleGraphStageClick);
+        elements.graphViewMode.addEventListener("change", () => {
+          state.graphViewMode = elements.graphViewMode.value;
+          renderGraph();
+        });
+        elements.graphEdgeMode.addEventListener("change", () => {
+          state.graphEdgeMode = elements.graphEdgeMode.value;
+          renderGraph();
+        });
         elements.tabButtons.forEach((button) => {
           button.addEventListener("click", () => selectTab(button.getAttribute("data-tab")));
           button.addEventListener("keydown", (event) => handleTabKeydown(event, button));
@@ -1346,13 +1421,6 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         });
         elements.lifecycleFilter.addEventListener("change", () => {
           state.filters.lifecycle = elements.lifecycleFilter.value;
-          renderGraph();
-        });
-        elements.clearFilters.addEventListener("click", () => {
-          state.filters = { nodeType: "all", tag: "", lifecycle: "all" };
-          elements.nodeTypeFilter.value = "all";
-          elements.tagFilter.value = "";
-          elements.lifecycleFilter.value = "all";
           renderGraph();
         });
 
@@ -2500,6 +2568,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
               renderGraph();
             });
           });
+          elements.graphStage.querySelectorAll("[data-graph-nav-action]").forEach((button) => {
+            button.addEventListener("click", () => handleGraphNavigatorAction(button.getAttribute("data-graph-nav-action"), graph));
+          });
+          elements.graphStage.querySelectorAll("[data-graph-cluster-toggle]").forEach((button) => {
+            button.addEventListener("click", () => toggleGraphCluster(button.getAttribute("data-graph-cluster-toggle")));
+          });
 
           renderDetailsPanel();
         }
@@ -2556,7 +2630,10 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (state.activeTab !== "graph" || !state.graph) return;
           const target = event.target;
           if (!target || typeof target.closest !== "function") return;
-          if (target.closest("[data-graph-node-id]") || target.closest("[data-graph-search-result-id]")) return;
+          if (target.closest("[data-graph-node-id]")
+            || target.closest("[data-graph-search-result-id]")
+            || target.closest("[data-graph-nav-action]")
+            || target.closest("[data-graph-cluster-toggle]")) return;
 
           const isGraphWhitespace = target === elements.graphStage
             || target.classList.contains("graph-svg")
@@ -2696,8 +2773,34 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         }
 
         function renderGraphSurface(graph) {
-          if (graph.mode === "overview") return renderGraphOverview(graph);
-          return renderGraphSvg(graph);
+          const surface = graph.mode === "overview" ? renderGraphOverview(graph) : renderGraphSvg(graph);
+          return renderGraphNavigator(graph) + surface;
+        }
+
+        function renderGraphNavigator(graph) {
+          const selectedDisabled = state.selectedGraphNodeId ? "" : " disabled";
+          return '<div class="graph-navigator" data-graph-navigator>' +
+            '<div class="summary-strip">' +
+              '<span>' + escapeHtml(graphModeLabel(graph)) + '</span>' +
+              '<span>edges: ' + escapeHtml(state.graphEdgeMode) + '</span>' +
+              '<span>view: ' + escapeHtml(state.graphViewMode) + '</span>' +
+            '</div>' +
+            '<div class="graph-nav-actions">' +
+              '<button class="icon-button" type="button" data-graph-nav-action="overview" title="Clear graph selection and return to overview"' + selectedDisabled + '>Reset view</button>' +
+            '</div>' +
+          '</div>';
+        }
+
+        function graphModeLabel(graph) {
+          if (graph.mode === "topic-focus") return "Topic focus";
+          if (graph.mode === "memory-focus") return "Memory focus";
+          return state.graphViewMode === "clusters" ? "Cluster overview" : "Overview";
+        }
+
+        function handleGraphNavigatorAction(action) {
+          if (action === "overview") {
+            resetGraphSelection();
+          }
         }
 
         function renderGraphOverview(graph) {
@@ -2706,6 +2809,9 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const hint = graph.topicNodes.length > 0
             ? "Select a topic to inspect its memory neighborhood."
             : "Select a memory to inspect its source topic.";
+          if (state.graphViewMode === "clusters" && graph.topicNodes.length > 0) {
+            return renderGraphClusters(graph, title, hint);
+          }
           return '<div class="graph-overview" data-graph-overview>' +
             '<div class="graph-overview-header">' +
               '<span class="graph-overview-title">' + title + '</span>' +
@@ -2713,6 +2819,58 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             '</div>' +
             '<div class="graph-overview-grid">' + nodes.map((node) => renderOverviewNode(node, graph)).join("") + '</div>' +
           '</div>';
+        }
+
+        function renderGraphClusters(graph, title, hint) {
+          const clusters = graphClusters(graph);
+          return '<div class="graph-overview" data-graph-overview>' +
+            '<div class="graph-overview-header">' +
+              '<span class="graph-overview-title">' + title + '</span>' +
+              '<span class="subtle">' + hint + '</span>' +
+            '</div>' +
+            '<div class="graph-cluster-list">' + clusters.map((cluster) => renderGraphCluster(cluster, graph)).join("") + '</div>' +
+          '</div>';
+        }
+
+        function graphClusters(graph) {
+          const clustersByKey = new Map();
+          graph.topicNodes.forEach((node) => {
+            const key = graphClusterKey(node);
+            const cluster = clustersByKey.get(key) || { key, label: key, nodes: [], memories: 0, suppressed: 0 };
+            cluster.nodes.push(node);
+            cluster.memories += graph.topicMemoryCounts.get(node.id) || 0;
+            if (node.lifecycle === "suppressed") cluster.suppressed += 1;
+            clustersByKey.set(key, cluster);
+          });
+          return Array.from(clustersByKey.values()).sort((left, right) => right.nodes.length - left.nodes.length || left.label.localeCompare(right.label));
+        }
+
+        function graphClusterKey(node) {
+          const tags = Array.isArray(node.tags) ? node.tags.filter(Boolean) : [];
+          if (tags.length > 0) return tags[0];
+          if (node.lifecycle) return node.lifecycle;
+          return "Untagged";
+        }
+
+        function renderGraphCluster(cluster, graph) {
+          const collapsed = Boolean(state.collapsedGraphClusters[cluster.key]);
+          return '<section class="graph-cluster">' +
+            '<button class="graph-cluster-header" type="button" data-graph-cluster-toggle="' + escapeAttribute(cluster.key) + '" aria-expanded="' + String(!collapsed) + '">' +
+              '<span class="graph-cluster-title">' + escapeHtml(cluster.label) + '</span>' +
+              '<span class="summary-strip">' +
+                '<span>' + numberText(cluster.nodes.length) + ' topics</span>' +
+                '<span>' + numberText(cluster.memories) + ' memories</span>' +
+                '<span>' + numberText(cluster.suppressed) + ' suppressed</span>' +
+              '</span>' +
+            '</button>' +
+            (collapsed ? "" : '<div class="graph-cluster-body"><div class="graph-overview-grid">' + cluster.nodes.map((node) => renderOverviewNode(node, graph)).join("") + '</div></div>') +
+          '</section>';
+        }
+
+        function toggleGraphCluster(key) {
+          if (!key) return;
+          state.collapsedGraphClusters[key] = !state.collapsedGraphClusters[key];
+          renderGraph();
         }
 
         function renderOverviewNode(node, graph) {
@@ -2780,9 +2938,11 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           const width = 920;
           const activeId = state.hoveredGraphNodeId || state.selectedGraphNodeId;
           const connectedIds = connectedNodeIds(graph, activeId);
+          const topicEdges = graphEdgesForMode(graph.topicEdges, activeId, (edge) => [edge.srcId, edge.dstId]);
+          const memoryEdges = graphEdgesForMode(graph.memoryEdges, activeId, (edge) => [edge.sourceId, edge.targetId]);
           const edgeMarkup = renderGraphMarkers() +
-            graph.topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
-            .concat(graph.memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
+            topicEdges.map((edge) => renderCurve(edge.srcId, edge.dstId, positions, nodeWidth, nodeHeight, edge.attachment ? "attachment" : "topic", activeId))
+            .concat(memoryEdges.map((edge) => renderCurve(edge.sourceId, edge.targetId, positions, nodeWidth, nodeHeight, "memory", activeId)))
             .join("");
           const nodeMarkup = graph.nodes.map((node) => renderNode(node, positions.get(node.id), nodeWidth, nodeHeight, activeId, connectedIds, graph)).join("");
 
@@ -2790,6 +2950,12 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             edgeMarkup +
             nodeMarkup +
           '</svg>';
+        }
+
+        function graphEdgesForMode(edges, activeId, idsForEdge) {
+          if (state.graphEdgeMode === "hidden") return [];
+          if (state.graphEdgeMode === "all" || !activeId) return edges;
+          return edges.filter((edge) => idsForEdge(edge).includes(activeId));
         }
 
         function renderGraphMarkers() {
