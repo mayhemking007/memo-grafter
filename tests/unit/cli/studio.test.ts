@@ -26,6 +26,7 @@ describe("memo-grafter studio", () => {
       expect(html.body).toContain("session-search");
       expect(html.body).toContain("title-editor");
       expect(html.body).toContain("title-button");
+      expect(html.body).toContain("theme-toggle");
       expect(html.body).toContain("graph-stage");
       expect(html.body).toContain("tab-graph");
       expect(html.body).toContain("tab-tables");
@@ -83,6 +84,12 @@ describe("memo-grafter studio", () => {
     const inlineScript = extractInlineScript(html);
 
     expect(() => new Function(inlineScript)).not.toThrow();
+    expect(html).toContain("--surface");
+    expect(html).toContain('--surface-code');
+    expect(html).toContain(':root[data-theme="dark"]');
+    expect(html).toContain("loadTheme");
+    expect(html).toContain("applyTheme");
+    expect(html).toContain("memo-grafter-studio-theme");
     expect(html).toContain("Connected memories");
     expect(html).toContain("Source metadata");
     expect(html).toContain("Relationships");

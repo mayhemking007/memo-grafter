@@ -22,8 +22,66 @@ export function renderStudioHtml(state: StudioFrontendState): string {
       :root {
         color-scheme: light;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f6f8fb;
-        color: #17202d;
+        --bg: #f5f7fb;
+        --surface: #ffffff;
+        --surface-muted: #f8fafc;
+        --surface-raised: #ffffff;
+        --surface-code: #111827;
+        --text: #17202d;
+        --text-strong: #111827;
+        --text-muted: #607086;
+        --text-subtle: #75849a;
+        --border: #d8dee9;
+        --border-muted: #e4e8f0;
+        --accent: #315f9f;
+        --accent-strong: #1d4ed8;
+        --accent-soft: #eef6ff;
+        --success: #16714a;
+        --success-soft: #edf8f1;
+        --warning: #9a5b12;
+        --warning-soft: #fff7ed;
+        --danger: #a52f2a;
+        --danger-soft: #fff1f0;
+        --topic-surface: #f0fdfa;
+        --topic-border: #99d8cf;
+        --memory-surface: #fff7ed;
+        --memory-border: #f2c38b;
+        --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.05);
+        --shadow-md: 0 10px 24px rgba(17, 24, 39, 0.08);
+        --focus-ring: rgba(61, 111, 182, 0.28);
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --surface: #111827;
+        --surface-muted: #162033;
+        --surface-raised: #172033;
+        --surface-code: #070b12;
+        --text: #dbe6f3;
+        --text-strong: #f8fafc;
+        --text-muted: #9aa8bb;
+        --text-subtle: #7f8da3;
+        --border: #2a3547;
+        --border-muted: #243044;
+        --accent: #7aa7e8;
+        --accent-strong: #93c5fd;
+        --accent-soft: #12223a;
+        --success: #4ade80;
+        --success-soft: #10251b;
+        --warning: #fbbf24;
+        --warning-soft: #2a1e0d;
+        --danger: #f87171;
+        --danger-soft: #2a1214;
+        --topic-surface: #092523;
+        --topic-border: #1f6f67;
+        --memory-surface: #291b0d;
+        --memory-border: #8a5b1f;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+        --shadow-md: 0 16px 36px rgba(0, 0, 0, 0.36);
+        --focus-ring: rgba(147, 197, 253, 0.35);
       }
 
       * {
@@ -233,15 +291,20 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       .main {
         min-width: 0;
-        padding: 22px;
+        padding: 18px 22px 22px;
       }
 
       .topbar {
         align-items: flex-start;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
         display: flex;
         justify-content: space-between;
         gap: 18px;
         margin-bottom: 18px;
+        padding: 14px;
       }
 
       .topbar-actions {
@@ -317,7 +380,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         align-items: end;
         display: grid;
         gap: 12px;
-        grid-template-columns: repeat(3, minmax(130px, 1fr)) auto;
+        grid-template-columns: repeat(5, minmax(130px, 1fr));
         margin-bottom: 16px;
       }
 
@@ -368,23 +431,27 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
       .workspace-tabs {
         align-items: center;
-        border-bottom: 1px solid #d8dee9;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
         display: flex;
         gap: 4px;
         margin-bottom: 16px;
+        padding: 4px;
       }
 
       .tab-button {
         background: transparent;
         border: 0;
-        border-bottom: 3px solid transparent;
+        border-radius: 6px;
         color: #55657b;
         font-weight: 750;
-        padding: 10px 12px;
+        min-height: 34px;
+        padding: 7px 12px;
       }
 
       .tab-button[aria-selected="true"] {
-        border-bottom-color: #3d6fb6;
+        background: var(--accent-soft);
         color: #1f2a3a;
       }
 
@@ -1138,6 +1205,248 @@ export function renderStudioHtml(state: StudioFrontendState): string {
         gap: 8px;
       }
 
+      /* Studio visual system */
+      body {
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .sidebar,
+      .panel,
+      .session-button,
+      .graph-search-result,
+      .icon-button,
+      .primary-button,
+      .field input,
+      .field select,
+      .field textarea,
+      .title-input {
+        background: var(--surface);
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      .main {
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--surface-muted) 80%, transparent), transparent 320px),
+          var(--bg);
+      }
+
+      .sidebar-header,
+      .workspace-tabs,
+      .panel-header,
+      .graph-search-results,
+      .graph-navigator,
+      .detail-section + .detail-section,
+      .preview-result-header,
+      .data-table-heading,
+      .graph-cluster-header {
+        border-color: var(--border-muted);
+      }
+
+      .sidebar,
+      .panel,
+      .data-table-section,
+      .preview-result,
+      .graph-cluster,
+      .workspace-tabs,
+      .topbar {
+        box-shadow: var(--shadow-sm);
+      }
+
+      .brand,
+      .title-button,
+      .panel-title,
+      .graph-overview-title,
+      .detail-value,
+      .overview-node-title,
+      .tab-button[aria-selected="true"] {
+        color: var(--text-strong);
+      }
+
+      .studio-url,
+      .subtle,
+      .session-meta,
+      .session-secondary,
+      .graph-search-count,
+      .summary-strip,
+      .overview-node-meta,
+      .overview-node-kind,
+      .overview-node-summary,
+      .detail-label,
+      .title-status,
+      .table-empty,
+      .empty-state,
+      .loading-state {
+        color: var(--text-muted);
+      }
+
+      .title-button:not(:disabled):hover,
+      .icon-button:hover,
+      .primary-button:hover,
+      .tab-button:hover,
+      .session-button:hover,
+      .db-cell:hover,
+      .data-table tr:hover td {
+        background: var(--surface-muted);
+        border-color: var(--accent);
+      }
+
+      .primary-button,
+      .session-button[aria-current="true"],
+      .tab-button[aria-selected="true"] {
+        border-color: var(--accent);
+      }
+
+      .session-button[aria-current="true"] {
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+
+      .tab-button[aria-selected="true"] {
+        border-bottom-color: var(--accent);
+      }
+
+      .badge {
+        background: var(--surface-muted);
+        border-color: var(--border);
+        color: var(--text-muted);
+      }
+
+      .status-pill {
+        background: var(--success-soft);
+        border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+        color: var(--success);
+      }
+
+      .field label,
+      .detail-section-title,
+      .db-table th,
+      .data-table th {
+        color: var(--text-muted);
+      }
+
+      .session-list {
+        padding-top: 2px;
+      }
+
+      .session-button {
+        min-height: 86px;
+      }
+
+      .table-browser,
+      .preview-workspace,
+      .details {
+        background: var(--surface);
+      }
+
+      .db-table th,
+      .data-table th,
+      .data-table-heading,
+      .preview-result-header,
+      .graph-cluster-header {
+        background: var(--surface-muted);
+      }
+
+      .db-table td,
+      .db-table th,
+      .data-table td,
+      .data-table th {
+        border-color: var(--border-muted);
+      }
+
+      .db-table tbody tr:nth-child(even) td,
+      .data-table tbody tr:nth-child(even) td {
+        background: color-mix(in srgb, var(--surface-muted) 44%, transparent);
+      }
+
+      .db-cell.selected,
+      .db-cell:focus-visible,
+      .data-table tr.selected td,
+      .data-table tr:focus-visible td {
+        background: var(--accent-soft);
+        box-shadow: inset 0 0 0 2px var(--accent);
+      }
+
+      .overview-node,
+      .node-card .node-surface {
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .overview-node.topic,
+      .node-card.topic .node-surface {
+        background: var(--topic-surface);
+        border-color: var(--topic-border);
+        fill: var(--topic-surface);
+        stroke: var(--topic-border);
+      }
+
+      .overview-node.memory,
+      .node-card.memory .node-surface {
+        background: var(--memory-surface);
+        border-color: var(--memory-border);
+        fill: var(--memory-surface);
+        stroke: var(--memory-border);
+      }
+
+      .node-card .node-surface {
+        fill: var(--surface);
+        stroke: var(--border);
+      }
+
+      .node-card text {
+        fill: var(--text);
+      }
+
+      .node-card .node-kind,
+      .node-card .node-meta {
+        fill: var(--text-muted);
+      }
+
+      .overview-node:hover,
+      .overview-node.selected,
+      .overview-node.hovered,
+      .node-card.selected .node-surface,
+      .node-card.hovered .node-surface {
+        border-color: var(--accent-strong);
+        stroke: var(--accent-strong);
+      }
+
+      .prompt-preview-output {
+        background: var(--surface-code);
+        color: #f8fafc;
+        border-top: 1px solid var(--border-muted);
+      }
+
+      .preview-form textarea {
+        line-height: 1.45;
+      }
+
+      .danger-button {
+        background: var(--danger-soft);
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .action-status.success {
+        background: var(--success-soft);
+        border-color: var(--success);
+        color: var(--success);
+      }
+
+      .action-status.error,
+      .error-state {
+        background: var(--danger-soft);
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .token-meter.warning {
+        background: var(--warning-soft);
+        border-color: var(--warning);
+        color: var(--warning);
+      }
+
       .hidden {
         display: none;
       }
@@ -1214,6 +1523,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
             <p class="subtle" id="page-subtitle">Graph data loads only after you choose a session.</p>
           </div>
           <div class="topbar-actions">
+            <button class="icon-button" id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
             <button class="primary-button" id="refresh-graph" type="button" disabled>Refresh graph</button>
           </div>
         </div>
@@ -1359,6 +1669,7 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           sessionSearch: document.getElementById("session-search"),
           refreshSessions: document.getElementById("refresh-sessions"),
           refreshGraph: document.getElementById("refresh-graph"),
+          themeToggle: document.getElementById("theme-toggle"),
           titleEditor: document.getElementById("title-editor"),
           pageTitle: document.getElementById("page-title"),
           pageSubtitle: document.getElementById("page-subtitle"),
@@ -1383,8 +1694,18 @@ export function renderStudioHtml(state: StudioFrontendState): string {
 
         elements.databaseStatus.textContent = initialState.databaseStatus;
         elements.studioUrl.textContent = initialState.studioUrl;
+        applyTheme(loadTheme());
 
         elements.refreshSessions.addEventListener("click", () => loadSessions());
+        elements.themeToggle.addEventListener("click", () => {
+          const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(nextTheme);
+          try {
+            window.localStorage.setItem("memo-grafter-studio-theme", nextTheme);
+          } catch {
+            return;
+          }
+        });
         elements.sessionSearch.addEventListener("input", () => {
           state.sessionSearchQuery = elements.sessionSearch.value.trim().toLowerCase();
           renderSessions();
@@ -1543,6 +1864,24 @@ export function renderStudioHtml(state: StudioFrontendState): string {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           callback();
+        }
+
+        function loadTheme() {
+          try {
+            const storedTheme = window.localStorage.getItem("memo-grafter-studio-theme");
+            if (storedTheme === "dark" || storedTheme === "light") return storedTheme;
+          } catch {
+            return "light";
+          }
+
+          return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+
+        function applyTheme(theme) {
+          const normalizedTheme = theme === "dark" ? "dark" : "light";
+          document.documentElement.dataset.theme = normalizedTheme;
+          elements.themeToggle.textContent = normalizedTheme === "dark" ? "Light mode" : "Dark mode";
+          elements.themeToggle.setAttribute("aria-pressed", String(normalizedTheme === "dark"));
         }
 
         function refreshActiveTab() {
