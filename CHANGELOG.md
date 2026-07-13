@@ -141,3 +141,15 @@ All notable changes to this project will be documented here.
 ### Internal
 
 - Refactored Studio infrastructure for future developer tooling.
+
+## [0.4.1] - 2026-06-28
+
+### Added
+
+- Added session labels and search to MemoGrafter Studio for improved workspace organization.
+- Added graph search with result navigation for locating memories and topics within large session graphs.
+
+### Changed
+
+- Enhanced Studio graph visualization with advanced navigation, interaction, and graph exploration capabilities.
+- Applied a unified visual design system across MemoGrafter Studio for a more consistent and polished user experience.
