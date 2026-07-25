@@ -100,11 +100,13 @@ npx memo-grafter studio --db postgres://postgres:postgres@localhost:5432/memo_gr
 
 Studio verifies the MemoGrafter schema, prints database connection status, session count, and the local URL, then opens your browser. It starts on `http://localhost:2891` or the next available port and keeps running until you stop it with `Ctrl+C`.
 
+Studio's database and inspection features do not require the OpenAI, Anthropic, or Gemini SDKs. The CLI loads provider-independent `memo-grafter/store` and `memo-grafter/studio` entry points. Install a provider SDK only when your application or Studio Prompt Preview explicitly uses that provider's adapter.
+
 The Studio landing page shows sessions first. Select a session to open its workspace:
 
 - **Graph:** shows topic nodes as the stable graph backbone. Memories are shown only for the selected topic, which keeps large sessions readable. Use node type, tag, and lifecycle filters to narrow the graph. Selecting a topic shows its summary, source metadata, lifecycle state, and connected memories. Selecting a memory shows its structured fact fields, confidence, lifecycle flags, source metadata, and related, conflict, or update edges.
 - **Tables:** provides a read-only browser for the underlying `mg_*` tables using their original table names. Use the table selector and pagination controls to inspect rows; long cell values can be expanded in place.
-- **Prompt Preview:** runs a read-only graft or recall query simulation for the selected session. It displays the exact generated system prompt and token usage. Prompt Preview requires an embedder in `mg.config.ts`; the generated OpenAI scaffold works when `OPENAI_API_KEY` is available.
+- **Prompt Preview:** runs a read-only graft or recall query simulation for the selected session. It displays the exact generated system prompt and token usage. Prompt Preview requires an embedder in `mg.config.ts`; the generated OpenAI-compatible scaffold uses `fetch` and works when `OPENAI_API_KEY` is available, without requiring the `openai` package. When no embedder is configured, only Prompt Preview is unavailable.
 
 The node details panel also provides the supported maintenance action: suppressing a topic. Studio refreshes the selected graph after a successful suppression and keeps the affected node selected so its new lifecycle state is visible. Use the refresh controls to reload the session list or active tab after your application writes more memory.
 
