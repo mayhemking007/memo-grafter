@@ -289,8 +289,17 @@ async function closeServer(server: http.Server): Promise<void> {
 }
 
 async function loadMemoGrafterModule(): Promise<MemoGrafterModule> {
-  const packageName = "memo-grafter";
-  return await import(packageName) as MemoGrafterModule;
+  const storeEntryPoint = "memo-grafter/store";
+  const studioEntryPoint = "memo-grafter/studio";
+  const [storeModule, studioModule] = await Promise.all([
+    import(storeEntryPoint),
+    import(studioEntryPoint),
+  ]);
+
+  return {
+    PostgresGraphStore: storeModule.PostgresGraphStore,
+    createStudioPreviewService: studioModule.createStudioPreviewService,
+  } as MemoGrafterModule;
 }
 
 function isAddressInUseError(error: unknown): boolean {

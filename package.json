@@ -30,6 +30,11 @@
       "types": "./dist/store/index.d.ts",
       "import": "./dist/store/index.js",
       "default": "./dist/store/index.js"
+    },
+    "./studio": {
+      "types": "./dist/studio/index.d.ts",
+      "import": "./dist/studio/index.js",
+      "default": "./dist/studio/index.js"
     }
   },
   "files": [
