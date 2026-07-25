@@ -86,7 +86,26 @@ try {
     migrationOutput,
   );
 
-  process.stdout.write("storage-only package entrypoint smoke test passed\n");
+  const studio = spawnSync(
+    process.execPath,
+    [
+      memoGrafterCli,
+      "studio",
+      "--db",
+      "postgres://postgres:postgres@127.0.0.1:1/memo_grafter?connect_timeout=1",
+    ],
+    { cwd: fixtureRoot, encoding: "utf8" },
+  );
+  const studioOutput = `${studio.stdout ?? ""}\n${studio.stderr ?? ""}`;
+  assert.notEqual(studio.status, 0, "Studio against a closed port should fail");
+  assert.doesNotMatch(
+    studioOutput,
+    /ERR_MODULE_NOT_FOUND|@anthropic-ai\/sdk|@google\/genai|Cannot find package ['"]openai/,
+    studioOutput,
+  );
+
+  process.stdout.write("provider-independent CLI package smoke test passed\n");
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
+  // process.stdout.write(`Fixture retained at: ${fixtureRoot}\n`);
 }
