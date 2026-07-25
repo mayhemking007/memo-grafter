@@ -45,6 +45,9 @@ npx memo-grafter studio
 
 MemoGrafter runs server-side on Node.js. The built-in storage backend uses PostgreSQL with `pgvector`.
 
+The CLI migration command loads the storage-only `memo-grafter/store` entry point.
+Provider SDKs remain optional and are not required to initialize or migrate a database.
+
 `init` is the required project setup step. It creates MemoGrafter-owned project files under `src/memo-grafter/` (`mg-schema.ts` and `mg.config.ts`) without touching your database or creating an application schema entrypoint. `migrate` is the preferred database setup step; it creates or updates MemoGrafter-owned `mg_*` tables and should run once per database or deployment, not during normal app startup. `studio` starts a local MemoGrafter Studio host with session browsing, a focused graph view, read-only table inspection, and Prompt Preview backed by an internal DB API. Application tables and schema files remain wherever your existing tool, such as Prisma, Drizzle, or SQL migrations, expects them.
 
 Studio resolves its database connection the same way as migration:
