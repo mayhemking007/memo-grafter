@@ -9,3 +9,4 @@ tsconfig.tsbuildinfo
 .npm-pack-cache
 internals.md
 knowledge/
+API_REFERENCE.md
