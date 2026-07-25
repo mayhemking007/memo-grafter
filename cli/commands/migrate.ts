@@ -47,8 +47,8 @@ export async function runMigrate(options: MigrateOptions = {}): Promise<void> {
 }
 
 async function loadMemoGrafterModule(): Promise<MemoGrafterModule> {
-  const packageName = "memo-grafter";
-  return await import(packageName) as MemoGrafterModule;
+  const storeEntryPoint = "memo-grafter/store";
+  return await import(storeEntryPoint) as MemoGrafterModule;
 }
 
 function printGroup(title: string, items: Array<{ name: string; status: string }>): void {

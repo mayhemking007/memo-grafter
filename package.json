@@ -25,6 +25,11 @@
       "types": "./dist/schema/index.d.ts",
       "import": "./dist/schema/index.js",
       "default": "./dist/schema/index.js"
+    },
+    "./store": {
+      "types": "./dist/store/index.d.ts",
+      "import": "./dist/store/index.js",
+      "default": "./dist/store/index.js"
     }
   },
   "files": [
@@ -41,6 +46,7 @@
     "prepublishOnly": "npm run build",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:package": "npm run build && node tests/package/storage-entrypoint-smoke.mjs",
     "test:watch": "vitest --watch",
     "test:core": "tsx --env-file=.env tests/core/run.ts",
     "test:fleet": "tsx --env-file=.env tests/fleet/run.ts"
