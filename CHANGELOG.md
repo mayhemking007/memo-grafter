@@ -153,3 +153,20 @@ All notable changes to this project will be documented here.
 
 - Enhanced Studio graph visualization with advanced navigation, interaction, and graph exploration capabilities.
 - Applied a unified visual design system across MemoGrafter Studio for a more consistent and polished user experience.
+
+## [0.4.2] - 2026-07-26
+
+### Added
+
+- Added provider-independent `memo-grafter/studio` entry point for Studio services.
+- Added graceful fallback for Prompt Preview when no embedding provider is configured, while keeping all other Studio features available.
+
+### Changed
+
+- Updated the Studio CLI to use the new `memo-grafter/studio` and `memo-grafter/store` entry points instead of importing the package root.
+- Isolated Studio from provider adapters so Studio can run without installing optional OpenAI, Anthropic, or Gemini SDKs.
+
+### Internal
+
+- Added packaged-install regression tests for `memo-grafter migrate` and `memo-grafter studio`.
+- Added focused tests for the new Studio entry point and unavailable Prompt Preview behavior.
