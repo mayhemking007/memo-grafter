@@ -40,8 +40,12 @@ describe("memo-grafter init", () => {
     expect(mgConfig).toContain("OPENAI_API_KEY");
     expect(mgConfig).toContain("https://api.openai.com/v1/embeddings");
     expect(mgConfig).toContain("text-embedding-3-small");
-    expect(envExample).toContain("DATABASE_URL=");
+    expect(envExample).toContain(
+      "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
+    );
     expect(envExample).toContain("OPENAI_API_KEY=");
     expect(envExample).toContain("MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small");
+    expect(envExample).toContain("# Example: REDIS_URL=redis://localhost:6379");
+    expect(envExample).toMatch(/^REDIS_URL=$/m);
   });
 });
