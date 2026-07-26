@@ -39,6 +39,7 @@
   },
   "files": [
     "dist",
+    "assets",
     ".env.example",
     "README.md",
     "USER_GUIDE.md",

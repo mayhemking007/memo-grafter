@@ -1,40 +1,67 @@
-# MemoGrafter
-[![npm version](https://img.shields.io/npm/v/memo-grafter.svg)](https://www.npmjs.com/package/memo-grafter)
+<p align="center">
+  <img src="./assets/memografter-logo.png" alt="MemoGrafter logo" width="180" />
+</p>
 
-Structured memory for TypeScript chatbots.
+<h1 align="center">MemoGrafter</h1>
 
-MemoGrafter helps chatbot applications remember conversations without stuffing every old message back into the prompt. It turns conversation history into topic-based memory, recalls relevant details later, and can copy useful memory from one chatbot or session into another.
+<p align="center">
+  Lifecycle-managed memory for TypeScript AI agents.
+</p>
 
-It is a memory framework, not an autonomous agent runtime. It does not run tools, schedule work, or decide goals for an agent.
+<p align="center">
+  <a href="https://www.npmjs.com/package/memo-grafter"><img src="https://img.shields.io/npm/v/memo-grafter.svg" alt="npm version" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg" alt="Node.js 18 or newer" />
+</p>
 
-MemoGrafter builds the memory graph incrementally. New chatbot turns append topic and memory nodes to the existing graph instead of clearing and rebuilding the session on every response, so grafted and externally enriched memory can survive later conversation turns. Use `clearSession()` explicitly when you want to reset an agent's local history and stored session memory.
+<p align="center">
+  <a href="https://memografter.com">Website</a>
+  ·
+  <a href="https://memografter.com/docs">Docs</a>
+  ·
+  <a href="https://mgplayground-green.vercel.app/">Playground</a>
+  ·
+  <a href="./USER_GUIDE.md">User Guide</a>
+</p>
 
-## Playground
+MemoGrafter gives AI agents structured memory that can evolve, be inspected, and be recalled safely across conversations. It turns chat history and raw text into topic-based graph memory, retrieves relevant facts later, and can graft useful memory from one session or agent into another.
 
-- Try the [MemoGrafter Playground](https://mgplayground-green.vercel.app/).
-- View the playground demo repo at [mayhemking007/mg-demo](https://github.com/mayhemking007/mg-demo).
+MemoGrafter is memory infrastructure, not an autonomous agent runtime. It does not run tools, schedule work, or decide goals for an agent. It helps your application remember, retrieve, maintain, and transfer context.
 
-## What It Is For
+## Website And Docs
 
-- Chatbots that need long-running memory.
-- Editors, document imports, and transcripts that need memory without assistant responses.
-- Assistants that should recall user preferences, prior context, and open questions.
-- Multi-chatbot or multi-session flows where selected memory can be grafted into another conversation.
-- TypeScript apps that need reusable memory, retrieval, and graph-backed conversation primitives.
+- Website: [memografter.com](https://memografter.com)
+- Docs: [memografter.com/docs](https://memografter.com/docs)
+- Playground: [MemoGrafter Playground](https://mgplayground-green.vercel.app/)
+- Playground demo repo: [mayhemking007/mg-demo](https://github.com/mayhemking007/mg-demo)
+
+## Why MemoGrafter?
+
+- Build long-running memory for TypeScript chatbots and AI agents.
+- Store conversation history as topic nodes, memory nodes, and graph edges.
+- Recall relevant facts without stuffing every old message back into the prompt.
+- Track lifecycle state such as forgotten, suppressed, conflicted, superseded, and decayed memory.
+- Graft selected memory between sessions, workers, or agents.
+- Inspect sessions locally with MemoGrafter Studio.
+- Use PostgreSQL and `pgvector` for durable graph-backed memory.
 
 ## How It Works
 
 ```text
-chat messages
-  -> topic-based memory
-  -> graph links
-  -> relevant recall
-  -> optional memory grafting
+conversation or text
+  -> topic segments
+  -> topic nodes
+  -> atomic memory facts
+  -> lifecycle metadata
+  -> recall or grafting
+  -> prompt-ready context
 ```
 
-MemoGrafter stores conversation turns, tracks which messages have already been ingested, detects topic changes for new turns with recent context, summarizes useful context, links related memories, and retrieves or grafts memory when needed.
+MemoGrafter stores conversation turns, tracks which messages have already been ingested, detects topic changes, extracts structured memory, links related memories, and retrieves or grafts context when needed.
 
-## Install
+Memory is built incrementally. New chatbot turns append topic and memory nodes to the existing graph instead of clearing and rebuilding the session on every response. Grafted and externally enriched memory can survive later conversation turns. Use `clearSession()` explicitly when you want to reset an agent's local history and stored session memory.
+
+## Quick Start
 
 ```bash
 npm install memo-grafter
@@ -43,25 +70,26 @@ npx memo-grafter migrate
 npx memo-grafter studio
 ```
 
-MemoGrafter runs server-side on Node.js. The built-in storage backend uses PostgreSQL with `pgvector`.
+MemoGrafter runs server-side on Node.js 18 or newer. The built-in storage backend uses PostgreSQL with `pgvector`.
 
-The CLI migration command loads the storage-only `memo-grafter/store` entry point.
-Provider SDKs remain optional and are not required to initialize or migrate a database.
-Studio also uses provider-independent `memo-grafter/store` and `memo-grafter/studio`
-entry points. Database browsing works without a provider SDK; Prompt Preview requires
-a configured embedder.
+The CLI migration and Studio commands use provider-independent entry points. Database setup and browsing do not require an LLM provider SDK. Prompt Preview and runtime memory extraction require the adapters you configure.
 
-`init` is the required project setup step. It creates MemoGrafter-owned project files under `src/memo-grafter/` (`mg-schema.ts` and `mg.config.ts`) without touching your database or creating an application schema entrypoint. `migrate` is the preferred database setup step; it creates or updates MemoGrafter-owned `mg_*` tables and should run once per database or deployment, not during normal app startup. `studio` starts a local MemoGrafter Studio host with session browsing, a focused graph view, read-only table inspection, and Prompt Preview backed by an internal DB API. Application tables and schema files remain wherever your existing tool, such as Prisma, Drizzle, or SQL migrations, expects them.
+`init` creates MemoGrafter-owned project files under `src/memo-grafter/`:
 
-Studio resolves its database connection the same way as migration:
+- `mg-schema.ts`: generated reference for MemoGrafter-owned `mg_*` tables.
+- `mg.config.ts`: user-editable CLI and Studio config.
+
+`migrate` creates or updates MemoGrafter-owned database infrastructure. Run it once per database or deployment, not during normal app startup.
+
+`studio` starts a local MemoGrafter Studio host for session browsing, graph inspection, read-only table browsing, and Prompt Preview.
+
+To pass a database URL directly:
 
 ```bash
 npx memo-grafter studio --db postgres://user:password@localhost:5432/memo_grafter
 ```
 
-If `--db` is omitted, Studio reads `.env` / `DATABASE_URL`, then `mg.config.ts`. It starts on `http://localhost:2891` or the next available port and keeps running until you stop the process. Prompt Preview uses the embedder from `mg.config.ts`; the generated config includes an OpenAI-compatible scaffold that activates when `OPENAI_API_KEY` is set, with `MEMO_GRAFTER_EMBEDDING_MODEL` defaulting to `text-embedding-3-small`.
-
-For advanced deploy, CI, or test tooling where the CLI cannot run, `PostgresGraphStore.migrate()` remains available as a manual fallback. Prefer `npx memo-grafter migrate` for normal projects so migrations do not run every time your application starts.
+If `--db` is omitted, Studio reads `.env` / `DATABASE_URL`, then `mg.config.ts`. It starts on `http://localhost:2891` or the next available port and keeps running until you stop the process.
 
 ## Minimal Example
 
@@ -82,12 +110,8 @@ const agent = new MemoGrafterAgent({
 
 await agent.initialize();
 
-await agent.invoke("I am planning a Japan trip.");
-await agent.invoke("I like quiet towns, bookstores, and local cafes.");
-
-await agent.ingestText("The product roadmap now prioritizes document imports.", {
-  source: "import",
-});
+await agent.invoke("I am planning a Kyoto trip.");
+await agent.invoke("I like quiet streets, bookstores, and local cafes.");
 
 await agent.remember("The user prefers concise TypeScript examples.");
 
@@ -97,10 +121,72 @@ console.log(recall.facts);
 await agent.close();
 ```
 
+## Core Concepts
+
+- **Messages:** raw user, assistant, or system turns.
+- **Segments:** ranges of messages that belong to the same topic.
+- **Topic nodes:** graph-level summaries of conversation segments.
+- **Memory nodes:** atomic facts, insights, questions, tasks, or references attached to topics.
+- **Recall:** semantic retrieval of relevant memory facts for a query or chatbot turn.
+- **Grafting:** copying selected memory from one session or agent into another.
+- **Lifecycle controls:** soft memory state such as forgetting memories or suppressing topics without physically deleting graph rows.
+
+## MemoGrafter Studio
+
+MemoGrafter Studio is a local visibility and debugging tool for your memory graph.
+
+```bash
+npx memo-grafter studio
+```
+
+Studio lets you:
+
+- browse sessions;
+- inspect topic and memory graphs;
+- view lifecycle state and graft provenance;
+- browse underlying `mg_*` tables in read-only mode;
+- preview the exact recall or graft prompt context sent to a model;
+- suppress topics during local inspection.
+
+Studio is local development tooling. Do not bind it to a public interface or proxy it as an application API.
+
+## Memory Lifecycle
+
+Applications can control active memory without losing provenance:
+
+- `forget(memoryId)` hides an individual memory from active recall and grafting.
+- `forgetMany(memoryIds)` hides multiple memories.
+- `suppressTopic(topicId)` hides a topic from active reads, recall, grafting, absorption, and maintenance.
+- `restoreTopic(topicId)` makes a suppressed topic active again.
+- `getMemoryHistory(...)` and `getMemoryDiff(...)` help inspect how facts changed over time.
+
+Optional crawler passes can annotate memory quality:
+
+- `ConflictDetectionPass` marks contradictory active facts.
+- `VersioningPass` marks explicit updates and superseded facts.
+- `DecayScoringPass` marks stale active facts as decayed.
+
+## Text And Document Ingestion
+
+Use `ingestText()` for notes, documents, transcripts, editor content, or other non-chat text:
+
+```ts
+await agent.ingestText("The product roadmap now prioritizes document imports.", {
+  source: "import",
+});
+```
+
+Use `remember()` for explicit facts:
+
+```ts
+await agent.remember("The user prefers short examples with complete imports.");
+```
+
+Both paths reuse the same topic detection, extraction, embedding, and graph storage pipeline as conversation ingestion.
+
 ## Shared Fleet Memory
 
-Fleets can store common knowledge once and make it available to workers without
-copying it into each worker session.
+Fleets can store common knowledge once and make it available to workers without copying it into each worker session.
 
 ```ts
 const fleet = new MemoGrafterFleet(config, {
@@ -117,12 +203,34 @@ const recall = await support.recall("refund policy", { memory: "both" });
 console.log(recall.facts);
 ```
 
+## Requirements
+
+- Node.js 18 or newer.
+- TypeScript or modern JavaScript using ES modules.
+- PostgreSQL with the `pgvector` extension enabled for the built-in store.
+- An LLM adapter.
+- An embedding adapter.
+- OpenAI, Anthropic, or Gemini API keys only when using the included adapters for those providers.
+- Redis only when enabling queue mode or the optional recall cache.
+
+MemoGrafter is server-side only. Do not run it in browser code.
+
+## Production Notes
+
+- Run `npx memo-grafter init` and `npx memo-grafter migrate` outside request handling.
+- Prefer `npx memo-grafter migrate` for normal projects.
+- Use `PostgresGraphStore.migrate()` only for advanced deploy, CI, or constrained runtime tooling.
+- Keep Studio local; it is not a hosted multi-user admin API.
+- Configure only the provider SDKs and API keys your app actually uses.
+
 ## Learn More
 
-- [USER_GUIDE.md](https://github.com/mayhemking007/memo-grafter/blob/main/USER_GUIDE.md) covers setup, configuration, adapters, queue mode, fleet APIs, examples, and troubleshooting.
-- [ARCHITECTURE.md](https://github.com/mayhemking007/memo-grafter/blob/main/ARCHITECTURE.md) explains the current high-level implementation.
-- `examples/basic-chat-memory` is the simplest runnable single-agent memory demo.
-- `examples/chatbot-memory-demo` shows the larger two-agent grafting workflow.
+- [Website](https://memografter.com)
+- [Docs](https://memografter.com/docs)
+- [USER_GUIDE.md](./USER_GUIDE.md) covers setup, configuration, adapters, queue mode, fleet APIs, examples, and troubleshooting.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) explains the high-level implementation.
+- [examples/basic-chat-memory](./examples/basic-chat-memory) is the simplest runnable single-agent memory demo.
+- [examples/chatbot-memory-demo](./examples/chatbot-memory-demo) shows a larger two-agent grafting workflow.
 
 ## License
 
