@@ -63,6 +63,32 @@ function createMemo(changes: {
 }
 
 describe("MemoGrafter lifecycle APIs", () => {
+  it("does not configure Redis from REDIS_URL alone", () => {
+    const previousRedisUrl = process.env.REDIS_URL;
+    process.env.REDIS_URL = "redis://localhost:6379";
+
+    try {
+      const memo = new MemoGrafter({
+        db: { connectionString: "postgres://example" },
+        llm: { complete: vi.fn(async () => "response") },
+        embedder: { embed: vi.fn(async () => [0.1, 0.2]) },
+      });
+      const internals = memo as unknown as {
+        recallCache: unknown;
+        ingestQueue: unknown;
+      };
+
+      expect(internals.recallCache).toBeNull();
+      expect(internals.ingestQueue).toBeNull();
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
+  });
+
   it("forgets a single memory and clears recall cache", async () => {
     const { memo, store, cache } = createMemo();
 

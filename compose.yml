@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: memografter-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memografter
+      POSTGRES_PASSWORD: memografter
+      POSTGRES_DB: memografter
+    ports:
+      - "5432:5432"
+    volumes:
+      - memografter_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memografter -d memografter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: memografter-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - memografter_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  memografter_postgres_data:
+  memografter_redis_data:

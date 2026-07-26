@@ -66,9 +66,12 @@ function writeIfMissing(filePath: string, content: string, label: string, result
 function ensureEnvExample(cwd: string, result: InitResult): void {
   const envExamplePath = path.join(cwd, ".env.example");
   const requiredLines = [
-    "DATABASE_URL=postgres://user:password@localhost:5432/memo_grafter",
+    "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
     "OPENAI_API_KEY=",
     "MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small",
+    "# Optional. Set this only when using queue mode or the recall cache.",
+    "# Example: REDIS_URL=redis://localhost:6379",
+    "REDIS_URL=",
   ];
 
   if (!existsSync(envExamplePath)) {
@@ -79,6 +82,7 @@ function ensureEnvExample(cwd: string, result: InitResult): void {
 
   const existing = readFileSync(envExamplePath, "utf8");
   const missingLines = requiredLines.filter((line) => {
+    if (line.startsWith("#")) return !existing.includes(line);
     const key = line.slice(0, line.indexOf("="));
     return !new RegExp(`^${escapeRegExp(key)}=`, "m").test(existing);
   });
