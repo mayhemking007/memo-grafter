@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DOCS_LINKS } from "../utils/docs.js";
 import { logger } from "../utils/logger.js";
 
 interface SchemaColumn {
@@ -28,6 +29,7 @@ export interface InitResult {
 }
 
 export async function runInit(cwd = process.cwd()): Promise<InitResult> {
+  const wasAlreadyInitialized = hasGeneratedProjectFiles(cwd);
   const result: InitResult = {
     generated: [],
     created: [],
@@ -44,13 +46,41 @@ export async function runInit(cwd = process.cwd()): Promise<InitResult> {
   writeIfMissing(path.join(memoGrafterDir, "mg.config.ts"), renderConfigTs(), "src/memo-grafter/mg.config.ts", result);
   ensureEnvExample(cwd, result);
 
-  logger.info("MemoGrafter project files initialized");
+  if (!wasAlreadyInitialized) logger.info("MemoGrafter project files initialized");
   for (const file of result.generated) logger.success(`${file} regenerated`);
   for (const file of result.created) logger.success(`${file} created`);
   for (const file of result.updated) logger.success(`${file} updated`);
   for (const file of result.skipped) logger.info(`- ${file} already exists, skipped`);
+  printNextSteps(wasAlreadyInitialized);
 
   return result;
+}
+
+function hasGeneratedProjectFiles(cwd: string): boolean {
+  const memoGrafterDir = path.join(cwd, "src", "memo-grafter");
+  return existsSync(path.join(memoGrafterDir, "mg-schema.ts"))
+    && existsSync(path.join(memoGrafterDir, "mg.config.ts"));
+}
+
+function printNextSteps(wasAlreadyInitialized: boolean): void {
+  const heading = wasAlreadyInitialized
+    ? "MemoGrafter is already initialized.\n\n"
+    : "";
+  const databaseHelp = wasAlreadyInitialized
+    ? `Need a local PostgreSQL database with pgvector?\n${DOCS_LINKS.databaseSetup}`
+    : [
+      "Don't have PostgreSQL with pgvector?",
+      "Set it up locally using Docker:",
+      DOCS_LINKS.databaseSetup,
+    ].join("\n");
+
+  logger.info([
+    `${heading}Next step:`,
+    "",
+    "  npx memo-grafter migrate",
+    "",
+    databaseHelp,
+  ].join("\n"));
 }
 
 function writeIfMissing(filePath: string, content: string, label: string, result: InitResult): void {
