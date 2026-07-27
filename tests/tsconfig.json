@@ -13,6 +13,7 @@
   "files": [
     "unit/cli/init.test.ts",
     "unit/cli/database-errors.test.ts",
-    "unit/cli/migrate.test.ts"
+    "unit/cli/migrate.test.ts",
+    "unit/cli/doctor.test.ts"
   ]
 }

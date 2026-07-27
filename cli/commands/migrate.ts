@@ -1,6 +1,6 @@
 import { resolveConnectionString } from "../utils/config.js";
 import {
-  classifyDatabaseError,
+  classifyPostgresError,
   formatDatabaseSetupError,
   HandledDatabaseSetupError,
 } from "../utils/database-errors.js";
@@ -74,7 +74,7 @@ export async function runMigrate(
       "  npx memo-grafter doctor",
     ].join("\n"));
   } catch (error) {
-    const classification = classifyDatabaseError(error);
+    const classification = classifyPostgresError(error);
     logger.info(formatDatabaseSetupError(classification));
     throw new HandledDatabaseSetupError(classification);
   }
