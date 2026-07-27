@@ -57,7 +57,8 @@ const defaultDependencies: DoctorDependencies = {
   checkPgvectorEnabled,
   getMigrationStatus,
   async loadSchemaMetadata() {
-    return await import("memo-grafter/schema") as unknown as SchemaMetadata;
+    const packageName = "memo-grafter/schema";
+    return await import(packageName) as SchemaMetadata;
   },
   async checkRedis(connectionString: string) {
     const redis = new Redis(connectionString, {
