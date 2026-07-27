@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { MissingDatabaseConfigurationError } from "./database-errors.js";
 
 export interface MemoGrafterCliConfig {
   db?: {
@@ -79,9 +80,7 @@ export async function resolveConnectionString(options: {
   const configured = config?.db?.connectionString;
   if (configured) return configured;
 
-  throw new Error(
-    "No database connection string found. Pass --db, set DATABASE_URL, or configure db.connectionString in src/memo-grafter/mg.config.ts.",
-  );
+  throw new MissingDatabaseConfigurationError();
 }
 
 export async function resolveStudioRuntimeConfig(options: {
