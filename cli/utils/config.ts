@@ -34,6 +34,19 @@ export interface StudioRuntimeConfig {
   cache?: MemoGrafterCliConfig["cache"];
 }
 
+export function findConfigFiles(cwd: string): string[] {
+  const configBasePaths = [
+    path.join(cwd, "src", "memo-grafter", "mg.config"),
+    path.join(cwd, "mg.config"),
+  ];
+  const extensions = [".ts", ".js", ".mjs", ".cjs"];
+  return configBasePaths.flatMap((basePath) =>
+    extensions
+      .map((extension) => `${basePath}${extension}`)
+      .filter((filePath) => existsSync(filePath))
+  );
+}
+
 export async function loadConfig(cwd: string): Promise<MemoGrafterCliConfig | null> {
   const configBasePaths = [
     path.join(cwd, "src", "memo-grafter", "mg.config"),
@@ -97,9 +110,9 @@ export async function resolveStudioRuntimeConfig(options: {
   };
 }
 
-function loadEnvFile(cwd: string): void {
+export function loadEnvFile(cwd: string): boolean {
   const envPath = path.join(cwd, ".env");
-  if (!existsSync(envPath)) return;
+  if (!existsSync(envPath)) return false;
 
   const lines = readFileSync(envPath, "utf8").split(/\r?\n/);
   for (const line of lines) {
@@ -115,6 +128,7 @@ function loadEnvFile(cwd: string): void {
 
     process.env[key] = stripEnvQuotes(rawValue);
   }
+  return true;
 }
 
 function stripEnvQuotes(value: string): string {
@@ -155,6 +169,14 @@ function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
       process.env.OPENAI_API_KEY,
       process.env.MEMO_GRAFTER_EMBEDDING_MODEL ?? "text-embedding-3-small",
     );
+  }
+
+  const cacheBlock = source.match(/\bcache\s*:\s*\{([\s\S]*?)\n\s*\}/)?.[1];
+  const cacheEnv = cacheBlock?.match(/connectionString\s*:\s*process\.env\.([A-Z0-9_]+)/)?.[1];
+  const cacheLiteral = cacheBlock?.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/)?.[1];
+  const cacheConnectionString = cacheEnv ? process.env[cacheEnv] : cacheLiteral;
+  if (cacheConnectionString) {
+    config.cache = { connectionString: cacheConnectionString };
   }
 
   return config;

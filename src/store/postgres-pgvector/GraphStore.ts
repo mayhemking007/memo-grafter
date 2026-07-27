@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
 import type { GraftRegistryEntry, MemoryDiff, MemoryDiffField, MemoryEdge, MemoryHistoryEntry, MemoryHistoryOptions, MemoryHistoryResult, MemoryHistoryStatus, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../core/types.js";
-import { memoGrafterExtensionNames, memoGrafterIndexNames, memoGrafterTableNames, type MigrationReport } from "../../schema/index.js";
+import {
+  memoGrafterCurrentMigrationVersion,
+  memoGrafterExtensionNames,
+  memoGrafterIndexNames,
+  memoGrafterMigrationTableName,
+  memoGrafterTableNames,
+  type MigrationReport,
+} from "../../schema/index.js";
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { normalizeTags } from "../../utils/tags.js";
 import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.js";
@@ -346,6 +353,17 @@ export class PostgresGraphStore implements GraphStore {
 
     await this.migrateExistingNodeTable();
     await this.createIndexes();
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS ${this.sql(memoGrafterMigrationTableName)} (
+        version    INT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+    await this.sql`
+      INSERT INTO ${this.sql(memoGrafterMigrationTableName)} (version)
+      VALUES (${memoGrafterCurrentMigrationVersion})
+      ON CONFLICT (version) DO NOTHING
+    `;
 
     return {
       extensions: memoGrafterExtensionNames.map((name) => ({

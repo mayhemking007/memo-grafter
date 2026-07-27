@@ -121,6 +121,8 @@ export function classifyDatabaseError(error: unknown): ClassifiedDatabaseError {
   return result("unknown");
 }
 
+export const classifyPostgresError = classifyDatabaseError;
+
 export function formatDatabaseSetupError(error: ClassifiedDatabaseError): string {
   switch (error.category) {
     case "missing_database_url":

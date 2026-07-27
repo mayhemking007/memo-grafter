@@ -1,5 +1,8 @@
 import { mgExtension, mgIndex, mgTable } from "./builders.js";
 
+export const memoGrafterMigrationTableName = "mg_migrations";
+export const memoGrafterCurrentMigrationVersion = 1;
+
 export const memoGrafterExtensions = [
   mgExtension({
     name: "vector",

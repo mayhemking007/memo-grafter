@@ -86,6 +86,32 @@ try {
     migrationOutput,
   );
 
+  const doctor = spawnSync(
+    process.execPath,
+    [
+      memoGrafterCli,
+      "doctor",
+      "--db",
+      "postgres://postgres:postgres@127.0.0.1:1/memo_grafter?connect_timeout=1",
+    ],
+    { cwd: fixtureRoot, encoding: "utf8" },
+  );
+  const doctorOutput = `${doctor.stdout ?? ""}\n${doctor.stderr ?? ""}`;
+  assert.equal(doctor.status, 1, "doctor against a closed port should report a required failure");
+  assert.match(doctorOutput, /MemoGrafter Doctor/);
+  assert.match(doctorOutput, /PostgreSQL could not be reached/);
+  assert.doesNotMatch(
+    doctorOutput,
+    /ERR_MODULE_NOT_FOUND|@anthropic-ai\/sdk|@google\/genai|Cannot find package ['"]openai/,
+    doctorOutput,
+  );
+  const invalidDoctorUsage = spawnSync(
+    process.execPath,
+    [memoGrafterCli, "doctor", "--unknown"],
+    { cwd: fixtureRoot, encoding: "utf8" },
+  );
+  assert.equal(invalidDoctorUsage.status, 2, "invalid doctor options should return usage exit code 2");
+
   const studio = spawnSync(
     process.execPath,
     [
