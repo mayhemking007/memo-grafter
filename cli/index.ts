@@ -2,6 +2,7 @@
 import { runInit } from "./commands/init.js";
 import { runMigrate } from "./commands/migrate.js";
 import { runStudio } from "./commands/studio.js";
+import { isHandledDatabaseSetupError } from "./utils/database-errors.js";
 import { logger } from "./utils/logger.js";
 
 const [, , command, ...args] = process.argv;
@@ -18,7 +19,9 @@ try {
     process.exitCode = command ? 1 : 0;
   }
 } catch (error) {
-  logger.error(error instanceof Error ? error.message : String(error));
+  if (!isHandledDatabaseSetupError(error)) {
+    logger.error(error instanceof Error ? error.message : String(error));
+  }
   process.exitCode = 1;
 }
 

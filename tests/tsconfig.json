@@ -10,5 +10,9 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "files": ["unit/cli/init.test.ts"]
+  "files": [
+    "unit/cli/init.test.ts",
+    "unit/cli/database-errors.test.ts",
+    "unit/cli/migrate.test.ts"
+  ]
 }
