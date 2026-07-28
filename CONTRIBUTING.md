@@ -1,8 +1,8 @@
 # Contributing to MemoGrafter
 
-Thank you for considering a contribution to MemoGrafter. Suggestions, bug
-reports, documentation improvements, and code contributions are all welcome.
-Please be polite and constructive when discussing issues and reviewing work.
+Suggestions, bug reports, documentation improvements, and code contributions
+are welcome. Please be polite and constructive. This guide is also available
+in the [MemoGrafter website documentation](https://memografter.com/docs/contributing).
 
 ## Set up the repository locally
 
@@ -22,27 +22,18 @@ git remote add upstream https://github.com/mayhemking007/memo-grafter.git
 git remote -v
 ```
 
-Install the dependencies:
+MemoGrafter requires Node.js 18 or newer. Install dependencies:
 
 ```bash
 npm install
 ```
 
-MemoGrafter requires Node.js 18 or newer.
-
 ### 2. Provide PostgreSQL and optional Redis
 
 MemoGrafter's built-in store requires PostgreSQL with the `pgvector`
-extension. Redis is required only when working on queue mode or the optional
-recall cache.
-
-If you already have compatible PostgreSQL and Redis services, you do not need
-Docker Compose. Configure `.env` with their connection URLs and continue to
-the initialization step.
-
-If you do not already have these services, the root-level `compose.yml`
-provides a convenient local development setup. Docker and Docker Compose are
-required only for this option.
+extension. Redis is needed only for queue mode or the optional recall cache.
+If you already run compatible services, configure their URLs in `.env` and
+skip Docker. Otherwise, use the root-level `compose.yml`.
 
 Start PostgreSQL and Redis:
 
@@ -56,15 +47,10 @@ Start only PostgreSQL:
 docker compose up -d postgres
 ```
 
-Inspect service status and health:
+Inspect services or PostgreSQL logs:
 
 ```bash
 docker compose ps
-```
-
-View PostgreSQL logs:
-
-```bash
 docker compose logs -f postgres
 ```
 
@@ -76,8 +62,6 @@ docker compose down
 
 > **Warning:** `docker compose down -v` permanently deletes the local
 > PostgreSQL database and Redis data stored in the Compose volumes.
-
-To intentionally delete the containers and their development data:
 
 ```bash
 docker compose down -v
@@ -97,17 +81,10 @@ On PowerShell, use:
 Copy-Item .env.example .env
 ```
 
-The default `DATABASE_URL` matches the PostgreSQL service in `compose.yml`.
-When using an existing PostgreSQL installation, replace it with that
-installation's connection URL.
-
-Redis is optional. If you start only PostgreSQL, leave `REDIS_URL` empty or
-omit it. Set it to `redis://localhost:6379`, or your existing Redis URL, only
-when enabling queue mode or the recall cache.
-
-MemoGrafter does not enable Redis from the environment variable alone. A Redis
-client is created only when an application explicitly supplies `queue` or
-`cache` configuration.
+The default `DATABASE_URL` matches `compose.yml`; replace it when using an
+existing PostgreSQL installation. Leave `REDIS_URL` empty or omit it for
+PostgreSQL-only development. Redis is enabled only when the application
+explicitly supplies `queue` or `cache` configuration.
 
 ### 4. Build, initialize, and migrate
 
@@ -117,8 +94,8 @@ npx memo-grafter init
 npx memo-grafter migrate
 ```
 
-The migration enables `vector` and `pgcrypto` and creates or updates
-MemoGrafter's `mg_*` tables. It is safe to run the migration again.
+The idempotent migration enables `vector` and `pgcrypto` and creates or updates
+MemoGrafter's `mg_*` tables.
 
 If you use the Compose services, you can inspect them with:
 
@@ -128,18 +105,13 @@ docker compose exec postgres psql -U memografter -d memografter -c "SELECT extna
 docker compose exec redis redis-cli ping
 ```
 
-The Redis check applies only when Redis is running and should return `PONG`.
-When using existing services, use their normal database and Redis clients for
-the equivalent checks.
+Run the Redis check only when Redis is running; it should return `PONG`.
 
 ### 5. Manually verify the setup
 
-The provider-specific setup smoke tests each create a basic chatbot, send it a
-short conversation, and confirm that MemoGrafter stored graph data. All three
-require a working `DATABASE_URL`. They do not require Redis.
-
-After building and migrating, run one test with the corresponding API key set
-in `.env`:
+Each setup smoke test creates a basic chatbot and confirms that MemoGrafter
+stored graph data. After building and migrating, run one with a working
+`DATABASE_URL` and the corresponding API key in `.env`:
 
 ```bash
 # Requires OPENAI_API_KEY
@@ -152,21 +124,16 @@ npx tsx --env-file=.env tests/manual/setup-test/anthropic-smoke.ts
 npx tsx --env-file=.env tests/manual/setup-test/gemini-smoke.ts
 ```
 
-The Anthropic setup test uses a deterministic local embedder because
-MemoGrafter does not provide an Anthropic embedding adapter. The OpenAI and
-Gemini setup tests use their provider's embedding API.
-
-A successful run prints chatbot responses, stored topic and memory counts, and
-a provider-specific `contributor setup smoke passed` message. These tests call
-external model APIs and may incur normal API usage charges.
+Redis is not required. Anthropic uses a deterministic local embedder; OpenAI
+and Gemini use their provider embedding APIs. These tests call external APIs
+and may incur usage charges.
 
 ## Start Contributing
 
 ### Create an issue
 
-For bugs, proposals, or larger changes, open an issue before implementation so
-the intended behavior and scope can be discussed. We follow this general
-template:
+Search existing issues first. For bugs, proposals, or larger changes, open an
+issue using this general template:
 
 ```markdown
 ## What
@@ -186,8 +153,7 @@ What should the expected outcome?
 Additional context or constraints.
 ```
 
-Search existing issues first to avoid duplicates. Clear reproduction steps,
-examples, and relevant constraints help us understand suggestions quickly.
+Include reproduction steps, examples, and constraints where relevant.
 
 ### Create a PR
 
@@ -208,7 +174,7 @@ Create a focused branch for the change:
 git checkout -b feat/short-description
 ```
 
-Use a prefix that describes the change:
+Use a matching branch, commit, and PR title prefix:
 
 - `feat`: a new user-facing capability
 - `fix`: a bug fix
@@ -216,14 +182,12 @@ Use a prefix that describes the change:
 - `refactor`: an internal code change that preserves behavior
 - `test`: test additions or improvements
 
-Use the same keywords in concise commit and pull request titles where
-appropriate, for example `fix: avoid duplicate memory ingestion`.
+For example: `fix: avoid duplicate memory ingestion`.
 
 **Implement and test**
 
-Keep changes focused and update documentation when behavior or public usage
-changes. MemoGrafter uses Vitest for automated tests. Add or update a unit test
-when applicable.
+Keep changes focused and update affected documentation. MemoGrafter uses
+Vitest; add or update a unit test when applicable.
 
 Every change should pass:
 
@@ -234,19 +198,16 @@ npm run typecheck
 npm run test:run
 ```
 
-If the change affects an algorithm or behavior that benefits from realistic
-end-to-end verification, add a focused manual test under `tests/manual/` and
-document how to run it.
+For algorithm or behavior changes, add a focused manual test under
+`tests/manual/` when useful and document its command.
 
-If the change affects the CLI, packaging, exports, or generated project
-workflow, also run:
+For CLI, packaging, export, or generated-workflow changes, also run:
 
 ```bash
 npm run test:package
 ```
 
-Database-backed changes should also run the relevant suites with
-`DATABASE_URL` configured:
+For database-backed changes, configure `DATABASE_URL` and run:
 
 ```bash
 npm run test:core
@@ -266,10 +227,8 @@ git commit -m "feat: short description"
 git push -u origin feat/short-description
 ```
 
-Open a pull request from your branch on your fork into
-`mayhemking007/memo-grafter`'s `main` branch.
-
-In the pull request:
+Open a pull request from your fork into `mayhemking007/memo-grafter`'s `main`
+branch. In the description:
 
 - explain what changed and why;
 - link the related issue;
@@ -277,6 +236,5 @@ In the pull request:
 - mention any compatibility considerations or follow-up work;
 - keep the pull request focused on one logical change.
 
-Please respond politely to review feedback. Review is collaborative, and
-follow-up suggestions are intended to help make the contribution safe and
-maintainable.
+Please respond politely to review feedback; suggestions help keep
+contributions safe and maintainable.
