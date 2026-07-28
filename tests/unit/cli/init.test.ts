@@ -129,7 +129,7 @@ describe("memo-grafter init", () => {
 
   it("keeps the database documentation URL in the shared link helper", () => {
     expect(DOCS_LINKS.databaseSetup).toBe(
-      "https://memografter.com/docs/installation",
+      "https://memografter.com/docs/database-setup-with-docker",
     );
   });
 });

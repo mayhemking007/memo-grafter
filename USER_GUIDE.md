@@ -69,22 +69,57 @@ REDIS_URL=redis://localhost:6379
 
 `REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
 
-For the recommended setup flow, initialize the project files, migrate the MemoGrafter tables, and then launch Studio:
+For the recommended setup flow, initialize the project files, migrate the MemoGrafter tables, verify the environment, and then launch Studio:
 
 ```bash
 npx memo-grafter init
 npx memo-grafter migrate
+npx memo-grafter doctor
 npx memo-grafter studio
 ```
 
-`memo-grafter init` is required before `migrate` or `studio`. It creates local project files only:
+`memo-grafter init` is required before `migrate` or `studio`. Doctor does not require initialization to start; it reports missing project configuration as a failed check instead of aborting. Init creates local project files only:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
 - `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config. The generated config includes database resolution plus an OpenAI-compatible embedder scaffold for Studio Prompt Preview; set `OPENAI_API_KEY` to enable it, and optionally set `MEMO_GRAFTER_EMBEDDING_MODEL`.
 
 `memo-grafter init` does not create, relocate, or modify an application schema file. Keep application models and tables in the location expected by Prisma, Drizzle, raw SQL migrations, or your existing database tool.
 
-`memo-grafter migrate` is the preferred migration path. It creates `pgvector`, `pgcrypto`, and MemoGrafter-owned `mg_*` tables in the database. It does not migrate application tables, and it should run once per database or deployment rather than on every application startup.
+`memo-grafter migrate` is the preferred migration path. It creates `pgvector`, `pgcrypto`, MemoGrafter-owned core `mg_*` tables and indexes, and the `mg_migrations` metadata table. The current schema records migration version `1` after the schema work succeeds. It does not migrate application tables, and it should run once per database or deployment rather than on every application startup. The command is idempotent and prints whether each extension, table, and index was created or already existed, followed by a reminder to run Doctor.
+
+### Verify Setup With Doctor
+
+Run Doctor after migration or whenever an environment stops behaving as expected:
+
+```bash
+npx memo-grafter doctor
+```
+
+Doctor checks:
+
+- the active Node.js and installed MemoGrafter versions;
+- whether MemoGrafter configuration files and `DATABASE_URL` are available;
+- PostgreSQL connectivity and server version;
+- whether pgvector is available on the server and enabled in the database;
+- whether `mg_migrations` exists and records the current version;
+- whether all required core MemoGrafter tables exist;
+- Redis reachability only when recall caching is configured through `cache.connectionString`.
+
+Doctor uses the same database resolution order as migration: `--db`, then `.env` / `DATABASE_URL`, then `src/memo-grafter/mg.config.ts`, then root `mg.config.ts`. You can override the database URL without printing it in the report:
+
+```bash
+npx memo-grafter doctor --db postgres://postgres:postgres@localhost:5432/memo_grafter
+```
+
+Checks are dependency-aware. If PostgreSQL cannot be reached, Doctor reports that required failure and marks pgvector and schema checks as skipped instead of reporting misleading secondary failures. Redis is optional in the current Doctor implementation: an unconfigured cache is skipped, and an unreachable configured cache produces a warning while PostgreSQL-backed recall remains available.
+
+Doctor exit codes are:
+
+- `0`: all required checks passed;
+- `1`: one or more required checks failed;
+- `2`: invalid command usage, such as an unknown option or `--db` without a value.
+
+Optional Redis warnings do not produce exit code `1`. Doctor stores checks internally as structured `passed`, `failed`, `warning`, or `skipped` results so future output modes can reuse the same checks.
 
 You can launch MemoGrafter Studio again whenever you want a local visibility and debugging entry point:
 
@@ -114,6 +149,7 @@ Studio also hosts an internal REST API for its own views, including session list
 
 Current v1 tables:
 
+- `mg_migrations` (migration metadata)
 - `mg_message_buffer`
 - `mg_segments`
 - `mg_topic_nodes`
@@ -122,6 +158,7 @@ Current v1 tables:
 - `mg_memory_edges`
 - `mg_fleets`
 - `mg_fleet_agents`
+- `mg_sessions`
 - `mg_session_ingest_state`
 - `mg_graft_registry`
 
@@ -134,6 +171,7 @@ Run the setup commands once for your app before starting application code:
 ```bash
 npx memo-grafter init
 npx memo-grafter migrate
+npx memo-grafter doctor
 ```
 
 Create `src/index.ts`:
@@ -1567,6 +1605,18 @@ Confirm `pgvector` is enabled:
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
+Run the complete diagnostic report:
+
+```bash
+npx memo-grafter doctor
+```
+
+If Doctor reports that the migration table, migration version, or required core tables are missing, rerun:
+
+```bash
+npx memo-grafter migrate
+```
+
 ### No Topic Nodes Are Created
 
 Common causes:
@@ -1657,7 +1707,7 @@ Incremental ingest can still create semantically similar topic nodes over time. 
 
 ### Redis Warnings
 
-Redis is only required when you pass `queue` or `cache` config. If you do not need background ingestion or recall caching, remove those sections.
+Redis is only used when you pass `queue` or `cache` config. A running Redis container or `REDIS_URL` by itself does not enable either feature. The current Doctor command detects `cache.connectionString`; if it is absent, Doctor reports `Redis not configured — optional`. If cache Redis is unreachable, Doctor warns without failing readiness because recall falls back to PostgreSQL. If you do not need background ingestion or recall caching, leave those configuration sections disabled.
 
 ### Browser Runtime Error
 
