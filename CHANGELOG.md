@@ -170,3 +170,18 @@ All notable changes to this project will be documented here.
 
 - Added packaged-install regression tests for `memo-grafter migrate` and `memo-grafter studio`.
 - Added focused tests for the new Studio entry point and unavailable Prompt Preview behavior.
+
+## [0.4.3] - 2026-07-29
+
+### Added
+
+- Added `doctor` CLI command to validate MemoGrafter environment setup, dependencies, and project configuration.
+- Added commented Redis configuration to the generated `mg-config.ts` template for easier optional cache setup.
+- Added Docker Compose setup and `CONTRIBUTING.md` to simplify local development and project onboarding.
+
+### Changed
+
+- Improved `init` CLI terminal output with clearer setup guidance and next steps.
+- Improved `migrate` CLI messaging with more actionable errors and recovery instructions.
+- Updated CLI helper messages and setup guidance throughout the initialization workflow.
+- Updated documentation across `USER_GUIDE.md`, `ARCHITECTURE.md`, and `CONTRIBUTION.md`, including refreshed documentation links.
