@@ -183,39 +183,75 @@ export async function runDoctor(
     appendSkippedDatabaseResults(results);
   }
 
-  const redisUrl = config?.cache?.connectionString;
-  if (!redisUrl) {
+  const redisEndpoints = new Map<string, Set<"cache" | "queue">>();
+  if (config?.cache?.connectionString) {
+    redisEndpoints.set(config.cache.connectionString, new Set(["cache"]));
+  }
+  if (config?.queue?.redisUrl) {
+    const uses = redisEndpoints.get(config.queue.redisUrl) ?? new Set<"cache" | "queue">();
+    uses.add("queue");
+    redisEndpoints.set(config.queue.redisUrl, uses);
+  }
+
+  if (redisEndpoints.size === 0) {
     results.push({
       id: "redis.connection",
       section: "Redis",
       label: "Redis not configured — optional",
       status: "skipped",
+      help: [
+        "To enable Redis, set REDIS_URL and uncomment cache or queue in",
+        "src/memo-grafter/mg.config.ts.",
+      ],
       required: false,
     });
   } else {
-    try {
-      await dependencies.checkRedis(redisUrl);
-      results.push({
-        id: "redis.connection",
-        section: "Redis",
-        label: "Redis reachable",
-        status: "passed",
-        required: false,
-      });
-    } catch {
-      results.push({
-        id: "redis.connection",
-        section: "Redis",
-        label: "Redis could not be reached",
-        status: "warning",
-        help: ["MemoGrafter can run without caching unless Redis is required by your configuration."],
-        required: false,
-      });
+    const distinctEndpoints = redisEndpoints.size;
+    for (const [redisUrl, uses] of redisEndpoints) {
+      const queueEnabled = uses.has("queue");
+      const cacheEnabled = uses.has("cache");
+      const id = distinctEndpoints === 1
+        ? "redis.connection"
+        : queueEnabled ? "redis.queue" : "redis.cache";
+      try {
+        await dependencies.checkRedis(redisUrl);
+        results.push({
+          id,
+          section: "Redis",
+          label: redisSuccessLabel(cacheEnabled, queueEnabled),
+          status: "passed",
+          required: queueEnabled,
+        });
+      } catch {
+        results.push({
+          id,
+          section: "Redis",
+          label: "Redis could not be reached",
+          status: queueEnabled ? "failed" : "warning",
+          help: queueEnabled
+            ? [
+              "Check REDIS_URL and confirm the Redis service is running.",
+              "Redis is required while queue mode is enabled.",
+              "Disable queue in src/memo-grafter/mg.config.ts to use synchronous ingestion.",
+            ]
+            : [
+              "Check REDIS_URL and confirm the Redis service is running.",
+              "MemoGrafter will continue without recall caching.",
+            ],
+          required: queueEnabled,
+        });
+      }
     }
   }
 
   const exitCode = results.some((result) => result.required && result.status === "failed") ? 1 : 0;
   return { exitCode, results, output: renderDoctor(results) };
+}
+
+function redisSuccessLabel(cacheEnabled: boolean, queueEnabled: boolean): string {
+  if (cacheEnabled && queueEnabled) return "Redis reachable — cache and queue configured";
+  if (queueEnabled) return "Redis reachable — queue mode enabled";
+  return "Redis reachable";
 }
 
 function appendMigrationResults(results: DoctorResult[], status: MigrationStatus): void {

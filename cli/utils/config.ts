@@ -25,6 +25,12 @@ export interface MemoGrafterCliConfig {
     connectionString: string;
     ttlSeconds?: number;
   };
+  queue?: {
+    redisUrl: string;
+    queueName?: string;
+    removeOnComplete?: boolean | number;
+    removeOnFail?: boolean | number;
+  };
 }
 
 export interface StudioRuntimeConfig {
@@ -143,8 +149,10 @@ function stripEnvQuotes(value: string): string {
 }
 
 function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
+  const activeSource = stripTypeScriptComments(source);
   const config: MemoGrafterCliConfig = {};
-  const envMatch = source.match(/connectionString\s*:\s*process\.env\.([A-Z0-9_]+)/);
+  const dbBlock = activeSource.match(/\bdb\s*:\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const envMatch = dbBlock.match(/connectionString\s*:\s*process\.env\.([A-Z0-9_]+)/);
   if (envMatch?.[1]) {
     const connectionString = process.env[envMatch[1]];
     if (connectionString) {
@@ -153,7 +161,7 @@ function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
       };
     }
   } else {
-    const literalMatch = source.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/);
+    const literalMatch = dbBlock.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/);
     if (literalMatch?.[1]) {
       config.db = {
         connectionString: literalMatch[1],
@@ -161,9 +169,9 @@ function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
     }
   }
 
-  const hasOpenAiEmbedderScaffold = /OPENAI_API_KEY/.test(source)
-    && /https:\/\/api\.openai\.com\/v1\/embeddings/.test(source)
-    && /\bembedder\s*:/.test(source);
+  const hasOpenAiEmbedderScaffold = /OPENAI_API_KEY/.test(activeSource)
+    && /https:\/\/api\.openai\.com\/v1\/embeddings/.test(activeSource)
+    && /\bembedder\s*:/.test(activeSource);
   if (hasOpenAiEmbedderScaffold && process.env.OPENAI_API_KEY) {
     config.embedder = createOpenAiEmbedder(
       process.env.OPENAI_API_KEY,
@@ -171,15 +179,94 @@ function parseTypeScriptConfig(source: string): MemoGrafterCliConfig {
     );
   }
 
-  const cacheBlock = source.match(/\bcache\s*:\s*\{([\s\S]*?)\n\s*\}/)?.[1];
-  const cacheEnv = cacheBlock?.match(/connectionString\s*:\s*process\.env\.([A-Z0-9_]+)/)?.[1];
-  const cacheLiteral = cacheBlock?.match(/connectionString\s*:\s*["'`]([^"'`]+)["'`]/)?.[1];
-  const cacheConnectionString = cacheEnv ? process.env[cacheEnv] : cacheLiteral;
+  const cacheConnectionString = resolveConfigString(
+    activeSource,
+    "cache",
+    "connectionString",
+  );
   if (cacheConnectionString) {
     config.cache = { connectionString: cacheConnectionString };
   }
 
+  const queueRedisUrl = resolveConfigString(activeSource, "queue", "redisUrl");
+  if (queueRedisUrl) {
+    config.queue = { redisUrl: queueRedisUrl };
+  }
+
   return config;
+}
+
+function resolveConfigString(source: string, property: string, valueKey: string): string | undefined {
+  const conditional = new RegExp(
+    `\\b${property}\\s*:\\s*process\\.env\\.([A-Z0-9_]+)\\s*`
+    + `\\?\\s*\\{\\s*${valueKey}\\s*:\\s*process\\.env\\.([A-Z0-9_]+)[^}]*\\}`
+    + `\\s*:\\s*undefined`,
+  ).exec(source);
+  if (conditional?.[1] && conditional[2]) {
+    const enabled = process.env[conditional[1]];
+    return enabled ? process.env[conditional[2]] : undefined;
+  }
+
+  const objectBlock = new RegExp(`\\b${property}\\s*:\\s*\\{([\\s\\S]*?)\\}`).exec(source)?.[1];
+  if (!objectBlock) return undefined;
+  const envName = new RegExp(`${valueKey}\\s*:\\s*process\\.env\\.([A-Z0-9_]+)`).exec(objectBlock)?.[1];
+  if (envName) return process.env[envName];
+  return new RegExp(`${valueKey}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`).exec(objectBlock)?.[1];
+}
+
+function stripTypeScriptComments(source: string): string {
+  let output = "";
+  let quote: "'" | "\"" | "`" | null = null;
+  let lineComment = false;
+  let blockComment = false;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        output += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n") {
+        output += character;
+      }
+      continue;
+    }
+    if (quote) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "'" || character === "\"" || character === "`") {
+      quote = character;
+      output += character;
+    } else if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else {
+      output += character;
+    }
+  }
+
+  return output;
 }
 
 function createOpenAiEmbedder(apiKey: string, model: string): NonNullable<MemoGrafterCliConfig["embedder"]> {
