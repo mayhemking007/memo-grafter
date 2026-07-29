@@ -50,13 +50,28 @@ describe("memo-grafter init", () => {
     expect(mgSchema).toContain("mg_memory_nodes");
     expect(mgSchema).toContain('session_id: {\n        name: "session_id",\n        type: "text",');
     expect(mgConfig).toContain("OPENAI_API_KEY");
+    expect(mgConfig).toContain("REDIS_URL?: string");
     expect(mgConfig).toContain("https://api.openai.com/v1/embeddings");
     expect(mgConfig).toContain("text-embedding-3-small");
+    expect(mgConfig).toContain("// cache: process.env.REDIS_URL");
+    expect(mgConfig).toContain("// queue: process.env.REDIS_URL");
+    expect(mgConfig).toContain(`// Optional recall cache. Falls back to PostgreSQL if Redis is unavailable.
+
+  // cache: process.env.REDIS_URL`);
+    expect(mgConfig).toContain(`// Optional Redis-backed ingestion; failed enqueues do not retry synchronously.
+
+  // queue: process.env.REDIS_URL`);
+    expect(mgConfig).not.toContain("Prompt Preview uses this embedder");
+    expect(mgConfig).not.toMatch(/^\s*cache:\s*process\.env\.REDIS_URL/m);
+    expect(mgConfig).not.toMatch(/^\s*queue:\s*process\.env\.REDIS_URL/m);
     expect(envExample).toContain(
       "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
     );
     expect(envExample).toContain("OPENAI_API_KEY=");
     expect(envExample).toContain("MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small");
+    expect(envExample).toContain(
+      "# Optional. Set this and uncomment cache or queue in src/memo-grafter/mg.config.ts.",
+    );
     expect(envExample).toContain("# Example: REDIS_URL=redis://localhost:6379");
     expect(envExample).toMatch(/^REDIS_URL=$/m);
   });

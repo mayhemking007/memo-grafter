@@ -28,6 +28,8 @@ describe("memo-grafter doctor", () => {
     expect(report.output).toContain("✓ PostgreSQL 16.4");
     expect(report.output).toContain("✓ Migrations are up to date");
     expect(report.output).toContain("○ Redis not configured — optional");
+    expect(report.output).toContain("set REDIS_URL and uncomment cache or queue");
+    expect(report.output).toContain("src/memo-grafter/mg.config.ts");
     expect(report.output).toContain("✓ MemoGrafter is ready");
     expect(end).toHaveBeenCalledOnce();
   });
@@ -80,8 +82,45 @@ describe("memo-grafter doctor", () => {
 
     expect(report.exitCode).toBe(0);
     expect(report.output).toContain("! Redis could not be reached");
-    expect(report.output).toContain("MemoGrafter can run without caching");
+    expect(report.output).toContain("MemoGrafter will continue without recall caching");
     expect(report.output).toContain("✓ MemoGrafter is ready");
+  });
+
+  it("fails when queue Redis is configured but unreachable", async () => {
+    const cwd = await createProject({
+      config: `export default {
+  db: { connectionString: "postgres://example" },
+  queue: { redisUrl: "redis://127.0.0.1:1" },
+};\n`,
+    });
+    const { dependencies } = healthyDependencies();
+    dependencies.checkRedis = vi.fn(async () => {
+      throw new Error("unreachable");
+    });
+
+    const report = await runDoctor({ cwd }, dependencies);
+
+    expect(report.exitCode).toBe(1);
+    expect(report.output).toContain("✗ Redis could not be reached");
+    expect(report.output).toContain("Redis is required while queue mode is enabled");
+    expect(report.output).toContain("Disable queue in src/memo-grafter/mg.config.ts");
+  });
+
+  it("checks a shared cache and queue Redis endpoint only once", async () => {
+    const cwd = await createProject({
+      config: `export default {
+  db: { connectionString: "postgres://example" },
+  cache: { connectionString: "redis://localhost:6379" },
+  queue: { redisUrl: "redis://localhost:6379" },
+};\n`,
+    });
+    const { dependencies } = healthyDependencies();
+
+    const report = await runDoctor({ cwd }, dependencies);
+
+    expect(report.exitCode).toBe(0);
+    expect(dependencies.checkRedis).toHaveBeenCalledOnce();
+    expect(report.output).toContain("Redis reachable — cache and queue configured");
   });
 
   it("fails cleanly when DATABASE_URL is missing", async () => {

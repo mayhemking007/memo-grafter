@@ -67,7 +67,7 @@ REDIS_URL=redis://localhost:6379
 
 `GEMINI_API_KEY` is required only when using `GeminiLLMAdapter` or `GeminiEmbedAdapter`.
 
-`REDIS_URL` is optional and only needed when you pass `queue` or `cache` config.
+`REDIS_URL` is optional. Setting it alone does not activate Redis: uncomment the generated `cache` or `queue` example in `src/memo-grafter/mg.config.ts` to opt in.
 
 For the recommended setup flow, initialize the project files, migrate the MemoGrafter tables, verify the environment, and then launch Studio:
 
@@ -81,7 +81,7 @@ npx memo-grafter studio
 `memo-grafter init` is required before `migrate` or `studio`. Doctor does not require initialization to start; it reports missing project configuration as a failed check instead of aborting. Init creates local project files only:
 
 - `src/memo-grafter/mg-schema.ts`: generated MemoGrafter schema reference for `mg_*` tables. This file is regenerated on every `init` run.
-- `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config. The generated config includes database resolution plus an OpenAI-compatible embedder scaffold for Studio Prompt Preview; set `OPENAI_API_KEY` to enable it, and optionally set `MEMO_GRAFTER_EMBEDDING_MODEL`.
+- `src/memo-grafter/mg.config.ts`: user-editable MemoGrafter CLI config. The generated config includes database resolution, commented Redis cache/queue examples, and an OpenAI-compatible embedder scaffold for Studio Prompt Preview. Set `OPENAI_API_KEY` to enable preview, and optionally set `MEMO_GRAFTER_EMBEDDING_MODEL`.
 
 `memo-grafter init` does not create, relocate, or modify an application schema file. Keep application models and tables in the location expected by Prisma, Drizzle, raw SQL migrations, or your existing database tool.
 
@@ -103,7 +103,7 @@ Doctor checks:
 - whether pgvector is available on the server and enabled in the database;
 - whether `mg_migrations` exists and records the current version;
 - whether all required core MemoGrafter tables exist;
-- Redis reachability only when recall caching is configured through `cache.connectionString`.
+- Redis reachability when recall caching or queue mode is enabled in `mg.config.ts`.
 
 Doctor uses the same database resolution order as migration: `--db`, then `.env` / `DATABASE_URL`, then `src/memo-grafter/mg.config.ts`, then root `mg.config.ts`. You can override the database URL without printing it in the report:
 
@@ -111,7 +111,7 @@ Doctor uses the same database resolution order as migration: `--db`, then `.env`
 npx memo-grafter doctor --db postgres://postgres:postgres@localhost:5432/memo_grafter
 ```
 
-Checks are dependency-aware. If PostgreSQL cannot be reached, Doctor reports that required failure and marks pgvector and schema checks as skipped instead of reporting misleading secondary failures. Redis is optional in the current Doctor implementation: an unconfigured cache is skipped, and an unreachable configured cache produces a warning while PostgreSQL-backed recall remains available.
+Checks are dependency-aware. If PostgreSQL cannot be reached, Doctor reports that required failure and marks pgvector and schema checks as skipped instead of reporting misleading secondary failures. If neither Redis feature is enabled, Doctor explains how to set `REDIS_URL` and uncomment `cache` or `queue`. An unreachable configured cache produces a warning while PostgreSQL-backed recall remains available. An unreachable configured queue is a required failure because queued ingestion depends on Redis.
 
 Doctor exit codes are:
 
@@ -1707,7 +1707,7 @@ Incremental ingest can still create semantically similar topic nodes over time. 
 
 ### Redis Warnings
 
-Redis is only used when you pass `queue` or `cache` config. A running Redis container or `REDIS_URL` by itself does not enable either feature. The current Doctor command detects `cache.connectionString`; if it is absent, Doctor reports `Redis not configured — optional`. If cache Redis is unreachable, Doctor warns without failing readiness because recall falls back to PostgreSQL. If you do not need background ingestion or recall caching, leave those configuration sections disabled.
+Redis is only used when you pass `queue` or `cache` config. A running Redis container or `REDIS_URL` by itself does not enable either feature; both examples in the generated `src/memo-grafter/mg.config.ts` are commented by default. Doctor reports setup guidance when neither is enabled. If cache Redis is unreachable, Doctor warns without failing readiness because recall falls back to PostgreSQL. If queue Redis is unreachable, Doctor fails readiness because enqueue failure does not currently guarantee a synchronous retry. If both features share one URL, Doctor checks that endpoint once.
 
 ### Browser Runtime Error
 

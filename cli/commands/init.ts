@@ -99,7 +99,7 @@ function ensureEnvExample(cwd: string, result: InitResult): void {
     "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
     "OPENAI_API_KEY=",
     "MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small",
-    "# Optional. Set this only when using queue mode or the recall cache.",
+    "# Optional. Set this and uncomment cache or queue in src/memo-grafter/mg.config.ts.",
     "# Example: REDIS_URL=redis://localhost:6379",
     "REDIS_URL=",
   ];
@@ -187,6 +187,7 @@ function renderConfigTs(): string {
     DATABASE_URL?: string;
     OPENAI_API_KEY?: string;
     MEMO_GRAFTER_EMBEDDING_MODEL?: string;
+    REDIS_URL?: string;
   };
 };
 
@@ -196,7 +197,19 @@ export default {
   db: {
     connectionString: process.env.DATABASE_URL,
   },
-  // Prompt Preview uses this embedder to run graft/recall preview from Studio.
+
+  // Optional recall cache. Falls back to PostgreSQL if Redis is unavailable.
+
+  // cache: process.env.REDIS_URL
+  //   ? { connectionString: process.env.REDIS_URL }
+  //   : undefined,
+
+  // Optional Redis-backed ingestion; failed enqueues do not retry synchronously.
+
+  // queue: process.env.REDIS_URL
+  //   ? { redisUrl: process.env.REDIS_URL }
+  //   : undefined,
+
   // Set OPENAI_API_KEY in your environment or replace this object with your own embedder.
   embedder: process.env.OPENAI_API_KEY
     ? {
