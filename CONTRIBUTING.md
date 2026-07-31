@@ -217,6 +217,26 @@ npm run test:fleet
 Redis is not required for the default unit tests or PostgreSQL-only
 development.
 
+Before releasing, or after changing a critical Grafter, ingestion, Fleet,
+crawler, or lifecycle workflow, run the minimal live smoke suite:
+
+```bash
+npm run live-smoke:smoke
+```
+
+This suite uses the root `.env`; its basic chat, graph building, queue, and
+Fleet checks call OpenAI. Queue and recall-cache coverage runs when `REDIS_URL`
+is configured. To save a Markdown
+report containing timings, answers, drift scores, node counts, queue metrics,
+and estimated token usage:
+
+```bash
+npm run live-smoke:smoke -- --write-doc
+```
+
+See `tests/manual/live-smoke/README.md` for individual suite commands and
+reporting options.
+
 **Open the pull request**
 
 Commit and push the branch to your fork:

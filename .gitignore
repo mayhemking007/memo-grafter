@@ -10,3 +10,4 @@ tsconfig.tsbuildinfo
 internals.md
 knowledge/
 API_REFERENCE.md
+tests/manual/live-smoke/reports/
