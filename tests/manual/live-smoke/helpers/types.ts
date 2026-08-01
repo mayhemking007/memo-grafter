@@ -32,8 +32,12 @@ export interface QueueUsage {
   completedJobs: number;
   failedJobs: number;
   totalMessages: number;
+  totalPayloadBytes: number;
+  maximumJobPayloadBytes: number;
   firstJobMessageCount: number | null;
   lastJobMessageCount: number | null;
+  firstJobPayloadBytes: number | null;
+  lastJobPayloadBytes: number | null;
   firstJobKind: "messages" | "text" | null;
   lastJobKind: "messages" | "text" | null;
 }

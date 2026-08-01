@@ -13,7 +13,7 @@ import {
 
 type AgentInternals = {
   core: {
-    enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
+    enqueueIncrementalIngest(messages: Message[], sessionId: string, startIndex: number): Promise<void>;
     getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }>;
     store: {
       getSessionNodeCount(sessionId: string): Promise<number>;
@@ -91,7 +91,7 @@ const agent = createAgent(llm);
 const privateAgent = agent as unknown as AgentInternals;
 const recallCalls: Array<{ query: string; options: RetrieverConfig }> = [];
 
-privateAgent.core.enqueueIngest = async () => undefined;
+privateAgent.core.enqueueIncrementalIngest = async () => undefined;
 privateAgent.core.store.getSessionNodeCount = async () => 1;
 privateAgent.core.getTopics = async () => {
   throw new Error("getTopics should not be called during overflow recall injection");

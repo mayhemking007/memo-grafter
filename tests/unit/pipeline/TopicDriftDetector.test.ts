@@ -217,7 +217,8 @@ describe("TopicDriftDetector — multi-signal scoring", () => {
     let nextSegmentId = 0;
 
     const store = {
-      saveMessages: vi.fn(async () => undefined),
+      saveMessagesAt: vi.fn(async () => undefined),
+      getRecentMessagesBefore: vi.fn(async () => []),
       getSessionIngestState: vi.fn(async () => null),
       updateSessionIngestState: vi.fn(async () => undefined),
       getNodesBySession: vi.fn(async () => []),

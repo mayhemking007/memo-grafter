@@ -119,6 +119,20 @@ export class MemoGrafter {
     await this.ingestPipeline.run(messages, sessionId, options);
   }
 
+  async enqueueIncrementalIngest(
+    messages: Message[],
+    sessionId: string,
+    startIndex: number,
+    options: IngestOptions = {},
+  ): Promise<void> {
+    if (this.ingestQueue) {
+      await this.ingestQueue.enqueueIncremental(messages, sessionId, startIndex, options);
+      return;
+    }
+
+    await this.ingestPipeline.runIncremental(messages, sessionId, startIndex, options);
+  }
+
   ingestText(text: string, sessionId: string, options: IngestTextOptions & IngestOptions = {}): Promise<TopicNode[]> {
     const pipelineOptions = this.toTextPipelineOptions(options);
     if (this.ingestQueue) {

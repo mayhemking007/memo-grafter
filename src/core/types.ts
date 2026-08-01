@@ -352,6 +352,8 @@ export interface QueueJobTelemetryEvent {
   jobId: string;
   kind: "messages" | "text";
   messageCount: number;
+  /** UTF-8 byte length of the serialized BullMQ job data. */
+  payloadBytes?: number;
   queuedAt: number;
   startedAt: number;
   completedAt: number;

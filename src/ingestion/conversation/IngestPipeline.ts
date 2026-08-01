@@ -55,14 +55,61 @@ export class IngestPipeline {
   async run(messages: Message[], sessionId: string, options: IngestPipelineOptions = {}): Promise<TopicNode[]> {
     if (messages.length === 0) return [];
 
-    await this.store.saveMessages(sessionId, messages);
     const ingestState = await this.store.getSessionIngestState(sessionId);
     const firstNewMessageIndex = (ingestState?.lastIngestedMessageIndex ?? -1) + 1;
     if (firstNewMessageIndex >= messages.length) return [];
 
+    return this.runIncremental(
+      messages.slice(firstNewMessageIndex),
+      sessionId,
+      firstNewMessageIndex,
+      options,
+      firstNewMessageIndex,
+    );
+  }
+
+  async runIncremental(
+    messages: Message[],
+    sessionId: string,
+    startIndex: number,
+    options: IngestPipelineOptions = {},
+    knownFirstNewMessageIndex?: number,
+  ): Promise<TopicNode[]> {
+    if (messages.length === 0) return [];
+
+    const ingestState = knownFirstNewMessageIndex === undefined
+      ? await this.store.getSessionIngestState(sessionId)
+      : null;
+    const firstNewMessageIndex = knownFirstNewMessageIndex
+      ?? (ingestState?.lastIngestedMessageIndex ?? -1) + 1;
+    const jobEndIndex = startIndex + messages.length - 1;
+    if (jobEndIndex < firstNewMessageIndex) return [];
+
+    const firstJobMessageIndex = Math.max(startIndex, firstNewMessageIndex);
+    const firstJobMessageOffset = firstJobMessageIndex - startIndex;
+    const unprocessedJobMessages = messages.slice(firstJobMessageOffset);
+    await this.store.saveMessagesAt(sessionId, firstJobMessageIndex, unprocessedJobMessages);
+
+    let newMessages = unprocessedJobMessages;
+    if (firstJobMessageIndex > firstNewMessageIndex) {
+      newMessages = await this.store.getMessagesBySession(sessionId, firstNewMessageIndex, jobEndIndex);
+      const expectedMessageCount = jobEndIndex - firstNewMessageIndex + 1;
+      if (newMessages.length !== expectedMessageCount) {
+        throw new Error(
+          `MemoGrafter ingestion gap for session ${sessionId}: expected messages ${firstNewMessageIndex}-${jobEndIndex}, found ${newMessages.length}.`,
+        );
+      }
+    }
+
+    const overlapMessages = await this.store.getRecentMessagesBefore(
+      sessionId,
+      firstNewMessageIndex,
+      INGEST_OVERLAP_MESSAGES,
+    );
+    const contextStartIndex = firstNewMessageIndex - overlapMessages.length;
+    const contextMessages = [...overlapMessages, ...newMessages];
+
     const existingNodes = await this.store.getNodesBySession(sessionId);
-    const contextStartIndex = Math.max(0, firstNewMessageIndex - INGEST_OVERLAP_MESSAGES);
-    const contextMessages = messages.slice(contextStartIndex);
     const contextEmbeddings = await Promise.all(contextMessages.map((message) => this.embedMessage(message)));
     const driftDetector = await this.createDriftDetector(sessionId, options.minSegmentMessages);
     const { segments, reentryMap } = await driftDetector.detectSegments(
@@ -83,10 +130,16 @@ export class IngestPipeline {
     const { label, minSegmentMessages: _minSegmentMessages, ...segmentOptions } = options;
 
     for (const [index, { segment, detectorTopicOrder }] of absoluteSegments.entries()) {
-      const node = await this.segmentProcessor.process(segment, messages, sessionId, {
-        ...segmentOptions,
-        ...(index === 0 && label ? { label } : {}),
-      });
+      const node = await this.segmentProcessor.process(
+        segment,
+        contextMessages,
+        sessionId,
+        {
+          ...segmentOptions,
+          ...(index === 0 && label ? { label } : {}),
+        },
+        contextStartIndex,
+      );
       nodes.push(node);
       nodeByDetectorTopicOrder.set(detectorTopicOrder, node);
 
@@ -121,7 +174,7 @@ export class IngestPipeline {
     }
 
     await this.linkIncrementalEdges(sessionId, existingNodes, nodes);
-    await this.store.updateSessionIngestState(sessionId, messages.length - 1);
+    await this.store.updateSessionIngestState(sessionId, jobEndIndex);
 
     return nodes;
   }
