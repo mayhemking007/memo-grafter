@@ -10,6 +10,7 @@ import {
 } from "../../../../src/index.js";
 import { TelemetryLLMAdapter } from "./telemetry.js";
 import type { RuntimeDescriptor } from "./types.js";
+import type { SmokeMetricsCollector } from "./metrics.js";
 
 export const NOT_USED_RUNTIME: RuntimeDescriptor = {
   llm: { provider: "Not Used", model: "Not Used" },
@@ -89,9 +90,9 @@ export class DeterministicLLM implements LLMAdapter {
 export function deterministicConfig(
   telemetry: TelemetryLLMAdapter,
   overrides: Partial<MemoGrafterConfig> = {},
+  metrics?: SmokeMetricsCollector,
 ): MemoGrafterConfig {
-  return {
-    db: { connectionString: requireEnv("DATABASE_URL") },
+  const config: MemoGrafterConfig = {
     llm: telemetry,
     embedder: new DeterministicEmbedder(),
     drift: {
@@ -101,7 +102,16 @@ export function deterministicConfig(
     },
     inject: { bufferSize: 0, tokenBudget: 1200 },
     ...overrides,
+    db: {
+      connectionString: requireEnv("DATABASE_URL"),
+      ...(metrics ? { telemetry: metrics.databaseTelemetry } : {}),
+      ...overrides.db,
+    },
   };
+  if (config.queue && metrics) {
+    config.queue = { ...config.queue, telemetry: metrics.createQueueTelemetry() };
+  }
+  return config;
 }
 
 export function createDeterministicTelemetry(): TelemetryLLMAdapter {
@@ -111,10 +121,10 @@ export function createDeterministicTelemetry(): TelemetryLLMAdapter {
 export function openAIConfig(
   telemetry: TelemetryLLMAdapter,
   overrides: Partial<MemoGrafterConfig> = {},
+  metrics?: SmokeMetricsCollector,
 ): MemoGrafterConfig {
   requireEnv("OPENAI_API_KEY");
-  return {
-    db: { connectionString: requireEnv("DATABASE_URL") },
+  const config: MemoGrafterConfig = {
     llm: telemetry,
     embedder: new OpenAIEmbedAdapter("text-embedding-3-small"),
     drift: {
@@ -124,12 +134,24 @@ export function openAIConfig(
     },
     inject: { bufferSize: 0, tokenBudget: 1200 },
     ...overrides,
+    db: {
+      connectionString: requireEnv("DATABASE_URL"),
+      ...(metrics ? { telemetry: metrics.databaseTelemetry } : {}),
+      ...overrides.db,
+    },
   };
+  if (config.queue && metrics) {
+    config.queue = { ...config.queue, telemetry: metrics.createQueueTelemetry() };
+  }
+  return config;
 }
 
-export function createOpenAITelemetry(): TelemetryLLMAdapter {
+export function createOpenAITelemetry(metrics?: SmokeMetricsCollector): TelemetryLLMAdapter {
   requireEnv("OPENAI_API_KEY");
-  return new TelemetryLLMAdapter(new OpenAILLMAdapter("gpt-4o-mini"));
+  return new TelemetryLLMAdapter(
+    new OpenAILLMAdapter("gpt-4o-mini"),
+    metrics ? (usage) => metrics.recordLlmCall(usage) : undefined,
+  );
 }
 
 export async function cleanupSessions(sessionIds: string[]): Promise<void> {

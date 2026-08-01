@@ -21,6 +21,23 @@ export interface TokenUsage {
   estimatedTotalTokens: number;
 }
 
+export interface DatabaseUsage {
+  total: number;
+  reads: number;
+  writes: number;
+  other: number;
+}
+
+export interface QueueUsage {
+  completedJobs: number;
+  failedJobs: number;
+  totalMessages: number;
+  firstJobMessageCount: number | null;
+  lastJobMessageCount: number | null;
+  firstJobKind: "messages" | "text" | null;
+  lastJobKind: "messages" | "text" | null;
+}
+
 export interface RuntimeComponent {
   provider: string;
   model: string;
@@ -57,6 +74,8 @@ export interface SmokeTestResult {
   metrics: Record<string, SmokeMetricValue>;
   conversation?: ConversationEntry[];
   tokenUsage?: TokenUsage;
+  databaseUsage: DatabaseUsage;
+  queueUsage?: QueueUsage;
   reason?: string;
   error?: string;
 }
@@ -65,16 +84,17 @@ export interface SmokeContext {
   strict: boolean;
   verbose: boolean;
   timeoutMs: number;
+  telemetry: import("./metrics.js").SmokeMetricsCollector;
 }
 
 export interface SmokeTestDefinition {
   suite: string;
   name: string;
   runtime: RuntimeDescriptor;
-  run(context: SmokeContext): Promise<Omit<SmokeTestResult, "suite" | "name" | "status" | "startedAt" | "finishedAt" | "durationMs" | "runtime">>;
+  run(context: SmokeContext): Promise<Omit<SmokeTestResult, "suite" | "name" | "status" | "startedAt" | "finishedAt" | "durationMs" | "runtime" | "databaseUsage" | "queueUsage">>;
 }
 
-export interface SmokeRunOptions extends SmokeContext {
+export interface SmokeRunOptions extends Omit<SmokeContext, "telemetry"> {
   writeDoc: boolean;
   reportPath?: string;
 }

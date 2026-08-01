@@ -3,6 +3,8 @@ import { Queue, Worker, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
 import type { IngestPipeline } from "./conversation/IngestPipeline.js";
 import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../core/types.js";
+import type { QueueJobTelemetryEvent } from "../core/types.js";
+import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
 
 type IngestJobData = {
   kind: "messages";
@@ -22,12 +24,14 @@ export class IngestQueue {
   private worker: Worker<IngestJobData> | null = null;
   private readonly defaultJobOptions: JobsOptions;
   private readonly queueName: string;
+  private readonly telemetry: MemoGrafterQueueConfig["telemetry"];
 
   constructor(
     private readonly pipeline: IngestPipeline,
     config: MemoGrafterQueueConfig,
   ) {
     this.queueName = config.queueName ?? `mg-ingest-${randomUUID()}`;
+    this.telemetry = config.telemetry;
 
     this.connection = new Redis(config.redisUrl, {
       enableOfflineQueue: false,
@@ -145,8 +149,30 @@ export class IngestQueue {
     this.worker.on("failed", (_job, error) => {
       console.warn("MemoGrafter ingest queue worker warning:", error.message);
     });
+    this.worker.on("completed", (job) => {
+      this.reportQueueEvent(this.telemetry?.onJobCompleted, job, Date.now());
+    });
+    this.worker.on("failed", (job) => {
+      if (job) this.reportQueueEvent(this.telemetry?.onJobFailed, job, Date.now());
+    });
     this.worker.on("error", (error) => {
       console.warn("MemoGrafter ingest queue worker warning:", error.message);
+    });
+  }
+
+  private reportQueueEvent(
+    callback: ((event: QueueJobTelemetryEvent) => void) | undefined,
+    job: { id?: string; data: IngestJobData; timestamp: number; processedOn?: number },
+    completedAt: number,
+  ): void {
+    if (!callback) return;
+    safelyReportQueueTelemetry(callback, {
+      jobId: job.id ?? "unknown",
+      kind: job.data.kind,
+      messageCount: countIngestJobMessages(job.data),
+      queuedAt: job.timestamp,
+      startedAt: job.processedOn ?? job.timestamp,
+      completedAt,
     });
   }
 
@@ -161,5 +187,20 @@ export class IngestQueue {
     } finally {
       if (timeout) clearTimeout(timeout);
     }
+  }
+}
+
+export function countIngestJobMessages(data: IngestJobData): number {
+  return data.kind === "messages" ? data.messages.length : splitTextForIngestion(data.text).length;
+}
+
+export function safelyReportQueueTelemetry(
+  callback: ((event: QueueJobTelemetryEvent) => void) | undefined,
+  event: QueueJobTelemetryEvent,
+): void {
+  try {
+    callback?.(event);
+  } catch {
+    // Observability must never affect queue behavior.
   }
 }

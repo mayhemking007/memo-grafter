@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectInfrastructureMetrics } from "./environment.js";
+import { SmokeMetricsCollector } from "./metrics.js";
 import type {
   InfrastructureMetrics,
   SmokeRunOptions,
@@ -30,10 +31,11 @@ async function executeTest(
 ): Promise<SmokeTestResult> {
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
+  const telemetry = new SmokeMetricsCollector();
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
     const outcome = await Promise.race([
-      definition.run(options),
+      definition.run({ ...options, telemetry }),
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error(`Timed out after ${options.timeoutMs} ms.`)),
@@ -42,6 +44,8 @@ async function executeTest(
       }),
     ]);
     const finished = Date.now();
+    const queueUsage = telemetry.queueSnapshot();
+    const tokenUsage = telemetry.tokenSnapshot();
     return {
       suite: definition.suite,
       name: definition.name,
@@ -50,12 +54,17 @@ async function executeTest(
       finishedAt: new Date(finished).toISOString(),
       durationMs: finished - started,
       runtime: definition.runtime,
+      databaseUsage: telemetry.databaseSnapshot(),
+      ...(queueUsage !== undefined ? { queueUsage } : {}),
       ...outcome,
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
     };
   } catch (error) {
     const finished = Date.now();
     const message = formatError(error);
     const isSkip = message.startsWith("SKIP:");
+    const queueUsage = telemetry.queueSnapshot();
+    const tokenUsage = telemetry.tokenSnapshot();
     return {
       suite: definition.suite,
       name: definition.name,
@@ -64,6 +73,9 @@ async function executeTest(
       finishedAt: new Date(finished).toISOString(),
       durationMs: finished - started,
       runtime: definition.runtime,
+      databaseUsage: telemetry.databaseSnapshot(),
+      ...(queueUsage !== undefined ? { queueUsage } : {}),
+      ...(tokenUsage !== undefined ? { tokenUsage } : {}),
       assertions: [],
       metrics: {},
       ...(isSkip ? { reason: message.slice(5).trim() } : { error: message }),
@@ -114,6 +126,18 @@ function markdown(
   const passed = results.filter((result) => result.status === "passed").length;
   const failed = results.filter((result) => result.status === "failed").length;
   const skipped = results.filter((result) => result.status === "skipped").length;
+  const totalLlmCalls = results.reduce((total, result) => total + (result.tokenUsage?.calls ?? 0), 0);
+  const totalInputTokens = results.reduce((total, result) => total + (result.tokenUsage?.estimatedInputTokens ?? 0), 0);
+  const totalOutputTokens = results.reduce((total, result) => total + (result.tokenUsage?.estimatedOutputTokens ?? 0), 0);
+  const totalTokens = results.reduce((total, result) => total + (result.tokenUsage?.estimatedTotalTokens ?? 0), 0);
+  const totalDatabaseCalls = results.reduce((total, result) => total + result.databaseUsage.total, 0);
+  const totalDatabaseReads = results.reduce((total, result) => total + result.databaseUsage.reads, 0);
+  const totalDatabaseWrites = results.reduce((total, result) => total + result.databaseUsage.writes, 0);
+  const totalDatabaseOther = results.reduce((total, result) => total + result.databaseUsage.other, 0);
+  const queueResults = results.flatMap((result) => result.queueUsage ? [result.queueUsage] : []);
+  const totalQueueJobs = queueResults.reduce((total, usage) => total + usage.completedJobs, 0);
+  const totalQueueFailures = queueResults.reduce((total, usage) => total + usage.failedJobs, 0);
+  const totalQueueMessages = queueResults.reduce((total, usage) => total + usage.totalMessages, 0);
   const lines = [
     "# MemoGrafter Live Smoke Report",
     "",
@@ -140,6 +164,22 @@ function markdown(
   if (infrastructure.redis.error) lines.push("", `Redis error: ${infrastructure.redis.error}`);
   lines.push(
     "",
+    "## Aggregate efficiency",
+    "",
+    "| Metric | Value |",
+    "|---|---:|",
+    `| LLM API calls | ${totalLlmCalls} |`,
+    `| Estimated input tokens | ${totalInputTokens} |`,
+    `| Estimated output tokens | ${totalOutputTokens} |`,
+    `| Estimated total tokens | ${totalTokens} |`,
+    `| Database calls | ${totalDatabaseCalls} |`,
+    `| Database reads | ${totalDatabaseReads} |`,
+    `| Database writes | ${totalDatabaseWrites} |`,
+    `| Database other | ${totalDatabaseOther} |`,
+    `| Queue jobs completed | ${totalQueueJobs} |`,
+    `| Queue jobs failed | ${totalQueueFailures} |`,
+    `| Queue messages processed | ${totalQueueMessages} |`,
+    "",
     "## Runtime configuration",
     "",
     "| Suite | Test | LLM provider | LLM model | Embedder provider | Embedder model |",
@@ -149,16 +189,52 @@ function markdown(
     "",
     "## Summary",
     "",
-    "| Suite | Test | Status | Duration | LLM calls | Estimated tokens |",
-    "|---|---|---:|---:|---:|---:|",
+    "| Suite | Test | Status | Duration | LLM calls | Est. tokens | DB calls | Reads | Writes | Queue jobs |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ...results.map((result) =>
-      `| ${result.suite} | ${result.name} | ${result.status.toUpperCase()} | ${formatDuration(result.durationMs)} | ${result.runtime.llm.provider === "Not Used" ? "Not Used" : result.tokenUsage?.calls ?? 0} | ${result.runtime.llm.provider === "Not Used" ? "Not Used" : result.tokenUsage?.estimatedTotalTokens ?? 0} |`),
+      `| ${result.suite} | ${result.name} | ${result.status.toUpperCase()} | ${formatDuration(result.durationMs)} | ${result.runtime.llm.provider === "Not Used" ? "Not Used" : result.tokenUsage?.calls ?? 0} | ${result.runtime.llm.provider === "Not Used" ? "Not Used" : result.tokenUsage?.estimatedTotalTokens ?? 0} | ${result.databaseUsage.total} | ${result.databaseUsage.reads} | ${result.databaseUsage.writes} | ${result.queueUsage?.completedJobs ?? "Not Used"} |`),
   );
 
   for (const result of results) {
     lines.push("", `## ${result.suite} / ${result.name}`, "");
     if (result.reason) lines.push(`Skipped: ${result.reason}`, "");
     if (result.error) lines.push(`Error: ${result.error}`, "");
+    lines.push(
+      "### Database",
+      "",
+      `- Total calls: ${result.databaseUsage.total}`,
+      `- Reads: ${result.databaseUsage.reads}`,
+      `- Writes: ${result.databaseUsage.writes}`,
+      `- Other: ${result.databaseUsage.other}`,
+      "",
+      "### Queue",
+      "",
+    );
+    if (result.queueUsage) {
+      lines.push(
+        `- Jobs completed: ${result.queueUsage.completedJobs}`,
+        `- Jobs failed: ${result.queueUsage.failedJobs}`,
+        `- Total messages: ${result.queueUsage.totalMessages}`,
+        `- First job message count: ${result.queueUsage.firstJobMessageCount ?? "Not Used"}`,
+        `- Last job message count: ${result.queueUsage.lastJobMessageCount ?? "Not Used"}`,
+        `- First job kind: ${result.queueUsage.firstJobKind ?? "Not Used"}`,
+        `- Last job kind: ${result.queueUsage.lastJobKind ?? "Not Used"}`,
+      );
+    } else {
+      lines.push("- Not Used");
+    }
+    lines.push("", "### LLM", "");
+    if (result.tokenUsage) {
+      lines.push(
+        `- Calls: ${result.tokenUsage.calls}`,
+        `- Estimated input tokens: ${result.tokenUsage.estimatedInputTokens}`,
+        `- Estimated output tokens: ${result.tokenUsage.estimatedOutputTokens}`,
+        `- Estimated total tokens: ${result.tokenUsage.estimatedTotalTokens}`,
+      );
+    } else {
+      lines.push("- Not Used");
+    }
+    lines.push("");
     lines.push("### Metrics", "");
     const metrics = Object.entries(result.metrics);
     if (metrics.length === 0) lines.push("- None");

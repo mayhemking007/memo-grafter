@@ -12,15 +12,15 @@ export const graphBuildingSmoke: SmokeTestDefinition = {
   suite: "graph",
   name: "graph-building",
   runtime: OPENAI_RUNTIME,
-  async run() {
-    const telemetry = createOpenAITelemetry();
+  async run(context) {
+    const telemetry = createOpenAITelemetry(context.telemetry);
     const memo = new MemoGrafter(openAIConfig(telemetry, {
       drift: {
         mode: "intent",
         driftSensitivity: "low",
         minSegmentMessages: 2,
       },
-    }));
+    }, context.telemetry));
     const sessionId = uniqueId("live-smoke-graph");
     const transcript: Message[] = [
       { role: "user", content: "I am planning a quiet Kyoto trip and prefer small neighborhood cafes." },
@@ -35,6 +35,7 @@ export const graphBuildingSmoke: SmokeTestDefinition = {
 
     try {
       await memo.initialize();
+      context.telemetry.start();
       await memo.ingestNow(transcript, sessionId);
       const { nodes, segments } = await memo.getTopics(sessionId);
       const memories = await memo.store.getMemoriesBySession(sessionId);
@@ -85,6 +86,7 @@ export const graphBuildingSmoke: SmokeTestDefinition = {
         tokenUsage: telemetry.snapshot(),
       };
     } finally {
+      context.telemetry.stop();
       await memo.store.clearSession(sessionId).catch(() => undefined);
       await memo.close().catch(() => undefined);
     }

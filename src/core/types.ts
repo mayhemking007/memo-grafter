@@ -332,11 +332,44 @@ export interface MemoGrafterInjectConfig {
   recallMinSimilarity?: number;
 }
 
+export type DatabaseQueryOperation = "read" | "write" | "other";
+
+export interface DatabaseQueryTelemetryEvent {
+  operation: DatabaseQueryOperation;
+}
+
+export interface MemoGrafterDatabaseTelemetry {
+  /** Optional observation hook. Callback errors are ignored and never affect database operations. */
+  onQuery?: (event: DatabaseQueryTelemetryEvent) => void;
+}
+
+export interface MemoGrafterDatabaseConfig {
+  connectionString: string;
+  telemetry?: MemoGrafterDatabaseTelemetry;
+}
+
+export interface QueueJobTelemetryEvent {
+  jobId: string;
+  kind: "messages" | "text";
+  messageCount: number;
+  queuedAt: number;
+  startedAt: number;
+  completedAt: number;
+}
+
+export interface MemoGrafterQueueTelemetry {
+  /** Optional observation hook. Callback errors are ignored and never affect queue operations. */
+  onJobCompleted?: (event: QueueJobTelemetryEvent) => void;
+  /** Optional observation hook for jobs whose final state is failed. */
+  onJobFailed?: (event: QueueJobTelemetryEvent) => void;
+}
+
 export interface MemoGrafterQueueConfig {
   redisUrl: string;
   queueName?: string;
   removeOnComplete?: boolean | number;
   removeOnFail?: boolean | number;
+  telemetry?: MemoGrafterQueueTelemetry;
 }
 
 export interface MemoGrafterCacheConfig {
@@ -345,7 +378,7 @@ export interface MemoGrafterCacheConfig {
 }
 
 export interface MemoGrafterConfig {
-  db: { connectionString: string };
+  db: MemoGrafterDatabaseConfig;
   llm: LLMAdapter;
   embedder: EmbedAdapter;
   systemPrompt?: string;

@@ -59,6 +59,7 @@
     "live-smoke:grafter": "tsx --env-file=.env tests/manual/live-smoke/grafter/run.ts",
     "live-smoke:graph": "tsx --env-file=.env tests/manual/live-smoke/graph/run.ts",
     "live-smoke:ingestion": "tsx --env-file=.env tests/manual/live-smoke/ingestion/run.ts",
+    "live-smoke:ingest-text": "tsx --env-file=.env tests/manual/live-smoke/ingestion/ingest-text-run.ts",
     "live-smoke:fleet": "tsx --env-file=.env tests/manual/live-smoke/fleet/run.ts",
     "live-smoke:crawler": "tsx --env-file=.env tests/manual/live-smoke/crawler/run.ts",
     "live-smoke:maintenance": "tsx --env-file=.env tests/manual/live-smoke/maintenance/run.ts",

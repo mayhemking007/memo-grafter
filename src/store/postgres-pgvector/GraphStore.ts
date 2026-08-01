@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import postgres, { type Sql } from "postgres";
 import type { FleetAgentRecord, GraphStore } from "../GraphStore.js";
+import type { DatabaseQueryOperation, MemoGrafterDatabaseTelemetry } from "../../core/types.js";
 import type { GraftRegistryEntry, MemoryDiff, MemoryDiffField, MemoryEdge, MemoryHistoryEntry, MemoryHistoryOptions, MemoryHistoryResult, MemoryHistoryStatus, MemoryNode, MemoryNodeInsert, Message, SessionIngestState, TagFilterOptions, TopicEdge, TopicNode, TopicSegment } from "../../core/types.js";
 import {
   memoGrafterCurrentMigrationVersion,
@@ -115,15 +116,43 @@ interface AbsorbOptions {
   agentId?: string | null;
 }
 
+export function classifyDatabaseQuery(query: string): DatabaseQueryOperation {
+  const normalized = query.replace(/^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/, "").trimStart().toUpperCase();
+  if (/^(SELECT|SHOW|EXPLAIN)\b/.test(normalized)) return "read";
+  if (/^(INSERT|UPDATE|DELETE|MERGE)\b/.test(normalized)) return "write";
+  if (/^WITH\b/.test(normalized)) {
+    return /\b(INSERT|UPDATE|DELETE|MERGE)\b/.test(normalized) ? "write" : "read";
+  }
+  return "other";
+}
+
+export function safelyReportDatabaseQuery(
+  telemetry: MemoGrafterDatabaseTelemetry | undefined,
+  operation: DatabaseQueryOperation,
+): void {
+  try {
+    telemetry?.onQuery?.({ operation });
+  } catch {
+    // Observability must never affect database behavior.
+  }
+}
+
 export class PostgresGraphStore implements GraphStore {
   private readonly sql: Sql;
 
-  constructor(connectionString: string) {
+  constructor(connectionString: string, options: { telemetry?: MemoGrafterDatabaseTelemetry } = {}) {
     this.sql = postgres(connectionString, {
       max: 10,
       idle_timeout: 30,
       connect_timeout: 10,
       onnotice: () => undefined,
+      ...(options.telemetry?.onQuery
+        ? {
+          debug: (_connection: number, query: string) => {
+            safelyReportDatabaseQuery(options.telemetry, classifyDatabaseQuery(query));
+          },
+        }
+        : {}),
     });
   }
 

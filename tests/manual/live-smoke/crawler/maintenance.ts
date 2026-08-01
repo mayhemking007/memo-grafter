@@ -17,14 +17,15 @@ export const crawlerMaintenanceSmoke: SmokeTestDefinition = {
   suite: "crawler",
   name: "maintenance",
   runtime: NOT_USED_RUNTIME,
-  async run() {
+  async run(context) {
     const telemetry = createDeterministicTelemetry();
     const memo = new MemoGrafter(deterministicConfig(telemetry, {
       drift: { mode: "intent", driftSensitivity: "low", minSegmentMessages: 1 },
-    }));
+    }, context.telemetry));
     const sessionId = uniqueId("live-smoke-crawler");
     try {
       await memo.initialize();
+      context.telemetry.start();
       await memo.ingestNow([
         { role: "user", content: "I live in Delhi." },
         { role: "assistant", content: "I will remember Delhi." },
@@ -71,6 +72,7 @@ export const crawlerMaintenanceSmoke: SmokeTestDefinition = {
         },
       };
     } finally {
+      context.telemetry.stop();
       await memo.store.clearSession(sessionId).catch(() => undefined);
       await memo.close().catch(() => undefined);
     }

@@ -11,11 +11,12 @@ export const memoryLifecycleSmoke: SmokeTestDefinition = {
   suite: "maintenance",
   name: "memory-lifecycle",
   runtime: NOT_USED_RUNTIME,
-  async run() {
+  async run(context) {
     const telemetry = createDeterministicTelemetry();
-    const agent = new MemoGrafterAgent(deterministicConfig(telemetry));
+    const agent = new MemoGrafterAgent(deterministicConfig(telemetry, {}, context.telemetry));
     try {
       await agent.initialize();
+      context.telemetry.start();
       await agent.ingestText("The user prefers blue notebooks for lifecycle smoke testing.");
       const before = await agent.recall("blue notebook preference", { minSimilarity: 0.2 });
       const memoryId = before.facts[0]?.id;
@@ -48,6 +49,7 @@ export const memoryLifecycleSmoke: SmokeTestDefinition = {
         },
       };
     } finally {
+      context.telemetry.stop();
       await agent.clearSession().catch(() => undefined);
       await agent.close().catch(() => undefined);
     }

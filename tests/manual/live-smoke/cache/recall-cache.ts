@@ -35,7 +35,7 @@ export const recallCacheSmoke: SmokeTestDefinition = {
   suite: "cache",
   name: "recall-cache",
   runtime: NOT_USED_RUNTIME,
-  async run() {
+  async run(context) {
     const redisUrl = optionalEnv("REDIS_URL");
     if (!redisUrl) throw new Error("SKIP: REDIS_URL is not configured.");
 
@@ -45,7 +45,7 @@ export const recallCacheSmoke: SmokeTestDefinition = {
         connectionString: redisUrl,
         ttlSeconds: 60,
       },
-    }));
+    }, context.telemetry));
     const observer = new Redis(redisUrl, {
       lazyConnect: true,
       enableOfflineQueue: false,
@@ -58,6 +58,7 @@ export const recallCacheSmoke: SmokeTestDefinition = {
       await observer.connect();
       await observer.ping();
       await agent.initialize();
+      context.telemetry.start();
       await agent.ingestText("The user prefers blue notebooks for recall cache testing.");
       const sessionId = agent.getSessionId();
       assert.equal((await cacheKeysForSession(observer, sessionId)).length, 0, "the unique session should start without cache keys");
@@ -116,6 +117,7 @@ export const recallCacheSmoke: SmokeTestDefinition = {
         },
       };
     } finally {
+      context.telemetry.stop();
       if (createdKeys.length > 0) await observer.del(...createdKeys).catch(() => undefined);
       await agent.clearSession().catch(() => undefined);
       await agent.close().catch(() => undefined);

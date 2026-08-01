@@ -5,12 +5,14 @@ import { basicChatSmoke } from "./grafter/basic-chat.js";
 import { graphBuildingSmoke } from "./graph/graph-building.js";
 import { driftAndPersistenceSmoke } from "./ingestion/drift-and-persistence.js";
 import { queueSmoke } from "./ingestion/queue.js";
+import { ingestTextSmoke } from "./ingestion/ingest-text.js";
 import { memoryLifecycleSmoke } from "./maintenance/memory-lifecycle.js";
 import { runSmokeTests } from "./helpers/runner.js";
 
 await runSmokeTests([
   basicChatSmoke,
   graphBuildingSmoke,
+  ingestTextSmoke,
   driftAndPersistenceSmoke,
   queueSmoke,
   recallCacheSmoke,

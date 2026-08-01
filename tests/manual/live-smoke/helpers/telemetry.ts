@@ -13,16 +13,22 @@ export class TelemetryLLMAdapter implements LLMAdapter {
     estimatedTotalTokens: 0,
   };
 
-  constructor(private readonly delegate: LLMAdapter) {}
+  constructor(
+    private readonly delegate: LLMAdapter,
+    private readonly onCall?: (usage: { inputTokens: number; outputTokens: number }) => void,
+  ) {}
 
   async complete(messages: Message[], system?: string): Promise<string> {
     const input = [system ?? "", ...messages.map((message) => message.content)].join("\n");
     const response = await this.delegate.complete(messages, system);
+    const inputTokens = estimateTokens(input);
+    const outputTokens = estimateTokens(response);
     this.usage.calls += 1;
-    this.usage.estimatedInputTokens += estimateTokens(input);
-    this.usage.estimatedOutputTokens += estimateTokens(response);
+    this.usage.estimatedInputTokens += inputTokens;
+    this.usage.estimatedOutputTokens += outputTokens;
     this.usage.estimatedTotalTokens =
       this.usage.estimatedInputTokens + this.usage.estimatedOutputTokens;
+    this.onCall?.({ inputTokens, outputTokens });
     return response;
   }
 
