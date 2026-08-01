@@ -47,13 +47,27 @@ class IncrementalStore {
   edges: TopicEdge[] = [];
   memories: MemoryNodeInsert[] = [];
   ingestState: SessionIngestState | null = null;
+  messageWrites: Array<{ startIndex: number; messages: Message[] }> = [];
 
   async saveMessages(_sessionId: string, messages: Message[]): Promise<void> {
     this.messages = [...messages];
   }
 
-  async getMessagesBySession(): Promise<Message[]> {
-    return [...this.messages];
+  async saveMessagesAt(_sessionId: string, startIndex: number, messages: Message[]): Promise<void> {
+    this.messageWrites.push({ startIndex, messages: [...messages] });
+    for (const [offset, message] of messages.entries()) {
+      this.messages[startIndex + offset] = message;
+    }
+  }
+
+  async getRecentMessagesBefore(_sessionId: string, beforeIndex: number, limit: number): Promise<Message[]> {
+    return this.messages.slice(Math.max(0, beforeIndex - limit), beforeIndex);
+  }
+
+  async getMessagesBySession(_sessionId?: string, startIndex = 0, endIndex = this.messages.length - 1): Promise<Message[]> {
+    return this.messages
+      .slice(startIndex, endIndex + 1)
+      .filter((message): message is Message => message !== undefined);
   }
 
   async clearSession(): Promise<void> {
@@ -173,7 +187,98 @@ describe("IngestPipeline incremental ingest", () => {
       [2, 3],
     ]);
     expect(store.ingestState?.lastIngestedMessageIndex).toBe(3);
+    expect(store.messageWrites).toEqual([
+      { startIndex: 0, messages: firstHistory },
+      {
+        startIndex: 2,
+        messages: [
+          { role: "user", content: "My Japan budget is around 2500 dollars." },
+          { role: "assistant", content: "Response to budget." },
+        ],
+      },
+    ]);
     expect(store.edges.length).toBeGreaterThan(0);
+  });
+
+  it("treats a completed incremental job as a write-free no-op", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    const pair: Message[] = [
+      { role: "user", content: "I am planning a Japan trip." },
+      { role: "assistant", content: "Response to Japan trip." },
+    ];
+
+    await pipeline.runIncremental(pair, "session-1", 0);
+    const writesAfterFirstRun = store.messageWrites.length;
+    const nodes = await pipeline.runIncremental(pair, "session-1", 0);
+
+    expect(nodes).toEqual([]);
+    expect(store.messageWrites).toHaveLength(writesAfterFirstRun);
+    expect(store.nodes).toHaveLength(1);
+    expect(store.ingestState?.lastIngestedMessageIndex).toBe(1);
+  });
+
+  it("trims the completed prefix of a partially overlapping job", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    const firstPair: Message[] = [
+      { role: "user", content: "I am planning a Japan trip." },
+      { role: "assistant", content: "Response to Japan trip." },
+    ];
+    const secondPair: Message[] = [
+      { role: "user", content: "My Japan budget is around 2500 dollars." },
+      { role: "assistant", content: "Response to budget." },
+    ];
+
+    await pipeline.runIncremental(firstPair, "session-1", 0);
+    await pipeline.runIncremental([...firstPair, ...secondPair], "session-1", 0);
+
+    expect(store.messageWrites.at(-1)).toEqual({ startIndex: 2, messages: secondPair });
+    expect(store.segments.map((segment) => [segment.startIndex, segment.endIndex])).toEqual([
+      [0, 1],
+      [2, 3],
+    ]);
+    expect(store.ingestState?.lastIngestedMessageIndex).toBe(3);
+  });
+
+  it("recovers a contiguous persisted gap before processing a later job", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    const firstPair: Message[] = [
+      { role: "user", content: "I am planning a Japan trip." },
+      { role: "assistant", content: "Response to Japan trip." },
+    ];
+    const secondPair: Message[] = [
+      { role: "user", content: "My Japan budget is around 2500 dollars." },
+      { role: "assistant", content: "Response to budget." },
+    ];
+
+    await store.saveMessagesAt("session-1", 0, firstPair);
+    store.messageWrites.length = 0;
+    const nodes = await pipeline.runIncremental(secondPair, "session-1", 2);
+
+    expect(nodes).toHaveLength(2);
+    expect(store.messageWrites).toEqual([{ startIndex: 2, messages: secondPair }]);
+    expect(store.segments.map((segment) => [segment.startIndex, segment.endIndex])).toEqual([
+      [0, 1],
+      [2, 3],
+    ]);
+    expect(store.ingestState?.lastIngestedMessageIndex).toBe(3);
+  });
+
+  it("rejects a later job when its preceding message range is missing", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    const laterPair: Message[] = [
+      { role: "user", content: "My Japan budget is around 2500 dollars." },
+      { role: "assistant", content: "Response to budget." },
+    ];
+
+    await expect(pipeline.runIncremental(laterPair, "session-1", 2)).rejects.toThrow(
+      "MemoGrafter ingestion gap for session session-1",
+    );
+    expect(store.ingestState).toBeNull();
+    expect(store.nodes).toEqual([]);
   });
 
   it("ingests raw text with label and source metadata, then replaces it", async () => {

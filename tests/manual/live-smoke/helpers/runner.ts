@@ -215,8 +215,12 @@ function markdown(
         `- Jobs completed: ${result.queueUsage.completedJobs}`,
         `- Jobs failed: ${result.queueUsage.failedJobs}`,
         `- Total messages: ${result.queueUsage.totalMessages}`,
+        `- Total payload bytes: ${result.queueUsage.totalPayloadBytes}`,
+        `- Maximum job payload bytes: ${result.queueUsage.maximumJobPayloadBytes}`,
         `- First job message count: ${result.queueUsage.firstJobMessageCount ?? "Not Used"}`,
         `- Last job message count: ${result.queueUsage.lastJobMessageCount ?? "Not Used"}`,
+        `- First job payload bytes: ${result.queueUsage.firstJobPayloadBytes ?? "Not Used"}`,
+        `- Last job payload bytes: ${result.queueUsage.lastJobPayloadBytes ?? "Not Used"}`,
         `- First job kind: ${result.queueUsage.firstJobKind ?? "Not Used"}`,
         `- Last job kind: ${result.queueUsage.lastJobKind ?? "Not Used"}`,
       );

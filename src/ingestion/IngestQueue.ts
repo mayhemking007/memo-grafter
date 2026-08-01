@@ -9,6 +9,7 @@ import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
 type IngestJobData = {
   kind: "messages";
   messages: Message[];
+  startIndex?: number;
   sessionId: string;
   options?: IngestPipelineOptions;
 } | {
@@ -62,6 +63,15 @@ export class IngestQueue {
   }
 
   async enqueue(messages: Message[], sessionId: string, options: IngestPipelineOptions = {}): Promise<void> {
+    await this.enqueueIncremental(messages, sessionId, 0, options).catch(() => undefined);
+  }
+
+  async enqueueIncremental(
+    messages: Message[],
+    sessionId: string,
+    startIndex: number,
+    options: IngestPipelineOptions = {},
+  ): Promise<void> {
     try {
       await this.withTimeout(
         this.queue.add(
@@ -69,6 +79,7 @@ export class IngestQueue {
           {
             kind: "messages",
             messages: [...messages],
+            startIndex,
             sessionId,
             options,
           },
@@ -80,6 +91,7 @@ export class IngestQueue {
       this.ensureWorker();
     } catch (error) {
       console.warn("MemoGrafter ingest queue enqueue failed:", error);
+      throw error;
     }
   }
 
@@ -137,7 +149,12 @@ export class IngestQueue {
             return;
           }
 
-          await this.pipeline.run(job.data.messages, job.data.sessionId, job.data.options ?? {});
+          await this.pipeline.runIncremental(
+            job.data.messages,
+            job.data.sessionId,
+            job.data.startIndex ?? 0,
+            job.data.options ?? {},
+          );
         } catch (error) {
           console.warn("MemoGrafter background ingest failed:", error);
           throw error;
@@ -170,6 +187,7 @@ export class IngestQueue {
       jobId: job.id ?? "unknown",
       kind: job.data.kind,
       messageCount: countIngestJobMessages(job.data),
+      payloadBytes: serializedIngestJobBytes(job.data),
       queuedAt: job.timestamp,
       startedAt: job.processedOn ?? job.timestamp,
       completedAt,
@@ -192,6 +210,10 @@ export class IngestQueue {
 
 export function countIngestJobMessages(data: IngestJobData): number {
   return data.kind === "messages" ? data.messages.length : splitTextForIngestion(data.text).length;
+}
+
+export function serializedIngestJobBytes(data: IngestJobData): number {
+  return Buffer.byteLength(JSON.stringify(data), "utf8");
 }
 
 export function safelyReportQueueTelemetry(

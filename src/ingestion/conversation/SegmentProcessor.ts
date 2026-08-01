@@ -44,10 +44,11 @@ export class SegmentProcessor {
     messages: Message[],
     sessionId: string,
     options: IngestPipelineOptions = {},
+    messageOffset = 0,
   ): Promise<TopicNode> {
     const savedSegment = await this.createSegment(segment, sessionId);
     const tags = normalizeTags(options.tags);
-    const topicNode = await this.nodeRunner(savedSegment, messages, tags, options);
+    const topicNode = await this.nodeRunner(savedSegment, messages, tags, options, messageOffset);
     await this.processMemories(this.lastExtraction.memories, savedSegment, topicNode, options);
     return topicNode;
   }
@@ -69,8 +70,9 @@ export class SegmentProcessor {
     messages: Message[],
     tags: string[],
     options: IngestPipelineOptions,
+    messageOffset: number,
   ): Promise<TopicNode> {
-    const node = await this.nodeProcessor(messages, segment, tags, options);
+    const node = await this.nodeProcessor(messages, segment, tags, options, messageOffset);
     await this.store.saveNode(node);
     return node;
   }
@@ -80,8 +82,12 @@ export class SegmentProcessor {
     segment: TopicSegment,
     tags: string[],
     options: IngestPipelineOptions,
+    messageOffset: number,
   ): Promise<TopicNode> {
-    const segmentMessages = messages.slice(segment.startIndex, segment.endIndex + 1);
+    const segmentMessages = messages.slice(
+      segment.startIndex - messageOffset,
+      segment.endIndex - messageOffset + 1,
+    );
     const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages, options.label);
     const raw = await this.llm.complete([{ role: "user", content: extractionPrompt }]);
     const extracted = parseSegmentExtraction(raw);

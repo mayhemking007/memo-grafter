@@ -3,6 +3,7 @@ import type { Message, QueueJobTelemetryEvent } from "../../../src/index.js";
 import {
   countIngestJobMessages,
   safelyReportQueueTelemetry,
+  serializedIngestJobBytes,
 } from "../../../src/ingestion/IngestQueue.js";
 
 const messages: Message[] = [
@@ -14,6 +15,7 @@ const event: QueueJobTelemetryEvent = {
   jobId: "job-1",
   kind: "messages",
   messageCount: 2,
+  payloadBytes: 128,
   queuedAt: 1,
   startedAt: 2,
   completedAt: 3,
@@ -22,6 +24,11 @@ const event: QueueJobTelemetryEvent = {
 describe("IngestQueue telemetry", () => {
   it("counts conversation messages", () => {
     expect(countIngestJobMessages({ kind: "messages", messages, sessionId: "session-1" })).toBe(2);
+  });
+
+  it("measures the serialized UTF-8 job payload", () => {
+    const data = { kind: "messages" as const, messages, startIndex: 0, sessionId: "session-1" };
+    expect(serializedIngestJobBytes(data)).toBe(Buffer.byteLength(JSON.stringify(data), "utf8"));
   });
 
   it("counts text chunks as logical messages", () => {

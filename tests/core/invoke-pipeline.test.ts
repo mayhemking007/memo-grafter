@@ -6,7 +6,7 @@ console.log("invoke() pipeline - proactive memory recall");
 type TestCore = {
   getTopics(sessionId: string): Promise<{ nodes: TopicNode[]; segments: TopicSegment[] }>;
   inject(sessionId: string, topicIds: string[]): Promise<{ systemPrompt: string; nodes: TopicNode[]; tokenCount: number }>;
-  enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
+  enqueueIncrementalIngest(messages: Message[], sessionId: string, startIndex: number): Promise<void>;
   store: {
     getSessionNodeCount(sessionId: string): Promise<number>;
   };
@@ -45,7 +45,7 @@ function createAgent(overrides: Partial<MemoGrafterConfig> = {}): MemoGrafterAge
 
 function patchCore(agent: MemoGrafterAgent): TestCore {
   const core = (agent as unknown as { core: TestCore }).core;
-  core.enqueueIngest = async () => undefined;
+  core.enqueueIncrementalIngest = async () => undefined;
   return core;
 }
 

@@ -37,6 +37,7 @@ export class MemoGrafterAgent {
   private readonly cacheConfig: MemoGrafterConfig["cache"];
   private sessionTags: string[] = [];
   private pendingIngest: Promise<void> = Promise.resolve();
+  private lastEnqueuedIngestionIndex = -1;
 
   constructor(config: MemoGrafterConfig) {
     this.core = new MemoGrafter(config);
@@ -88,6 +89,7 @@ export class MemoGrafterAgent {
     const run = async (): Promise<void> => {
       if (options.replace) {
         this.ingestionHistory.splice(0, this.ingestionHistory.length);
+        this.lastEnqueuedIngestionIndex = -1;
       }
 
       await this.core.enqueueTextIngest(text, this.sessionId, {
@@ -95,6 +97,7 @@ export class MemoGrafterAgent {
         tags: this.sessionTags,
       });
       this.ingestionHistory.push(...chunks.map((content): Message => ({ role: "user", content })));
+      this.lastEnqueuedIngestionIndex = this.ingestionHistory.length - 1;
     };
 
     const operation = this.pendingIngest.then(run);
@@ -241,6 +244,7 @@ export class MemoGrafterAgent {
     await this.core.store.clearSession(this.sessionId);
     this.history.splice(0, this.history.length);
     this.ingestionHistory.splice(0, this.ingestionHistory.length);
+    this.lastEnqueuedIngestionIndex = -1;
   }
 
   async graft(topicIds?: string[]): Promise<InjectionResult> {
@@ -288,10 +292,20 @@ export class MemoGrafterAgent {
   }
 
   private enqueueBackgroundIngest(): void {
-    const historySnapshot = [...this.ingestionHistory];
+    const endIndex = this.ingestionHistory.length - 1;
 
     this.pendingIngest = this.pendingIngest
-      .then(() => this.core.enqueueIngest(historySnapshot, this.sessionId, { tags: this.sessionTags }))
+      .then(async () => {
+        const startIndex = this.lastEnqueuedIngestionIndex + 1;
+        const newMessages = this.ingestionHistory.slice(startIndex, endIndex + 1);
+        await this.core.enqueueIncrementalIngest(
+          newMessages,
+          this.sessionId,
+          startIndex,
+          { tags: this.sessionTags },
+        );
+        this.lastEnqueuedIngestionIndex = endIndex;
+      })
       .catch((error: unknown) => {
         console.warn("MemoGrafter background ingest warning:", error);
       });

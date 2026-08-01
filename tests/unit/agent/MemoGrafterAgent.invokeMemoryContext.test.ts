@@ -11,12 +11,13 @@ import type {
 } from "../../../src/core/types.js";
 
 type AgentInternals = {
+  pendingIngest: Promise<void>;
   core: {
     llm: LLMAdapter;
     store: {
       getSessionNodeCount(sessionId: string): Promise<number>;
     };
-    enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
+    enqueueIncrementalIngest(messages: Message[], sessionId: string, startIndex: number): Promise<void>;
   };
   recall(query: string, options?: RetrieverConfig): Promise<RetrievalResult>;
 };
@@ -92,7 +93,7 @@ describe("MemoGrafterAgent.invoke memory context", () => {
     const llm = new CapturingLLMAdapter();
     const agent = createAgent({ llm });
     const privateAgent = internals(agent);
-    privateAgent.core.enqueueIngest = vi.fn<AgentInternals["core"]["enqueueIngest"]>().mockResolvedValue(undefined);
+    privateAgent.core.enqueueIncrementalIngest = vi.fn<AgentInternals["core"]["enqueueIncrementalIngest"]>().mockResolvedValue(undefined);
     privateAgent.core.store.getSessionNodeCount = vi.fn<AgentInternals["core"]["store"]["getSessionNodeCount"]>()
       .mockResolvedValue(0);
     privateAgent.recall = vi.fn<AgentInternals["recall"]>().mockResolvedValue(retrievalResult("should not inject"));
@@ -106,6 +107,72 @@ describe("MemoGrafterAgent.invoke memory context", () => {
     ]);
   });
 
+  it("enqueues only each completed user-assistant pair with its absolute start index", async () => {
+    const llm = new CapturingLLMAdapter();
+    const agent = createAgent({ llm });
+    const privateAgent = internals(agent);
+    privateAgent.core.store.getSessionNodeCount = vi.fn<AgentInternals["core"]["store"]["getSessionNodeCount"]>()
+      .mockResolvedValue(0);
+    privateAgent.core.enqueueIncrementalIngest = vi.fn<AgentInternals["core"]["enqueueIncrementalIngest"]>()
+      .mockResolvedValue(undefined);
+
+    await agent.invoke("First turn.");
+    await agent.invoke("Second turn.");
+    await privateAgent.pendingIngest;
+
+    expect(privateAgent.core.enqueueIncrementalIngest).toHaveBeenNthCalledWith(
+      1,
+      [
+        { role: "user", content: "First turn." },
+        { role: "assistant", content: "Response to: First turn." },
+      ],
+      agent.getSessionId(),
+      0,
+      { tags: [] },
+    );
+    expect(privateAgent.core.enqueueIncrementalIngest).toHaveBeenNthCalledWith(
+      2,
+      [
+        { role: "user", content: "Second turn." },
+        { role: "assistant", content: "Response to: Second turn." },
+      ],
+      agent.getSessionId(),
+      2,
+      { tags: [] },
+    );
+  });
+
+  it("re-enqueues only the unsent backlog after an enqueue failure", async () => {
+    const llm = new CapturingLLMAdapter();
+    const agent = createAgent({ llm });
+    const privateAgent = internals(agent);
+    privateAgent.core.store.getSessionNodeCount = vi.fn<AgentInternals["core"]["store"]["getSessionNodeCount"]>()
+      .mockResolvedValue(0);
+    privateAgent.core.enqueueIncrementalIngest = vi.fn<AgentInternals["core"]["enqueueIncrementalIngest"]>()
+      .mockRejectedValueOnce(new Error("Redis unavailable"))
+      .mockResolvedValue(undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await agent.invoke("First turn.");
+    await privateAgent.pendingIngest;
+    await agent.invoke("Second turn.");
+    await privateAgent.pendingIngest;
+
+    expect(privateAgent.core.enqueueIncrementalIngest).toHaveBeenNthCalledWith(
+      2,
+      [
+        { role: "user", content: "First turn." },
+        { role: "assistant", content: "Response to: First turn." },
+        { role: "user", content: "Second turn." },
+        { role: "assistant", content: "Response to: Second turn." },
+      ],
+      agent.getSessionId(),
+      0,
+      { tags: [] },
+    );
+    expect(warn).toHaveBeenCalledWith("MemoGrafter background ingest warning:", expect.any(Error));
+  });
+
   it("injects recalled memories before raw history and the current user message", async () => {
     const llm = new CapturingLLMAdapter();
     const agent = createAgent({
@@ -117,7 +184,7 @@ describe("MemoGrafterAgent.invoke memory context", () => {
       },
     });
     const privateAgent = internals(agent);
-    privateAgent.core.enqueueIngest = vi.fn<AgentInternals["core"]["enqueueIngest"]>().mockResolvedValue(undefined);
+    privateAgent.core.enqueueIncrementalIngest = vi.fn<AgentInternals["core"]["enqueueIncrementalIngest"]>().mockResolvedValue(undefined);
     privateAgent.core.store.getSessionNodeCount = vi.fn<AgentInternals["core"]["store"]["getSessionNodeCount"]>()
       .mockResolvedValue(2);
     privateAgent.recall = vi.fn<AgentInternals["recall"]>().mockResolvedValue(retrievalResult("Relevant memory"));
@@ -141,7 +208,7 @@ describe("MemoGrafterAgent.invoke memory context", () => {
     const llm = new CapturingLLMAdapter();
     const agent = createAgent({ llm, inject: { recentWindowSize: 2 } });
     const privateAgent = internals(agent);
-    privateAgent.core.enqueueIngest = vi.fn<AgentInternals["core"]["enqueueIngest"]>().mockResolvedValue(undefined);
+    privateAgent.core.enqueueIncrementalIngest = vi.fn<AgentInternals["core"]["enqueueIncrementalIngest"]>().mockResolvedValue(undefined);
     privateAgent.core.store.getSessionNodeCount = vi.fn<AgentInternals["core"]["store"]["getSessionNodeCount"]>()
       .mockResolvedValue(1);
     privateAgent.recall = vi.fn<AgentInternals["recall"]>().mockRejectedValue(new Error("embed failed"));

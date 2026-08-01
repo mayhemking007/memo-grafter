@@ -39,30 +39,31 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 3. The agent builds the LLM message list from an optional recalled-memory system message, a recent raw history window, and the current user message.
 4. The configured `LLMAdapter` produces the assistant response.
 5. The user message and assistant response are appended to session history.
-6. The full history snapshot is queued for background ingestion.
-7. Ingestion persists messages, processes only unprocessed message ranges, appends new graph state, and updates graph edges.
+6. The newly completed user-assistant pair and its absolute start index are queued for background ingestion. If an enqueue attempt fails, the agent retains that unsent range and includes it with the next enqueue attempt.
+7. Ingestion persists only unprocessed messages, loads a small preceding overlap from storage, appends new graph state, and updates graph edges.
 
 `MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. The existing drift detector runs across the chunks, and the extraction LLM, topic segmentation, memory extraction, and edge-building stages are reused.
 
-The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced active graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Calls that need consistent memory state, such as `getActiveNodes()`, `getActiveSegments()`, `getGraphSnapshot()`, `graft()`, `graftByRelevance()`, lifecycle controls, and `close()`, wait for pending ingestion to finish.
+The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced active graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Read and lifecycle calls wait for the agent's local pending-ingest chain. Without queue mode that includes pipeline completion; with BullMQ it covers submission only, and durable graph visibility still depends on worker completion.
 
 ## Ingestion Flow
 
 `IngestPipeline` is responsible for turning a session message history into graph state.
 
 ```text
-messages + sessionId
-  -> save message buffer
-  -> load existing topic nodes
+indexed messages + sessionId
   -> load session ingest cursor
-  -> embed each message
+  -> save only the unprocessed message range
+  -> load up to six preceding messages
+  -> load existing topic nodes
+  -> embed overlap + unprocessed messages
   -> detect topic segments for new message ranges
   -> process each new segment
   -> append temporal, semantic, and reentry edges
   -> add reentry edges when detected
 ```
 
-The current ingestion model is incremental. `mg_session_ingest_state` tracks the last processed message index for each session, so repeated ingestion of the same message snapshot is a no-op for graph creation. Existing topic nodes, grafted nodes, memory nodes, and graph edges are preserved during normal `invoke()` processing. `clearSession()` remains available as an explicit reset API rather than a default ingest step.
+The current ingestion model is incremental. `mg_session_ingest_state` tracks the last processed message index for each session, so repeated jobs are no-ops and partially overlapping jobs are trimmed to their unprocessed suffix. Indexed jobs never advance the cursor across a missing range. Existing topic nodes, grafted nodes, memory nodes, and graph edges are preserved during normal `invoke()` processing. `clearSession()` remains available as an explicit reset API rather than a default ingest step.
 
 ## Main Components
 
@@ -110,7 +111,7 @@ Its responsibilities include:
 - providing targeted recall through `RetrieverPipeline`;
 - storing optional session tags and applying them to future ingested topic and memory rows;
 - exposing explicit memory lifecycle controls for forgetting memory nodes and suppressing or restoring topic nodes;
-- waiting for pending ingestion before reads that depend on memory state.
+- waiting for the local pending-ingest chain before dependent reads; in queue mode, worker completion remains a separate consistency boundary.
 
 The agent keeps public conversational history separate from its graph ingestion history. This allows raw text and later chat turns to share one incremental graph cursor while keeping `getHistory()` and invoke-time prompts conversational.
 
@@ -118,7 +119,7 @@ The agent keeps public conversational history separate from its graph ingestion 
 
 ### IngestPipeline
 
-`IngestPipeline` coordinates the write-side memory pipeline. It receives a complete message snapshot and a session ID, saves the message buffer, reads the session ingest cursor, embeds messages for the unprocessed range plus a small overlap window, delegates topic boundary detection to `TopicDriftDetector`, delegates node creation to `SegmentProcessor`, and appends graph edges.
+`IngestPipeline` coordinates the write-side memory pipeline. Agent queue jobs normally carry only the newly completed user-assistant pair plus its absolute start index; after an enqueue failure, the next attempt also carries the retained unsent range. The pipeline reads the session ingest cursor, persists only the unprocessed range, loads up to six preceding messages from storage, embeds that overlap plus the new messages, delegates topic boundary detection to `TopicDriftDetector`, delegates node creation to `SegmentProcessor`, and appends graph edges. The public full-history ingestion APIs are retained and internally reduced to the same unprocessed indexed range.
 
 When adaptive drift sensitivity is enabled, ingestion reads recent saved segments for the session before detection and derives a conservative per-run threshold from the configured static sensitivity. Short, consistently fragmented recent segments raise the threshold slightly; consistently long recent segments lower it slightly. The adjustment is bounded, skipped for short or unstable histories, and does not require schema changes.
 
@@ -327,5 +328,7 @@ During normal ingestion, existing graph state is not cleared. New topic nodes an
 - **Token-budgeted graft assembly:** graft prompt assembly respects token budgets by trimming context and includes maintenance notes when active memory facts supersede contradictory summary details.
 - **Semantic graft selection is additive:** `graftByRelevance()` uses topic-node vector search to choose graft seeds by natural-language query, then delegates to the existing graft assembly path. Existing `graft()` and `inject()` behavior remains unchanged.
 - **Optional asynchronous ingestion:** queue mode can move ingestion work behind a BullMQ/Redis queue without changing the pipeline contract.
+- **Bounded conversational queue payloads:** normal agent jobs carry one user-assistant pair and an absolute start index; historical drift overlap is loaded from PostgreSQL instead of copied through Redis.
+- **Cursor-safe delivery:** completed retries are no-ops, partial overlaps are trimmed, persisted gaps can be recovered, and missing gaps fail before cursor advancement.
 - **Optional recall cache:** recall can cache raw memory search results in Redis for a short bounded TTL without caching final prompt assembly.
 - **Grafting is explicit and traceable:** memory transfer copies selected topic nodes and active atomic memories into a target session, records graph edges, and stores provenance in `mg_graft_registry` instead of silently mixing sessions.

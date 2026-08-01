@@ -10,7 +10,7 @@ import type {
 
 type AgentCore = {
   llm: LLMAdapter;
-  enqueueIngest(messages: Message[], sessionId: string): Promise<void>;
+  enqueueIncrementalIngest(messages: Message[], sessionId: string, startIndex: number): Promise<void>;
   enqueueTextIngest(
     text: string,
     sessionId: string,
@@ -93,12 +93,12 @@ describe("MemoGrafterAgent.ingestText", () => {
     const llm = new CapturingLLMAdapter();
     const agent = createAgent(llm);
     const privateAgent = internals(agent);
-    const messageSnapshots: Message[][] = [];
+    const messageBatches: Array<{ messages: Message[]; startIndex: number }> = [];
     const textCalls: Array<{ text: string; replace?: boolean }> = [];
 
     privateAgent.core.store.getSessionNodeCount = async () => 0;
-    privateAgent.core.enqueueIngest = async (messages) => {
-      messageSnapshots.push([...messages]);
+    privateAgent.core.enqueueIncrementalIngest = async (messages, _sessionId, startIndex) => {
+      messageBatches.push({ messages: [...messages], startIndex });
     };
     privateAgent.core.enqueueTextIngest = async (text, _sessionId, options) => {
       textCalls.push({ text, replace: options?.replace });
@@ -123,16 +123,21 @@ describe("MemoGrafterAgent.ingestText", () => {
       ],
     ]);
     expect(textCalls).toEqual([{ text: "Replacement document.", replace: true }]);
-    expect(messageSnapshots).toEqual([
-      [
-        { role: "user", content: "Chat before replacement." },
-        { role: "assistant", content: "Assistant response" },
-      ],
-      [
-        { role: "user", content: "Replacement document." },
-        { role: "user", content: "Chat after replacement." },
-        { role: "assistant", content: "Assistant response" },
-      ],
+    expect(messageBatches).toEqual([
+      {
+        startIndex: 0,
+        messages: [
+          { role: "user", content: "Chat before replacement." },
+          { role: "assistant", content: "Assistant response" },
+        ],
+      },
+      {
+        startIndex: 1,
+        messages: [
+          { role: "user", content: "Chat after replacement." },
+          { role: "assistant", content: "Assistant response" },
+        ],
+      },
     ]);
   });
 

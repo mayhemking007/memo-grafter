@@ -370,7 +370,9 @@ On every call, `invoke()`:
 3. Prepends the recalled memory prompt as a system message when recall returns matching facts.
 4. Builds the LLM message list from the optional memory system message, the recent raw history window, and the current user message.
 5. Adds the user message and assistant response to local history after the LLM response.
-6. Queues ingestion of only the newly added conversation turns into the memory graph.
+6. Queues the newly completed user-assistant pair with its absolute message start index. A normal job contains two messages, not the complete session history.
+
+The worker persists only messages beyond the stored ingest cursor, loads up to six preceding messages from PostgreSQL for drift context, and creates graph state only for the unprocessed range. This changes transport and persistence efficiency without changing the foreground LLM prompt, drift scoring, extraction prompts, or graph-building stages.
 
 Recall is skipped entirely when the session has no topic nodes yet. This avoids an unnecessary embed and vector search on the first turn or while async ingestion has not produced graph content.
 
@@ -673,7 +675,7 @@ Each `snapshotMemories` entry contains:
 
 The `nodes`, `edges`, `memories`, and `memoryEdges` arrays remain available for backward-compatible callers that already read the raw graph rows directly. Snapshot arrays are sorted deterministically so graph UIs can use them as a stable primary data source.
 
-This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's pending ingest work before reading. If called immediately after `invoke()` in queue mode, it waits for the current ingest job to settle before returning.
+This method is read-only. It does not include raw `mg_message_buffer` content and does not add rendering, layout, or color decisions. Like `getActiveNodes()` and `getActiveSegments()`, it waits for the agent's local pending-ingest chain before reading. Without queue mode that includes pipeline completion; with BullMQ it guarantees only that submission settled, so callers that require newly created graph state must still wait for worker completion.
 
 Graph snapshots intentionally include stale and maintenance metadata so visualizers can show memory lifecycle state. For example, a UI can hide or label `forgotten` memories, fade `decayed` memories, show `hasConflict` badges, draw `conflicts` edges between contradictory facts, draw `updates` edges from the current fact to the older fact it replaced, and show suppressed topics separately from active topics.
 
@@ -1295,7 +1297,11 @@ const agent = new MemoGrafterAgent({
 
 Queue mode is useful when ingestion becomes too slow to run inline. Redis connection problems are logged as warnings and should not throw from normal chatbot invocation.
 
-Whether ingestion runs inline or through the queue, MemoGrafter uses the stored ingest cursor to skip message ranges that have already been processed. Queue retries should therefore avoid creating duplicate topic nodes for the same message range.
+For agent conversations, a normal BullMQ job contains the latest user-assistant pair plus an absolute `startIndex`. The worker does not receive the complete session history: it loads up to six preceding messages from `mg_message_buffer` and combines them with the new pair for the existing drift calculation. Only the new, unprocessed messages are written back to the message buffer.
+
+Whether ingestion runs inline or through the queue, MemoGrafter uses the stored ingest cursor to skip completed jobs, trim partially overlapping retries, and prevent duplicate topic nodes. A job arriving after a gap can recover the missing contiguous range when those messages were already persisted; otherwise it fails without advancing the cursor. If Redis rejects an enqueue before a job is created, `MemoGrafterAgent` retains the unsent range and includes it in the next enqueue attempt. Normal successful jobs remain two messages.
+
+Optional queue telemetry reports job kind, logical message count, serialized payload bytes, and queue timing. These metrics can be used to confirm that normal conversation jobs remain constant-sized as session history grows.
 
 ## Custom Adapters
 

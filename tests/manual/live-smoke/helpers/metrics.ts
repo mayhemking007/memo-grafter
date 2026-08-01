@@ -59,8 +59,12 @@ export class SmokeMetricsCollector {
       completedJobs: this.completed.size,
       failedJobs: this.failed.size,
       totalMessages: ordered.reduce((total, job) => total + job.messageCount, 0),
+      totalPayloadBytes: ordered.reduce((total, job) => total + (job.payloadBytes ?? 0), 0),
+      maximumJobPayloadBytes: ordered.reduce((maximum, job) => Math.max(maximum, job.payloadBytes ?? 0), 0),
       firstJobMessageCount: first?.messageCount ?? null,
       lastJobMessageCount: last?.messageCount ?? null,
+      firstJobPayloadBytes: first?.payloadBytes ?? null,
+      lastJobPayloadBytes: last?.payloadBytes ?? null,
       firstJobKind: first?.kind ?? null,
       lastJobKind: last?.kind ?? null,
     };
