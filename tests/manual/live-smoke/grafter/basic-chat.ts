@@ -15,12 +15,15 @@ export const basicChatSmoke: SmokeTestDefinition = {
     llm: { provider: "OpenAI", model: "gpt-4o-mini" },
     embedder: { provider: "OpenAI", model: "text-embedding-3-small" },
   },
-  async run() {
+  async run(context) {
     const databaseUrl = requireEnv("DATABASE_URL");
     requireEnv("OPENAI_API_KEY");
-    const telemetry = new TelemetryLLMAdapter(new OpenAILLMAdapter("gpt-4o-mini"));
+    const telemetry = new TelemetryLLMAdapter(
+      new OpenAILLMAdapter("gpt-4o-mini"),
+      (usage) => context.telemetry.recordLlmCall(usage),
+    );
     const agent = new MemoGrafterAgent({
-      db: { connectionString: databaseUrl },
+      db: { connectionString: databaseUrl, telemetry: context.telemetry.databaseTelemetry },
       llm: telemetry,
       embedder: new OpenAIEmbedAdapter("text-embedding-3-small"),
       systemPrompt: "You are a concise assistant. Keep smoke-test answers to one sentence.",
@@ -31,6 +34,7 @@ export const basicChatSmoke: SmokeTestDefinition = {
 
     try {
       await agent.initialize();
+      context.telemetry.start();
       for (const prompt of [
         "Remember that I prefer quiet neighborhoods and small cafes when visiting Kyoto.",
         "What kind of Kyoto itinerary would suit me?",
@@ -68,6 +72,7 @@ export const basicChatSmoke: SmokeTestDefinition = {
         tokenUsage: telemetry.snapshot(),
       };
     } finally {
+      context.telemetry.stop();
       await agent.clearSession().catch(() => undefined);
       await agent.close().catch(() => undefined);
     }

@@ -13,16 +13,17 @@ export const fleetSharedMemorySmoke: SmokeTestDefinition = {
   suite: "fleet",
   name: "shared-memory",
   runtime: OPENAI_RUNTIME,
-  async run() {
-    const telemetry = createOpenAITelemetry();
+  async run(context) {
+    const telemetry = createOpenAITelemetry(context.telemetry);
     const fleetId = uniqueId("live-smoke-fleet");
-    const fleet = new MemoGrafterFleet(openAIConfig(telemetry), {
+    const fleet = new MemoGrafterFleet(openAIConfig(telemetry, {}, context.telemetry), {
       id: fleetId,
       name: "Live smoke fleet",
     });
     const sessionIds: string[] = [];
     try {
       await fleet.initialize();
+      context.telemetry.start();
       const support = await fleet.createWorker({ color: "support" });
       const billing = await fleet.createWorker({ color: "billing", memory: "fleet" });
       sessionIds.push(fleet.getSharedSessionId(), support.getSessionId(), billing.getSessionId());
@@ -73,6 +74,7 @@ export const fleetSharedMemorySmoke: SmokeTestDefinition = {
         tokenUsage: telemetry.snapshot(),
       };
     } finally {
+      context.telemetry.stop();
       await fleet.close().catch(() => undefined);
       await cleanupFleet(fleetId, sessionIds).catch(() => undefined);
     }

@@ -224,15 +224,19 @@ crawler, or lifecycle workflow, run the minimal live smoke suite:
 npm run live-smoke:smoke
 ```
 
-This suite uses the root `.env`; its basic chat, graph building, queue, and
-Fleet checks call OpenAI. Queue and recall-cache coverage runs when `REDIS_URL`
-is configured. To save a Markdown
+This suite uses the root `.env`; its basic chat, graph building, `ingestText`,
+queue, and Fleet checks call OpenAI. Queue and recall-cache coverage runs when
+`REDIS_URL` is configured. To save a Markdown
 report containing timings, answers, drift scores, node counts, queue metrics,
 and estimated token usage:
 
 ```bash
 npm run live-smoke:smoke -- --write-doc
 ```
+
+The generated report includes per-test and aggregate LLM calls, estimated
+tokens, actual PostgreSQL statement counts split into reads and writes, and
+queue job/message metrics. Setup and cleanup queries are excluded.
 
 See `tests/manual/live-smoke/README.md` for individual suite commands and
 reporting options.

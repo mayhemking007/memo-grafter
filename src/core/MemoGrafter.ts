@@ -56,7 +56,9 @@ export class MemoGrafter {
 
     this.llm = config.llm;
     this.embedder = config.embedder;
-    this.store = new PostgresGraphStore(config.db.connectionString);
+    this.store = new PostgresGraphStore(config.db.connectionString, {
+      ...(config.db.telemetry ? { telemetry: config.db.telemetry } : {}),
+    });
     this.graphTopK = topK;
     this.graphHopDepth = hopDepth;
     this.recallCache = config.cache

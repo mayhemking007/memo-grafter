@@ -12,9 +12,9 @@ export const driftAndPersistenceSmoke: SmokeTestDefinition = {
   suite: "ingestion",
   name: "drift-and-persistence",
   runtime: NOT_USED_RUNTIME,
-  async run() {
+  async run(context) {
     const telemetry = createDeterministicTelemetry();
-    const memo = new MemoGrafter(deterministicConfig(telemetry));
+    const memo = new MemoGrafter(deterministicConfig(telemetry, {}, context.telemetry));
     const sessionId = uniqueId("live-smoke-drift");
     const transcript: Message[] = [
       { role: "user", content: "I am planning a quiet trip to Kyoto." },
@@ -28,6 +28,7 @@ export const driftAndPersistenceSmoke: SmokeTestDefinition = {
     ];
     try {
       await memo.initialize();
+      context.telemetry.start();
       const nodes = await memo.ingestNow(transcript, sessionId);
       const { segments } = await memo.getTopics(sessionId);
       const memories = await memo.store.getMemoriesBySession(sessionId);
@@ -63,6 +64,7 @@ export const driftAndPersistenceSmoke: SmokeTestDefinition = {
         },
       };
     } finally {
+      context.telemetry.stop();
       await memo.store.clearSession(sessionId).catch(() => undefined);
       await memo.close().catch(() => undefined);
     }
