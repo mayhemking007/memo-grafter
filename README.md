@@ -210,7 +210,7 @@ console.log(recall.facts);
 - PostgreSQL with the `pgvector` extension enabled for the built-in store.
 - An LLM adapter.
 - An embedding adapter.
-- OpenAI, Anthropic, or Gemini API keys only when using the included adapters for those providers.
+- OpenAI, Anthropic, or Gemini SDKs and API keys only when the corresponding included adapter performs its first completion or embedding operation. Importing MemoGrafter and constructing adapters do not load provider SDKs.
 - Redis only when enabling queue mode or the optional recall cache.
 
 MemoGrafter is server-side only. Do not run it in browser code.

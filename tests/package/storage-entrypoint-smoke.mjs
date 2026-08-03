@@ -55,6 +55,34 @@ try {
   const storeModule = await import(storeModuleUrl);
   assert.equal(typeof storeModule.PostgresGraphStore, "function");
 
+  const rootModuleUrl = pathToFileURL(
+    path.join(fixtureRoot, "node_modules", "memo-grafter", "dist", "index.js"),
+  ).href;
+  const rootModule = await import(rootModuleUrl);
+  assert.equal(typeof rootModule.MemoGrafterAgent, "function");
+
+  const adapters = [
+    new rootModule.OpenAILLMAdapter(),
+    new rootModule.OpenAIEmbedAdapter(),
+    new rootModule.AnthropicLLMAdapter(),
+    new rootModule.GeminiLLMAdapter(),
+    new rootModule.GeminiEmbedAdapter(),
+  ];
+  assert.equal(adapters.length, 5, "all adapters should construct without provider SDKs");
+
+  await assert.rejects(
+    adapters[0].complete([{ role: "user", content: "Hello" }]),
+    /requires the optional "openai" package.*npm install openai/,
+  );
+  await assert.rejects(
+    adapters[2].complete([{ role: "user", content: "Hello" }]),
+    /requires the optional "@anthropic-ai\/sdk" package.*npm install @anthropic-ai\/sdk/,
+  );
+  await assert.rejects(
+    adapters[3].complete([{ role: "user", content: "Hello" }]),
+    /requires the optional "@google\/genai" package.*npm install @google\/genai/,
+  );
+
   const memoGrafterCli = path.join(
     fixtureRoot,
     "node_modules",

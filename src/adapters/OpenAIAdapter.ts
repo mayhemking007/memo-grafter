@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { EmbedAdapter, LLMAdapter, Message } from "../core/types.js";
 
@@ -8,7 +8,7 @@ export interface OpenAILLMAdapterOptions {
 }
 
 export class OpenAILLMAdapter implements LLMAdapter {
-  private readonly client = new OpenAI();
+  private clientPromise: Promise<OpenAI> | undefined;
 
   constructor(
     private readonly model = "gpt-4o",
@@ -24,45 +24,110 @@ export class OpenAILLMAdapter implements LLMAdapter {
       })),
     ];
 
-    if (this.options.streaming) {
-      const stream = await this.client.chat.completions.create({
-        model: this.model,
-        messages: openAiMessages,
-        stream: true,
-      });
-      let response = "";
+    try {
+      const client = await this.getClient();
 
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta.content;
-        if (!content) continue;
+      if (this.options.streaming) {
+        const stream = await client.chat.completions.create({
+          model: this.model,
+          messages: openAiMessages,
+          stream: true,
+        });
+        let response = "";
 
-        response += content;
-        await this.options.onChunk?.(content);
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta.content;
+          if (!content) continue;
+
+          response += content;
+          await this.options.onChunk?.(content);
+        }
+
+        return response;
       }
 
-      return response;
+      const response = await client.chat.completions.create({
+        model: this.model,
+        messages: openAiMessages,
+      });
+
+      return response.choices[0]?.message.content ?? "";
+    } catch (error) {
+      if (isMissingOpenAISdkError(error)) throw error;
+      throw new Error(
+        "OpenAI completion failed. Configure OPENAI_API_KEY and verify the model and credentials.",
+        { cause: error },
+      );
     }
+  }
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: openAiMessages,
+  private getClient(): Promise<OpenAI> {
+    if (this.clientPromise) return this.clientPromise;
+    const loading = loadOpenAIClient();
+    this.clientPromise = loading;
+    void loading.catch(() => {
+      if (this.clientPromise === loading) this.clientPromise = undefined;
     });
-
-    return response.choices[0]?.message.content ?? "";
+    return loading;
   }
 }
 
 export class OpenAIEmbedAdapter implements EmbedAdapter {
-  private readonly client = new OpenAI();
+  private clientPromise: Promise<OpenAI> | undefined;
 
   constructor(private readonly model = "text-embedding-3-small") {}
 
   async embed(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
-      model: this.model,
-      input: text,
-    });
+    try {
+      const client = await this.getClient();
+      const response = await client.embeddings.create({
+        model: this.model,
+        input: text,
+      });
 
-    return response.data[0]?.embedding ?? [];
+      return response.data[0]?.embedding ?? [];
+    } catch (error) {
+      if (isMissingOpenAISdkError(error)) throw error;
+      throw new Error(
+        "OpenAI embedding failed. Configure OPENAI_API_KEY and verify the embedding model and credentials.",
+        { cause: error },
+      );
+    }
   }
+
+  private getClient(): Promise<OpenAI> {
+    if (this.clientPromise) return this.clientPromise;
+    const loading = loadOpenAIClient();
+    this.clientPromise = loading;
+    void loading.catch(() => {
+      if (this.clientPromise === loading) this.clientPromise = undefined;
+    });
+    return loading;
+  }
+}
+
+const missingOpenAISdkMessage =
+  'OpenAI adapter requires the optional "openai" package. Install it with: npm install openai';
+
+async function loadOpenAIClient(): Promise<OpenAI> {
+  try {
+    const { default: OpenAIClient } = await import("openai");
+    return new OpenAIClient();
+  } catch (error) {
+    if (isModuleNotFound(error, "openai")) {
+      throw new Error(missingOpenAISdkMessage, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function isMissingOpenAISdkError(error: unknown): boolean {
+  return error instanceof Error && error.message === missingOpenAISdkMessage;
+}
+
+function isModuleNotFound(error: unknown, packageName: string): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = "code" in error ? String(error.code) : "";
+  return (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND")
+    && error.message.includes(packageName);
 }

@@ -1,13 +1,8 @@
-import { GoogleGenAI, type Content } from "@google/genai";
+import type { Content, GoogleGenAI } from "@google/genai";
 import type { EmbedAdapter, LLMAdapter, Message } from "../core/types.js";
 
-const createGeminiClient = (): GoogleGenAI =>
-  new GoogleGenAI(
-    process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : {}
-  );
-
 export class GeminiLLMAdapter implements LLMAdapter {
-  private readonly client = createGeminiClient();
+  private clientPromise: Promise<GoogleGenAI> | undefined;
 
   constructor(private readonly model = "gemini-2.5-flash") {}
 
@@ -23,18 +18,37 @@ export class GeminiLLMAdapter implements LLMAdapter {
       }));
     const systemInstruction = [system, ...systemMessages].filter(Boolean).join("\n\n");
 
-    const response = await this.client.models.generateContent({
-      model: this.model,
-      contents,
-      ...(systemInstruction ? { config: { systemInstruction } } : {}),
-    });
+    try {
+      const client = await this.getClient();
+      const response = await client.models.generateContent({
+        model: this.model,
+        contents,
+        ...(systemInstruction ? { config: { systemInstruction } } : {}),
+      });
 
-    return response.text ?? "";
+      return response.text ?? "";
+    } catch (error) {
+      if (isMissingGeminiSdkError(error)) throw error;
+      throw new Error(
+        "Gemini completion failed. Configure GEMINI_API_KEY and verify the model and credentials.",
+        { cause: error },
+      );
+    }
+  }
+
+  private getClient(): Promise<GoogleGenAI> {
+    if (this.clientPromise) return this.clientPromise;
+    const loading = loadGeminiClient();
+    this.clientPromise = loading;
+    void loading.catch(() => {
+      if (this.clientPromise === loading) this.clientPromise = undefined;
+    });
+    return loading;
   }
 }
 
 export class GeminiEmbedAdapter implements EmbedAdapter {
-  private readonly client = createGeminiClient();
+  private clientPromise: Promise<GoogleGenAI> | undefined;
 
   constructor(
     private readonly model = "gemini-embedding-001",
@@ -42,15 +56,62 @@ export class GeminiEmbedAdapter implements EmbedAdapter {
   ) {}
 
   async embed(text: string): Promise<number[]> {
-    const response = await this.client.models.embedContent({
-      model: this.model,
-      contents: text,
-      config: {
-        outputDimensionality: this.outputDimensionality,
-        taskType: "SEMANTIC_SIMILARITY",
-      },
-    });
+    try {
+      const client = await this.getClient();
+      const response = await client.models.embedContent({
+        model: this.model,
+        contents: text,
+        config: {
+          outputDimensionality: this.outputDimensionality,
+          taskType: "SEMANTIC_SIMILARITY",
+        },
+      });
 
-    return response.embeddings?.[0]?.values ?? [];
+      return response.embeddings?.[0]?.values ?? [];
+    } catch (error) {
+      if (isMissingGeminiSdkError(error)) throw error;
+      throw new Error(
+        "Gemini embedding failed. Configure GEMINI_API_KEY and verify the embedding model and credentials.",
+        { cause: error },
+      );
+    }
   }
+
+  private getClient(): Promise<GoogleGenAI> {
+    if (this.clientPromise) return this.clientPromise;
+    const loading = loadGeminiClient();
+    this.clientPromise = loading;
+    void loading.catch(() => {
+      if (this.clientPromise === loading) this.clientPromise = undefined;
+    });
+    return loading;
+  }
+}
+
+const missingGeminiSdkMessage =
+  'Gemini adapter requires the optional "@google/genai" package. Install it with: npm install @google/genai';
+
+async function loadGeminiClient(): Promise<GoogleGenAI> {
+  try {
+    const { GoogleGenAI: GoogleGenAIClient } = await import("@google/genai");
+    return new GoogleGenAIClient(
+      process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : {},
+    );
+  } catch (error) {
+    if (isModuleNotFound(error, "@google/genai")) {
+      throw new Error(missingGeminiSdkMessage, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function isMissingGeminiSdkError(error: unknown): boolean {
+  return error instanceof Error && error.message === missingGeminiSdkMessage;
+}
+
+function isModuleNotFound(error: unknown, packageName: string): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = "code" in error ? String(error.code) : "";
+  return (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND")
+    && error.message.includes(packageName);
 }
