@@ -185,3 +185,15 @@ All notable changes to this project will be documented here.
 - Improved `migrate` CLI messaging with more actionable errors and recovery instructions.
 - Updated CLI helper messages and setup guidance throughout the initialization workflow.
 - Updated documentation across `USER_GUIDE.md`, `ARCHITECTURE.md`, and `CONTRIBUTION.md`, including refreshed documentation links.
+
+## [0.4.4] - 2026-08-03
+
+### Changed
+
+- Introduced lazy loading for provider SDKs so optional provider dependencies are loaded only when their corresponding adapters are used.
+- Optimized queued ingestion by reducing database calls per ingestion job, improving throughput and reducing database load.
+
+### Internal
+
+- Added manual smoke tests for memory accuracy and performance validation.
+- Added optional result export support for live smoke testing.
