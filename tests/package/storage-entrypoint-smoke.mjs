@@ -160,6 +160,6 @@ try {
 
   process.stdout.write("provider-independent CLI package smoke test passed\n");
 } finally {
-  // rmSync(fixtureRoot, { recursive: true, force: true });
-  process.stdout.write(`Fixture retained at: ${fixtureRoot}\n`);
+  rmSync(fixtureRoot, { recursive: true, force: true });
+  // process.stdout.write(`Fixture retained at: ${fixtureRoot}\n`);
 }
