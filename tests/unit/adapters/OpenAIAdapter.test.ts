@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   embeddingsCreate: vi.fn(),
+  constructor: vi.fn(),
 }));
 
 vi.mock("openai", () => ({
-  default: vi.fn(function MockOpenAI() {
+  default: function MockOpenAI() {
+    mocks.constructor();
     return {
       chat: {
         completions: {
@@ -17,10 +19,10 @@ vi.mock("openai", () => ({
         create: mocks.embeddingsCreate,
       },
     };
-  }),
+  },
 }));
 
-import { OpenAILLMAdapter } from "../../../src/adapters/OpenAIAdapter.js";
+import { OpenAIEmbedAdapter, OpenAILLMAdapter } from "../../../src/adapters/OpenAIAdapter.js";
 
 async function* createStream(chunks: Array<string | undefined>) {
   for (const content of chunks) {
@@ -38,6 +40,20 @@ describe("OpenAILLMAdapter", () => {
   beforeEach(() => {
     mocks.create.mockReset();
     mocks.embeddingsCreate.mockReset();
+    mocks.constructor.mockReset();
+  });
+
+  it("does not construct the SDK client until the first provider operation", async () => {
+    const adapter = new OpenAILLMAdapter("gpt-test");
+    expect(mocks.constructor).not.toHaveBeenCalled();
+
+    mocks.create.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
+    await Promise.all([
+      adapter.complete([{ role: "user", content: "one" }]),
+      adapter.complete([{ role: "user", content: "two" }]),
+    ]);
+
+    expect(mocks.constructor).toHaveBeenCalledTimes(1);
   });
 
   it("uses the existing non-streaming completion path by default", async () => {
@@ -86,5 +102,31 @@ describe("OpenAILLMAdapter", () => {
       messages: [{ role: "user", content: "Hello" }],
       stream: true,
     });
+  });
+
+  it("wraps completion failures and preserves the provider error", async () => {
+    const providerError = new Error("invalid api key");
+    mocks.create.mockRejectedValueOnce(providerError);
+
+    const error = await new OpenAILLMAdapter("gpt-test")
+      .complete([{ role: "user", content: "Hello" }])
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/OpenAI completion failed.*OPENAI_API_KEY/);
+    expect((error as Error).cause).toBe(providerError);
+  });
+
+  it("loads the embedder lazily and labels embedding failures", async () => {
+    const adapter = new OpenAIEmbedAdapter("embed-test");
+    expect(mocks.constructor).not.toHaveBeenCalled();
+
+    const providerError = new Error("invalid api key");
+    mocks.embeddingsCreate.mockRejectedValueOnce(providerError);
+    const error = await adapter.embed("Hello").catch((caught: unknown) => caught);
+
+    expect(mocks.constructor).toHaveBeenCalledTimes(1);
+    expect((error as Error).message).toMatch(/OpenAI embedding failed.*OPENAI_API_KEY/);
+    expect((error as Error).cause).toBe(providerError);
   });
 });

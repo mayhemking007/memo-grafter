@@ -67,6 +67,8 @@ REDIS_URL=redis://localhost:6379
 
 `GEMINI_API_KEY` is required only when using `GeminiLLMAdapter` or `GeminiEmbedAdapter`.
 
+Provider SDKs are optional and loaded lazily. Importing `memo-grafter` or constructing an adapter does not require any provider SDK or API key. Install only the SDK for the built-in adapter you call; configuration errors surface from that adapter's `complete()` or `embed()` operation.
+
 `REDIS_URL` is optional. Setting it alone does not activate Redis: uncomment the generated `cache` or `queue` example in `src/memo-grafter/mg.config.ts` to opt in.
 
 For the recommended setup flow, initialize the project files, migrate the MemoGrafter tables, verify the environment, and then launch Studio:
