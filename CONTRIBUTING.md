@@ -241,6 +241,18 @@ queue job/message metrics. Setup and cleanup queries are excluded.
 See `tests/manual/live-smoke/README.md` for individual suite commands and
 reporting options.
 
+To inspect topic and memory formation as well as recall, graft, and final-answer
+accuracy, run the separate golden-case evaluation suite:
+
+```bash
+npm run accuracy:memory
+npm run accuracy:memory -- --judge --write-doc
+```
+
+The judge is optional; deterministic checks always run. Accuracy misses are
+reported without failing the command unless `--strict` is supplied. See
+`tests/manual/accuracy/README.md` for the scoring model and other flags.
+
 **Open the pull request**
 
 Commit and push the branch to your fork:
