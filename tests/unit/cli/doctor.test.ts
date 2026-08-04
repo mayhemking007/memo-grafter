@@ -4,16 +4,20 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runDoctor,
+  runRepositoryDoctor,
   type DoctorDependencies,
 } from "../../../cli/commands/doctor.js";
 import type { DatabaseClient } from "../../../cli/utils/database.js";
 
 const previousDatabaseUrl = process.env.DATABASE_URL;
+const previousRedisUrl = process.env.REDIS_URL;
 
 afterEach(() => {
   vi.restoreAllMocks();
   if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
   else process.env.DATABASE_URL = previousDatabaseUrl;
+  if (previousRedisUrl === undefined) delete process.env.REDIS_URL;
+  else process.env.REDIS_URL = previousRedisUrl;
 });
 
 describe("memo-grafter doctor", () => {
@@ -32,6 +36,66 @@ describe("memo-grafter doctor", () => {
     expect(report.output).toContain("src/memo-grafter/mg.config.ts");
     expect(report.output).toContain("✓ MemoGrafter is ready");
     expect(end).toHaveBeenCalledOnce();
+  });
+
+  it("does not treat standalone REDIS_URL as application Redis configuration", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const cwd = await createProject();
+    const { dependencies } = healthyDependencies();
+
+    const report = await runDoctor({ cwd, db: "postgres://example" }, dependencies);
+
+    expect(dependencies.checkRedis).not.toHaveBeenCalled();
+    expect(report.output).toContain("Redis not configured");
+    expect(report.output).toContain("src/memo-grafter/mg.config.ts");
+  });
+
+  it("checks standalone REDIS_URL for the cloned repository", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const cwd = await createProject();
+    const { dependencies } = healthyDependencies();
+
+    const report = await runRepositoryDoctor(
+      { cwd, db: "postgres://example" },
+      dependencies,
+    );
+
+    expect(report.exitCode).toBe(0);
+    expect(dependencies.checkRedis).toHaveBeenCalledWith("redis://localhost:6379");
+    expect(report.output).toContain("Redis reachable — repository service configured");
+  });
+
+  it("uses repository guidance when REDIS_URL is missing", async () => {
+    delete process.env.REDIS_URL;
+    const cwd = await createProject();
+    const { dependencies } = healthyDependencies();
+
+    const report = await runRepositoryDoctor(
+      { cwd, db: "postgres://example" },
+      dependencies,
+    );
+
+    expect(report.output).toContain("Set REDIS_URL in .env to check the repository Redis service");
+    expect(report.output).not.toContain("src/memo-grafter/mg.config.ts");
+  });
+
+  it("warns without failing when repository Redis is unreachable", async () => {
+    process.env.REDIS_URL = "redis://127.0.0.1:1";
+    const cwd = await createProject();
+    const { dependencies } = healthyDependencies();
+    dependencies.checkRedis = vi.fn(async () => {
+      throw new Error("unreachable");
+    });
+
+    const report = await runRepositoryDoctor(
+      { cwd, db: "postgres://example" },
+      dependencies,
+    );
+
+    expect(report.exitCode).toBe(0);
+    expect(report.output).toContain("! Redis could not be reached");
+    expect(report.output).toContain("repository Redis service is running");
+    expect(report.output).not.toContain("src/memo-grafter/mg.config.ts");
   });
 
   it("fails once and skips dependent checks when PostgreSQL is unreachable", async () => {

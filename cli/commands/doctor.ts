@@ -84,6 +84,22 @@ export async function runDoctor(
   options: DoctorOptions = {},
   dependencies: DoctorDependencies = defaultDependencies,
 ): Promise<{ exitCode: 0 | 1; results: DoctorResult[]; output: string }> {
+  return runDoctorWithRedisPolicy(options, dependencies, "application");
+}
+
+/** Runs Doctor with repository infrastructure checks instead of consumer config guidance. */
+export async function runRepositoryDoctor(
+  options: DoctorOptions = {},
+  dependencies: DoctorDependencies = defaultDependencies,
+): Promise<{ exitCode: 0 | 1; results: DoctorResult[]; output: string }> {
+  return runDoctorWithRedisPolicy(options, dependencies, "repository");
+}
+
+async function runDoctorWithRedisPolicy(
+  options: DoctorOptions,
+  dependencies: DoctorDependencies,
+  redisPolicy: "application" | "repository",
+): Promise<{ exitCode: 0 | 1; results: DoctorResult[]; output: string }> {
   const cwd = options.cwd ?? process.cwd();
   const results: DoctorResult[] = [
     passed("runtime.node", "Runtime", `Node.js ${process.versions.node}`),
@@ -183,14 +199,18 @@ export async function runDoctor(
     appendSkippedDatabaseResults(results);
   }
 
-  const redisEndpoints = new Map<string, Set<"cache" | "queue">>();
+  type RedisUse = "cache" | "queue" | "repository";
+  const redisEndpoints = new Map<string, Set<RedisUse>>();
   if (config?.cache?.connectionString) {
     redisEndpoints.set(config.cache.connectionString, new Set(["cache"]));
   }
   if (config?.queue?.redisUrl) {
-    const uses = redisEndpoints.get(config.queue.redisUrl) ?? new Set<"cache" | "queue">();
+    const uses = redisEndpoints.get(config.queue.redisUrl) ?? new Set<RedisUse>();
     uses.add("queue");
     redisEndpoints.set(config.queue.redisUrl, uses);
+  }
+  if (redisPolicy === "repository" && redisEndpoints.size === 0 && process.env.REDIS_URL) {
+    redisEndpoints.set(process.env.REDIS_URL, new Set(["repository"]));
   }
 
   if (redisEndpoints.size === 0) {
@@ -199,10 +219,12 @@ export async function runDoctor(
       section: "Redis",
       label: "Redis not configured — optional",
       status: "skipped",
-      help: [
-        "To enable Redis, set REDIS_URL and uncomment cache or queue in",
-        "src/memo-grafter/mg.config.ts.",
-      ],
+      help: redisPolicy === "repository"
+        ? ["Set REDIS_URL in .env to check the repository Redis service."]
+        : [
+          "To enable Redis, set REDIS_URL and uncomment cache or queue in",
+          "src/memo-grafter/mg.config.ts.",
+        ],
       required: false,
     });
   } else {
@@ -210,6 +232,7 @@ export async function runDoctor(
     for (const [redisUrl, uses] of redisEndpoints) {
       const queueEnabled = uses.has("queue");
       const cacheEnabled = uses.has("cache");
+      const repositoryEnabled = uses.has("repository");
       const id = distinctEndpoints === 1
         ? "redis.connection"
         : queueEnabled ? "redis.queue" : "redis.cache";
@@ -218,7 +241,7 @@ export async function runDoctor(
         results.push({
           id,
           section: "Redis",
-          label: redisSuccessLabel(cacheEnabled, queueEnabled),
+          label: redisSuccessLabel(cacheEnabled, queueEnabled, repositoryEnabled),
           status: "passed",
           required: queueEnabled,
         });
@@ -228,7 +251,9 @@ export async function runDoctor(
           section: "Redis",
           label: "Redis could not be reached",
           status: queueEnabled ? "failed" : "warning",
-          help: queueEnabled
+          help: repositoryEnabled
+            ? ["Check REDIS_URL and confirm the repository Redis service is running."]
+            : queueEnabled
             ? [
               "Check REDIS_URL and confirm the Redis service is running.",
               "Redis is required while queue mode is enabled.",
@@ -248,7 +273,12 @@ export async function runDoctor(
   return { exitCode, results, output: renderDoctor(results) };
 }
 
-function redisSuccessLabel(cacheEnabled: boolean, queueEnabled: boolean): string {
+function redisSuccessLabel(
+  cacheEnabled: boolean,
+  queueEnabled: boolean,
+  repositoryEnabled: boolean,
+): string {
+  if (repositoryEnabled) return "Redis reachable — repository service configured";
   if (cacheEnabled && queueEnabled) return "Redis reachable — cache and queue configured";
   if (queueEnabled) return "Redis reachable — queue mode enabled";
   return "Redis reachable";

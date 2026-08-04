@@ -47,6 +47,8 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "migrate": "tsx scripts/migrate.ts",
+    "doctor": "tsx scripts/doctor.ts",
     "typecheck": "tsc -p tsconfig.src.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "lint": "eslint .",
     "prepublishOnly": "npm run build",

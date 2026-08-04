@@ -86,16 +86,31 @@ existing PostgreSQL installation. Leave `REDIS_URL` empty or omit it for
 PostgreSQL-only development. Redis is enabled only when the application
 explicitly supplies `queue` or `cache` configuration.
 
-### 4. Build, initialize, and migrate
+### 4. Build and migrate
 
 ```bash
-npm run build
-npx memo-grafter init
-npx memo-grafter migrate
+npm run migrate
+npm run doctor
 ```
 
-The idempotent migration enables `vector` and `pgcrypto` and creates or updates
-MemoGrafter's `mg_*` tables.
+`npm run migrate` runs the repository-only migration entry point against the
+`DATABASE_URL` in `.env`. The idempotent migration enables `vector` and
+`pgcrypto` and creates or updates MemoGrafter's `mg_*` tables. `npm run doctor`
+runs the repository-only diagnostics and verifies the database, migration
+state, and the Redis service identified by `REDIS_URL`. Repository Redis is an
+optional check, so an unreachable endpoint is reported as a warning unless an
+application config explicitly enables queue mode.
+Repo contributors do not need to run `init`; that command scaffolds files for
+apps that consume MemoGrafter. The public `npx memo-grafter migrate` command
+continues to require `init` for application projects.
+
+To use a different database without changing `.env`, pass `--db` through the
+npm script:
+
+```bash
+npm run migrate -- --db postgres://user:password@localhost:5432/memo_grafter
+npm run doctor -- --db postgres://user:password@localhost:5432/memo_grafter
+```
 
 If you use the Compose services, you can inspect them with:
 
