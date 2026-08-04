@@ -121,6 +121,42 @@ console.log(recall.facts);
 await agent.close();
 ```
 
+### Initialize from `mg.config.ts`
+
+`mg.config.ts` can also be the application runtime configuration. Import it explicitly and use
+`MemoGrafterAgent.create()` to validate the configuration and return an initialized agent:
+
+```ts
+// src/memo-grafter/mg.config.ts
+import { defineConfig, OpenAILLMAdapter } from "memo-grafter";
+
+export default defineConfig(() => ({
+  db: { connectionString: process.env.DATABASE_URL },
+  llm: new OpenAILLMAdapter("gpt-4o"),
+  embedder: {
+    async embed(text: string): Promise<number[]> {
+      // Call the embedding provider used by your application.
+      return embed(text);
+    },
+  },
+}));
+```
+
+```ts
+import "dotenv/config";
+import { MemoGrafterAgent } from "memo-grafter";
+import config from "./memo-grafter/mg.config.js";
+
+const agent = await MemoGrafterAgent.create(config, {
+  inject: { recallLimit: 10 },
+});
+```
+
+The `.js` import specifier is intentional for NodeNext TypeScript projects. The config is compiled
+with the rest of the application, so development watchers pick up changes and production changes
+use the application's normal build. `create()` calls `initialize()`; constructor-based applications
+continue to call `initialize()` themselves. Provider SDKs remain lazy and optional.
+
 ## Core Concepts
 
 - **Messages:** raw user, assistant, or system turns.

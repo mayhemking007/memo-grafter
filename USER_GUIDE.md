@@ -335,6 +335,35 @@ Absorbed topic nodes are also registered in `mg_graft_registry`. The registry re
 
 `MemoGrafterAgent` is the easiest API to start with.
 
+For a single application configuration point, import the generated config explicitly. Automatic
+config discovery is not performed:
+
+```ts
+import "dotenv/config";
+import { MemoGrafterAgent } from "memo-grafter";
+import config from "./memo-grafter/mg.config.js";
+
+const agent = await MemoGrafterAgent.create(config);
+```
+
+`create()` validates environment-backed values, constructs the existing agent, and initializes it.
+It also accepts field-aware overrides without discarding sibling settings:
+
+```ts
+const agent = await MemoGrafterAgent.create(config, {
+  systemPrompt: "You are a travel assistant.",
+  inject: { recallLimit: 10 },
+  cache: false,
+});
+```
+
+Use `defineConfig(() => ({ ... }))` in `mg.config.ts` when values come from the environment. The
+factory is evaluated when `create()` runs. The config file participates in the normal application
+build; `tsx` or TypeScript watch mode reflects changes automatically, while production uses the
+usual rebuild. Keep this server-only configuration out of browser bundles.
+
+The constructor lifecycle remains supported and unchanged:
+
 ```ts
 const agent = new MemoGrafterAgent({
   db: {

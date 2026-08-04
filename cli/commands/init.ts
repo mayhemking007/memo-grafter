@@ -98,6 +98,7 @@ function ensureEnvExample(cwd: string, result: InitResult): void {
   const requiredLines = [
     "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
     "OPENAI_API_KEY=",
+    "MEMO_GRAFTER_LLM_MODEL=gpt-4o",
     "MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small",
     "# Optional. Set this and uncomment cache or queue in src/memo-grafter/mg.config.ts.",
     "# Example: REDIS_URL=redis://localhost:6379",
@@ -186,17 +187,23 @@ function renderConfigTs(): string {
   env: {
     DATABASE_URL?: string;
     OPENAI_API_KEY?: string;
+    MEMO_GRAFTER_LLM_MODEL?: string;
     MEMO_GRAFTER_EMBEDDING_MODEL?: string;
     REDIS_URL?: string;
   };
 };
 
+import { defineConfig, OpenAILLMAdapter } from "memo-grafter";
+
+const llmModel = process.env.MEMO_GRAFTER_LLM_MODEL ?? "gpt-4o";
 const embeddingModel = process.env.MEMO_GRAFTER_EMBEDDING_MODEL ?? "text-embedding-3-small";
 
-export default {
+export default defineConfig(() => ({
   db: {
     connectionString: process.env.DATABASE_URL,
   },
+
+  llm: new OpenAILLMAdapter(llmModel),
 
   // Optional recall cache. Falls back to PostgreSQL if Redis is unavailable.
 
@@ -237,6 +244,6 @@ export default {
       },
     }
     : undefined,
-};
+}));
 `;
 }

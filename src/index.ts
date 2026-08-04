@@ -1,5 +1,6 @@
 export { MemoGrafterAgent } from "./agents/MemoGrafterAgent.js";
 export { MemoGrafter } from "./core/MemoGrafter.js";
+export { defineConfig, resolveMemoGrafterConfig } from "./config.js";
 export { ConflictDetectionPass, DecayScoringPass, MemoGrafterCrawler, VersioningPass } from "./maintenance/index.js";
 export { ConductorAgent } from "./agents/fleet/ConductorAgent.js";
 export { MemoGrafterFleet } from "./agents/fleet/MemoGrafterFleet.js";
@@ -71,6 +72,12 @@ export type {
   TopicNode,
   TopicSegment,
 } from "./core/types.js";
+export type {
+  MemoGrafterConfigOverrides,
+  MemoGrafterConfigSource,
+  MemoGrafterProjectConfig,
+  MemoGrafterProjectDatabaseConfig,
+} from "./config.js";
 export type {
   ConductorGraftOptions,
   FleetAbsorbOptions,
