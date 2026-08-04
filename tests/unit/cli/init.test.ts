@@ -50,6 +50,9 @@ describe("memo-grafter init", () => {
     expect(mgSchema).toContain("mg_memory_nodes");
     expect(mgSchema).toContain('session_id: {\n        name: "session_id",\n        type: "text",');
     expect(mgConfig).toContain("OPENAI_API_KEY");
+    expect(mgConfig).toContain('import { defineConfig, OpenAILLMAdapter } from "memo-grafter"');
+    expect(mgConfig).toContain("llm: new OpenAILLMAdapter(llmModel)");
+    expect(mgConfig).toContain("export default defineConfig(() => ({");
     expect(mgConfig).toContain("REDIS_URL?: string");
     expect(mgConfig).toContain("https://api.openai.com/v1/embeddings");
     expect(mgConfig).toContain("text-embedding-3-small");
@@ -68,6 +71,7 @@ describe("memo-grafter init", () => {
       "DATABASE_URL=postgresql://memografter:memografter@localhost:5432/memografter",
     );
     expect(envExample).toContain("OPENAI_API_KEY=");
+    expect(envExample).toContain("MEMO_GRAFTER_LLM_MODEL=gpt-4o");
     expect(envExample).toContain("MEMO_GRAFTER_EMBEDDING_MODEL=text-embedding-3-small");
     expect(envExample).toContain(
       "# Optional. Set this and uncomment cache or queue in src/memo-grafter/mg.config.ts.",

@@ -24,6 +24,8 @@ import type {
 } from "../core/types.js";
 import { normalizeTags } from "../utils/tags.js";
 import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
+import { resolveMemoGrafterConfig } from "../config.js";
+import type { MemoGrafterConfigOverrides, MemoGrafterConfigSource } from "../config.js";
 
 export class MemoGrafterAgent {
   private readonly core: MemoGrafter;
@@ -46,6 +48,22 @@ export class MemoGrafterAgent {
     this.recallLimit = config.inject?.recallLimit ?? 6;
     this.recallMinSimilarity = config.inject?.recallMinSimilarity ?? 0.55;
     this.cacheConfig = config.cache;
+  }
+
+  static async create(
+    config: MemoGrafterConfigSource,
+    overrides: MemoGrafterConfigOverrides = {},
+  ): Promise<MemoGrafterAgent> {
+    const resolvedConfig = await resolveMemoGrafterConfig(config, overrides);
+    const agent = new MemoGrafterAgent(resolvedConfig);
+
+    try {
+      await agent.initialize();
+      return agent;
+    } catch (error) {
+      await agent.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   initialize(): Promise<void> {
