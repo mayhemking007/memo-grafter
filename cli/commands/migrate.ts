@@ -45,6 +45,15 @@ export async function runMigrate(
   const cwd = options.cwd ?? process.cwd();
   assertProjectInitialized(cwd);
 
+  await runRepositoryMigration(options, dependencies);
+}
+
+/** Runs migrations for this repository without scaffolding consumer project files. */
+export async function runRepositoryMigration(
+  options: MigrateOptions = {},
+  dependencies: MigrateDependencies = defaultDependencies,
+): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
   try {
     const connectionString = await resolveConnectionString({
       cwd,
