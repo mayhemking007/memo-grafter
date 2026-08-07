@@ -152,6 +152,17 @@ const agent = await MemoGrafterAgent.create(config, {
 });
 ```
 
+Applications that manage their own sessions can initialize the lower-level API from the same
+config:
+
+```ts
+import { MemoGrafter } from "memo-grafter";
+
+const memo = await MemoGrafter.create(config, {
+  graph: { topK: 10 },
+});
+```
+
 The `.js` import specifier is intentional for NodeNext TypeScript projects. The config is compiled
 with the rest of the application, so development watchers pick up changes and production changes
 use the application's normal build. `create()` calls `initialize()`; constructor-based applications
