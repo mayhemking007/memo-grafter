@@ -844,6 +844,20 @@ const report = await crawler.runOnce();
 console.log(report);
 ```
 
+When `config` is imported from `mg.config.ts`, the lower-level API can instead resolve and
+initialize it in one step:
+
+```ts
+import config from "./memo-grafter/mg.config.js";
+
+const memo = await MemoGrafter.create(config, {
+  graph: { topK: 10 },
+});
+```
+
+`MemoGrafter.create()` returns an initialized instance. The existing constructor remains explicit
+and still requires `await memo.initialize()`.
+
 `runOnce()` executes the configured passes exactly one time and returns a `CrawlerReport`. `intervalMs` does not affect `runOnce()`.
 
 To run the crawler in-process on a schedule:

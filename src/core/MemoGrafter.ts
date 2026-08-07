@@ -5,6 +5,8 @@ import { IngestPipeline } from "../ingestion/conversation/IngestPipeline.js";
 import { IngestQueue } from "../ingestion/IngestQueue.js";
 import { PostgresGraphStore } from "../store/index.js";
 import { MemoGrafterFleet } from "../agents/fleet/MemoGrafterFleet.js";
+import { resolveMemoGrafterConfig } from "../config.js";
+import type { MemoGrafterConfigOverrides, MemoGrafterConfigSource } from "../config.js";
 import type { MemoGrafterFleetOptions } from "../agents/fleet/types.js";
 import type { GraphStore } from "../store/index.js";
 import type {
@@ -92,6 +94,22 @@ export class MemoGrafter {
       tokenBudget,
     });
     this.ingestQueue = config.queue ? new IngestQueue(this.ingestPipeline, config.queue) : null;
+  }
+
+  static async create(
+    config: MemoGrafterConfigSource,
+    overrides: MemoGrafterConfigOverrides = {},
+  ): Promise<MemoGrafter> {
+    const resolvedConfig = await resolveMemoGrafterConfig(config, overrides);
+    const memo = new MemoGrafter(resolvedConfig);
+
+    try {
+      await memo.initialize();
+      return memo;
+    } catch (error) {
+      await memo.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   initialize(): Promise<void> {
