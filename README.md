@@ -205,6 +205,19 @@ with the rest of the application, so development watchers pick up changes and pr
 use the application's normal build. `create()` calls `initialize()`; constructor-based applications
 continue to call `initialize()` themselves. Provider SDKs remain lazy and optional.
 
+## Capture Agent Runs And Tool Events
+
+Agent event capture is available through `memo.agentRuns(access)` or the provider-independent
+`PostgresGraphStore.agentRuns(access)` API. It records persistent agent identities, task runs,
+tool calls/results, observations, and artifact references. Run `npx memo-grafter migrate` first.
+
+Events support idempotent retries, out-of-order delivery, interruption/resume, and private or
+explicitly project-shared access. This first phase stores evidence; it does not yet extract
+agent lessons or include these events in conversation recall.
+
+See the [agent event capture example](./examples/agent-event-capture/README.md) for the API,
+access contract, and recovery semantics.
+
 ## Core Concepts
 
 - **Messages:** raw user, assistant, or system turns.

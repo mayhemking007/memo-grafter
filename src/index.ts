@@ -1,4 +1,8 @@
 export { MemoGrafterAgent } from "./agents/MemoGrafterAgent.js";
+export { AgentRunError } from "./agents/runs/types.js";
+export type { AgentRunAccess, AgentRunScope, AgentRunStatus, StartAgentRunInput, AgentRun,
+  AgentEventData, JsonValue, AgentEventInput, AgentEvent, CompleteAgentRunInput, AgentRunAPI,
+  AgentRunErrorCode } from "./agents/runs/types.js";
 export { MemoGrafter } from "./core/MemoGrafter.js";
 export { MemoGrafterError, emitWarning, enrichMemoGrafterError, isMemoGrafterError } from "./diagnostics.js";
 export type { AdapterReadiness, IngestionFailureContext, MemoGrafterDiagnostics, MemoGrafterErrorCode, MemoGrafterErrorContext, MemoGrafterLogger, MemoGrafterOperation, MemoGrafterStage, MemoGrafterWarning, MemoGrafterWarningCode, ReadinessCheck, ReadinessResult } from "./diagnostics.js";

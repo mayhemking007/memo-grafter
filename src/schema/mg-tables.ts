@@ -1,7 +1,8 @@
 import { mgExtension, mgIndex, mgTable } from "./builders.js";
+import { agentRunTables, agentRunIndexes } from "./agentRunSchema.js";
 
 export const memoGrafterMigrationTableName = "mg_migrations";
-export const memoGrafterCurrentMigrationVersion = 7;
+export const memoGrafterCurrentMigrationVersion = 8;
 
 export const memoGrafterExtensions = [
   mgExtension({
@@ -15,6 +16,7 @@ export const memoGrafterExtensions = [
 ] as const;
 
 export const memoGrafterTables = [
+  ...agentRunTables,
   mgTable({
     name: "mg_topic_clusters", description: "Optional session-scoped topic domains; no retrieval graph edges.",
     columns: [
@@ -287,6 +289,7 @@ export const memoGrafterTables = [
 ] as const;
 
 export const memoGrafterIndexes = [
+  ...agentRunIndexes,
   mgIndex({ name: "idx_topic_nodes_cluster", table: "mg_topic_nodes", description: "Session-scoped cluster membership lookup." }),
   mgIndex({ name: "mg_message_buffer_session_idx", table: "mg_message_buffer", description: "Message lookup by session and index." }),
   mgIndex({ name: "mg_segments_session_idx", table: "mg_segments", description: "Segment lookup by session and topic order." }),

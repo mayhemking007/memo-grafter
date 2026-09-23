@@ -54,6 +54,13 @@ try {
   ).href;
   const storeModule = await import(storeModuleUrl);
   assert.equal(typeof storeModule.PostgresGraphStore, "function");
+  assert.equal(typeof storeModule.AgentRunError, "function");
+  const agentEventStore = new storeModule.PostgresGraphStore("postgres://unused");
+  const scopedRuns = agentEventStore.agentRuns({ tenantId: "package-test", agentId: "agent-test" });
+  for (const method of ["startRun", "getRun", "recordEvent", "listEvents", "interruptRun", "resumeRun", "completeRun"]) {
+    assert.equal(typeof scopedRuns[method], "function", `agent event API must expose ${method}`);
+  }
+  await agentEventStore.close();
 
   const rootModuleUrl = pathToFileURL(
     path.join(fixtureRoot, "node_modules", "memo-grafter", "dist", "index.js"),
