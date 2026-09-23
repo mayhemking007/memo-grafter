@@ -10,6 +10,7 @@ tsconfig.tsbuildinfo
 internals.md
 knowledge/
 API_REFERENCE.md
+INTERVIEW_ROADMAP.md
 tests/manual/live-smoke/reports/
 tests/manual/accuracy/reports
 tests/manual/reports/memory-quality/

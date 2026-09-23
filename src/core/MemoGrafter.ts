@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { AgentRunError, type AgentRunAccess, type AgentRunAPI } from "../agents/runs/types.js";
 import { GraftRelevancePipeline } from "../retrieval/GraftRelevancePipeline.js";
 import { GrafterPipeline } from "../retrieval/GrafterPipeline.js";
 import { formatEpisodeContext, RetrieverPipeline } from "../retrieval/RetrieverPipeline.js";
@@ -42,6 +43,12 @@ import { createOperationControl } from "../utils/operationControl.js";
 import { loadClusterMetadata } from "../retrieval/clusterMetadata.js";
 
 export class MemoGrafter {
+  /** Capture agent work using identity and project grants supplied by the trusted host. */
+  agentRuns(access: AgentRunAccess): AgentRunAPI {
+    if (!this.store.agentRuns) throw new AgentRunError("INVALID_STATE", "The configured store does not support agent runs.");
+    return this.store.agentRuns(access);
+  }
+
   readonly llm: LLMAdapter;
   readonly embedder: EmbedAdapter;
   readonly store: GraphStore;

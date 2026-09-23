@@ -1,4 +1,7 @@
 import { topicClusterMigrationSql } from "../../schema/topicClusterMigration.js";
+import { agentRunMigrationSql } from "../../schema/agentRunMigration.js";
+import { PostgresAgentRunStore } from "./AgentRunStore.js";
+import type { AgentRunAccess, AgentRunAPI } from "../../agents/runs/types.js";
 import { TopicClusterStore } from "./TopicClusterStore.js";
 import type { ClusterDecision } from "../GraphStore.js";
 import type { TopicClusterAssignment } from "../../core/types.js";
@@ -194,6 +197,8 @@ export function safelyReportDatabaseQuery(
 
 export class PostgresGraphStore implements GraphStore {
   private readonly sql: Sql;
+
+  agentRuns(access: AgentRunAccess): AgentRunAPI { return new PostgresAgentRunStore(this.sql, access); }
 
   constructor(connectionString: string, options: { telemetry?: MemoGrafterDatabaseTelemetry } = {}) {
     this.sql = postgres(connectionString, {
@@ -470,6 +475,7 @@ export class PostgresGraphStore implements GraphStore {
 
     await this.sql.unsafe(memoryQualityMigrationSql);
     await this.sql.unsafe(topicClusterMigrationSql);
+    await this.sql.unsafe(agentRunMigrationSql);
     await this.sql`ALTER TABLE mg_memory_evidence ADD COLUMN IF NOT EXISTS episode_id UUID REFERENCES mg_episodes(id) ON DELETE SET NULL`;
     await this.sql`INSERT INTO mg_episodes (session_id,segment_id,topic_id,summary,intent,outcome,embedding,message_range,episode_order,source_type,source,tags,assignment_method,created_at)
       SELECT session_id,segment_id,id,COALESCE(summary,''),'','',embedding,message_range,topic_order,'conversation',source,tags,'backfill',created_at FROM mg_topic_nodes

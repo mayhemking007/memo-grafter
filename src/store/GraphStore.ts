@@ -1,3 +1,4 @@
+import type { AgentRunAccess, AgentRunAPI } from "../agents/runs/types.js";
 import type {
   GraftRegistryEntry,
   Episode,
@@ -37,6 +38,7 @@ export interface FleetAgentRecord {
 }
 
 export interface GraphStore {
+  agentRuns?(access: AgentRunAccess): AgentRunAPI;
   getTopicClusterCatalog?(sessionId: string): Promise<{ clusters: TopicCluster[]; revision: string }>;
   getTopicClusters?(sessionId: string): Promise<Array<Omit<TopicCluster, "embedding">>>;
   getTopicClusterMetadata?(topics: Array<{ id: string; sessionId: string }>): Promise<TopicClusterMetadata>;
