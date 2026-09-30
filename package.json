@@ -55,6 +55,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:package": "npm run build && node tests/package/storage-entrypoint-smoke.mjs",
+    "benchmark:document-ingestion": "tsx tests/manual/benchmarks/document-ingestion.ts",
     "test:watch": "vitest --watch",
     "test:core": "tsx --env-file=.env tests/core/run.ts",
     "test:fleet": "tsx --env-file=.env tests/fleet/run.ts",

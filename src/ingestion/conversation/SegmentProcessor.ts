@@ -1,3 +1,6 @@
+import { embedTexts } from "../providerWork.js";
+import { selectMemories } from "../selectMemories.js";
+import type { MemorySelectionStats } from "../../diagnostics.js";
 import { assessQualityAdmission, normalizeMemoryQualityWithDefaults } from "../../utils/memoryQuality.js";
 import { randomUUID } from "node:crypto";
 import { buildSegmentExtractionPrompt } from "../../prompts/segmentExtractionPrompt.js";
@@ -26,6 +29,11 @@ import { validateCompletion, validateEmbedding } from "../../adapters/validation
 import { validateDurableMemories } from "../../utils/extraction/durableMemoryValidation.js";
 import { TopicAssigner } from "./TopicAssigner.js";
 
+export interface PreparedSegment {
+  segment: TopicSegment; node: TopicNode; episode: Episode; memories: MemoryNodeInsert[];
+  warnings: import("../../diagnostics.js").MemoGrafterWarning[];
+}
+
 export class SegmentProcessor {
   private readonly topicAssigner: TopicAssigner;
 
@@ -51,6 +59,10 @@ export class SegmentProcessor {
     messageOffset = 0,
   ): Promise<TopicNode> {
     const prepared = await this.prepare(segment, messages, sessionId, options, messageOffset, false);
+    return this.persistPrepared(prepared, sessionId);
+  }
+
+  async persistPrepared(prepared: PreparedSegment, sessionId: string, stats?: MemorySelectionStats): Promise<TopicNode> {
     const assignment = this.store.saveEpisodeBundle
       ? await this.topicAssigner.assign(prepared.episode, prepared.node)
       : { topic: prepared.node, createTopic: true, similarity: null };
@@ -70,7 +82,8 @@ export class SegmentProcessor {
     const memories = prepared.memories.map((memory) => ({ ...memory, topicNodeId: persisted.node.id }));
     if (memories.length > 0) {
       try {
-        await this.store.insertMemories(memories);
+        const result = await this.store.insertMemories(memories);
+        if (stats) { stats.acknowledged += memories.length; stats.persisted = result && stats.persisted !== null ? stats.persisted + result.inserted : null; }
         await this.store.buildMemoryEdges(persisted.node.id, persisted.segment.sessionId, this.config.semanticThreshold);
       } catch (cause) {
         emitWarning(this.config.diagnostics, { code: "BEST_EFFORT_OPERATION_FAILED", operation: "analyze", stage: "graph-processing", context: { sessionId }, cause });
@@ -81,16 +94,16 @@ export class SegmentProcessor {
 
   async prepare(
     segment: DriftSegment, messages: Message[], sessionId: string,
-    options: IngestPipelineOptions = {}, messageOffset = 0, memoriesRequired = true,
+    options: IngestPipelineOptions = {}, messageOffset = 0, memoriesRequired = true, deferEmbedding = false, stats?: MemorySelectionStats,
   ): Promise<{ segment: TopicSegment; node: TopicNode; episode: Episode; memories: MemoryNodeInsert[]; warnings: import("../../diagnostics.js").MemoGrafterWarning[] }> {
     const candidateSegment = this.createSegment(segment, sessionId);
     const tags = normalizeTags(options.tags);
-    const prepared = await this.prepareTopic(candidateSegment, messages, tags, options, messageOffset);
+    const prepared = await this.prepareTopic(candidateSegment, messages, tags, options, messageOffset, deferEmbedding, stats);
     try {
       const memories = await this.prepareMemories(prepared.extracted.memories, candidateSegment, prepared.node, options, messages.slice(
         candidateSegment.startIndex - messageOffset,
         candidateSegment.endIndex - messageOffset + 1,
-      ));
+      ), deferEmbedding, stats);
       return { segment: candidateSegment, node: prepared.node, episode: prepared.episode, memories, warnings: [] };
     } catch (cause) {
       if (memoriesRequired) throw cause;
@@ -98,6 +111,32 @@ export class SegmentProcessor {
       emitWarning(this.config.diagnostics, warning);
       return { segment: candidateSegment, node: prepared.node, episode: prepared.episode, memories: [], warnings: [warning] };
     }
+  }
+
+  async prepareDocument(segments: DriftSegment[], messages: Message[], sessionId: string, options: IngestPipelineOptions, messageOffset: number, stats: MemorySelectionStats): Promise<PreparedSegment[]> {
+    const { label, ...sharedOptions } = options;
+    const results = await Promise.allSettled(segments.map((segment, index) => this.prepare(segment, messages, sessionId, { ...sharedOptions, ...(index === 0 && label ? { label } : {}) }, messageOffset, true, true, stats)));
+    const prepared = results.map((result) => { if (result.status === "rejected") throw result.reason; return result.value; });
+    const selection = selectMemories(prepared.map((item) => item.memories), options.memoryBudget);
+    stats.deduplicated = selection.deduplicated;
+    stats.budgetExcluded = selection.budgetExcluded;
+    stats.selected = selection.selected;
+    prepared.forEach((item, index) => { item.memories = selection.groups[index]!; });
+    const texts = prepared.map((item) => item.node.summary);
+    const topicEmbeddings = await embedTexts(this.embedder, texts);
+    prepared.forEach((item, index) => { item.node.embedding = topicEmbeddings[index]!; item.episode.embedding = topicEmbeddings[index]!; });
+    await Promise.all(prepared.map(async (item) => {
+      try {
+        const embeddings = await embedTexts(this.embedder, item.memories.map((memory) => formatMemoryEmbeddingText(memory)));
+        item.memories.forEach((memory, index) => { memory.embedding = embeddings[index]!; });
+      } catch (cause) {
+        const warning = { code: "BEST_EFFORT_OPERATION_FAILED" as const, operation: "ingest" as const, stage: "embedding" as const, context: { sessionId }, cause };
+        emitWarning(this.config.diagnostics, warning);
+        item.memories = [];
+        item.warnings.push(warning);
+      }
+    }));
+    return prepared;
   }
 
   private createSegment(segment: DriftSegment, sessionId: string): TopicSegment {
@@ -118,16 +157,18 @@ export class SegmentProcessor {
     tags: string[],
     options: IngestPipelineOptions,
     messageOffset: number,
+    deferEmbedding = false,
+    stats?: MemorySelectionStats,
   ): Promise<{ extracted: SegmentExtractionResult; node: TopicNode; episode: Episode }> {
     const segmentMessages = messages.slice(
       segment.startIndex - messageOffset,
       segment.endIndex - messageOffset + 1,
     );
-    const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages, options.label, options.sourceType ?? "conversation");
+    const extractionPrompt = buildSegmentExtractionPrompt(segmentMessages, options.label, options.sourceType ?? "conversation") + (options.memoryBudget ? "\nSelect durable, reusable statements. Avoid headings, navigation, repeated explanations, and redundant memories. Preserve distinct decisions, negations, dates, and conflicting facts." + (options.memoryBudget.maxPerSegment !== undefined ? `\nReturn at most ${options.memoryBudget.maxPerSegment} memories.` : "") : "");
     const raw = validateCompletion(await this.llm.complete([{ role: "user", content: extractionPrompt }]));
-    const extracted = parseSegmentExtraction(raw, this.config.diagnostics);
+    const extracted = parseSegmentExtraction(raw, this.config.diagnostics, stats);
     const summary = buildSegmentSummary(extracted);
-    const embedding = validateEmbedding(await this.embedder.embed(summary), this.embedder.dimensions);
+    const embedding = deferEmbedding ? [] : validateEmbedding(await this.embedder.embed(summary), this.embedder.dimensions);
 
     const nodeId = randomUUID();
     const createdAt = new Date();
@@ -179,28 +220,10 @@ export class SegmentProcessor {
     return { segment: savedSegment, node: stableNode };
   }
 
-  private async processMemories(
-    memories: ExtractedMemory[],
-    segment: TopicSegment,
-    topicNode: TopicNode,
-    options: IngestPipelineOptions,
-    segmentMessages: Message[],
-  ): Promise<void> {
-    if (memories.length === 0) return;
-
-    try {
-      const nodes = await this.prepareMemories(memories, segment, topicNode, options, segmentMessages);
-      await this.store.insertMemories(nodes);
-      await this.store.buildMemoryEdges(topicNode.id, segment.sessionId, this.config.semanticThreshold);
-    } catch (error) {
-      emitWarning(this.config.diagnostics, { code: "BEST_EFFORT_OPERATION_FAILED", operation: "analyze", stage: "graph-processing", context: { sessionId: segment.sessionId, messageRange: [segment.startIndex, segment.endIndex] }, cause: error });
-      console.warn("SegmentProcessor memory processing warning:", error);
-    }
-  }
-
-  private async prepareMemories(memories: ExtractedMemory[], segment: TopicSegment, topicNode: TopicNode, options: IngestPipelineOptions, segmentMessages: Message[]): Promise<MemoryNodeInsert[]> {
+  private async prepareMemories(memories: ExtractedMemory[], segment: TopicSegment, topicNode: TopicNode, options: IngestPipelineOptions, segmentMessages: Message[], deferEmbedding = false, stats?: MemorySelectionStats): Promise<MemoryNodeInsert[]> {
     const nodes: MemoryNodeInsert[] = [];
     const validation = validateDurableMemories(memories, segmentMessages, segment, options.sourceType ?? "conversation");
+    if (stats) stats.rejected += validation.rejected.length;
     for (const rejection of validation.rejected) {
       console.warn(`SegmentProcessor rejected non-durable memory (${rejection.reason}):`, rejection.memory.value);
     }
@@ -218,8 +241,8 @@ export class SegmentProcessor {
         wouldReject++;
         emitWarning(this.config.diagnostics, { code: "MEMORY_QUALITY_ADMISSION", operation: "ingest", stage: "topic-extraction", context: { sessionId: segment.sessionId, reason: admission.reason, mode: options.qualityPolicy?.mode ?? "observe" } });
       }
-      if (!admission.accepted) { rejected++; continue; }
-      const embedding = validateEmbedding(await this.embedder.embed(formatMemoryEmbeddingText(memory)), this.embedder.dimensions);
+      if (!admission.accepted) { rejected++; if (stats) stats.rejected++; continue; }
+      const embedding = deferEmbedding ? [] : validateEmbedding(await this.embedder.embed(formatMemoryEmbeddingText(memory)), this.embedder.dimensions);
       nodes.push({ id: randomUUID(), segmentId: segment.id, topicNodeId: topicNode.id, sessionId: segment.sessionId,
         agentId: topicNode.agentId, agentColor: topicNode.agentColor, fleetId: topicNode.fleetId,
         memoryType: memory.memoryType, sourceType: options.sourceType ?? "conversation", subject: memory.subject,

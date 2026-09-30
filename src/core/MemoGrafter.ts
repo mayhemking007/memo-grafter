@@ -108,6 +108,7 @@ export class MemoGrafter {
     };
 
     this.ingestPipeline = new IngestPipeline(this.store, config.llm, config.embedder, {
+      ...(config.ingestion?.concurrency ? { concurrency: config.ingestion.concurrency } : {}),
       ...ingestConfig,
       ...(threshold !== undefined ? { threshold } : {}),
       ...(driftSensitivity !== undefined ? { driftSensitivity } : {}),
@@ -648,6 +649,8 @@ export class MemoGrafter {
       ...(options.label ? { label: options.label } : {}),
       ...(options.source ? { source: options.source } : {}),
       ...(options.tags ? { tags: options.tags } : {}),
+      ...(options.memoryBudget ? { memoryBudget: options.memoryBudget } : {}),
+      ...(options.concurrency ? { concurrency: options.concurrency } : {}),
       ...(options.chunking ? { chunking: options.chunking } : {}),
       ...(options.segmentation ? { segmentation: options.segmentation } : {}),
       ...(options.minSegmentMessages !== undefined ? { minSegmentMessages: options.minSegmentMessages } : {}),

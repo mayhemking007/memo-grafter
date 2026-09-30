@@ -107,7 +107,7 @@ export interface GraphStore {
   getNodesBySession(sessionId: string, options?: TagFilterOptions): Promise<TopicNode[]>;
   getLastTopicNode(sessionId: string): Promise<TopicNode | null>;
   getSegmentsBySession(sessionId: string): Promise<TopicSegment[]>;
-  insertMemories(nodes: MemoryNodeInsert[]): Promise<void>;
+  insertMemories(nodes: MemoryNodeInsert[]): Promise<void | { inserted: number }>;
   getMemoriesBySegment(segmentId: string): Promise<MemoryNode[]>;
   getMemoriesByTopic(topicNodeId: string): Promise<MemoryNode[]>;
   /** Batch-load active memories for topic candidates. Optional for custom-store compatibility. */

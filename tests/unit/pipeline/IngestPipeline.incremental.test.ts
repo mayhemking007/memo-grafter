@@ -515,3 +515,63 @@ it("uses configured document minimums while retaining legacy defaults and explic
     expect(store.segments).toHaveLength(count);
   }
 });
+
+
+describe("document memory budgets", () => {
+  function candidate(value: string, salience: number, explicitness = 0.9) {
+    return { memory_type: "fact", subject: "Project", predicate: "decision", value,
+      quality: { explicitness, salience, stability: 0.9, sourceReliability: 0.9 },
+      provenance: { speaker: "document", message_indexes: [1], extraction_method: "document-extraction" } };
+  }
+  it("selects across out-of-order extraction before embedding and writes in source order", async () => {
+    const store = new IncrementalStore();
+    const writes: number[] = [];
+    const save = store.saveNode.bind(store);
+    store.saveNode = async (node) => { writes.push(node.messageRange[0]); await save(node); };
+    const stats: import("../../../src/diagnostics.js").MemorySelectionStats[] = [];
+    const embedded: string[] = [];
+    const completed: string[] = [];
+    const pipeline = new IngestPipeline(store as unknown as GraphStore, {
+      complete: async (messages) => {
+        const alpha = messages[0]!.content.includes("Alpha.");
+        if (alpha) await new Promise(resolve => setTimeout(resolve, 15));
+        completed.push(alpha ? "alpha" : "beta");
+        return JSON.stringify({ label: alpha ? "Alpha" : "Beta", user_intent: "Document", outcome: "Recorded", open: null,
+          memories: alpha ? [candidate("Ship Friday", 0.4), candidate("Low priority", 0.2), {}]
+            : [candidate("Ship Friday", 0.9), candidate("Do not ship Friday", 0.8), candidate("Unclear", 0.9, 0.1)] });
+      },
+    }, { dimensions: 2, embed: async (text) => { embedded.push(text); return [1, 0]; } }, {
+      windowSize: 2, topK: 1, mode: "intent", minSegmentMessages: 1,
+      diagnostics: { onMemorySelection: value => stats.push({ ...value }) },
+    });
+    await pipeline.runText("Alpha. Beta.", "s", { segmentation: { strategy: "per-chunk" },
+      memoryBudget: { deduplicate: true, maxPerDocument: 2, maxPerSegment: 2 },
+      qualityPolicy: { mode: "enforce", minExplicitness: 0.5 }, concurrency: { extraction: 2, embedding: 1 } });
+    expect(completed).toEqual(["beta", "alpha"]);
+    expect(writes).toEqual([0, 1]);
+    expect(embedded.filter(text => text.startsWith("fact:"))).toEqual(["fact: Project decision: Ship Friday", "fact: Project decision: Do not ship Friday"]);
+    expect(store.memories.map(memory => memory.provenance?.messageIndexes)).toEqual([[1], [1]]);
+    expect(stats).toEqual([{ sessionId: "s", extracted: 6, rejected: 2, deduplicated: 1, budgetExcluded: 1, selected: 2, acknowledged: 2, persisted: null }]);
+  });
+
+  it("supports zero budgets, observe mode, write failures, and exact insert counts", async () => {
+    for (const mode of ["zero", "observe", "failure", "count"] as const) {
+      const store = new IncrementalStore();
+      if (mode === "failure") store.insertMemories = async () => { throw new Error("write failed"); };
+      if (mode === "count") Object.assign(store, { insertMemories: async () => ({ inserted: 1 }) });
+      const events: import("../../../src/diagnostics.js").MemorySelectionStats[] = [];
+      const embedded: string[] = [];
+      const pipeline = new IngestPipeline(store as unknown as GraphStore, { complete: async () => JSON.stringify({ label: "Topic", user_intent: "Document", outcome: "Recorded", open: null, memories: [candidate("Useful", 0.8, 0.1)] }) },
+        { embed: async text => { embedded.push(text); return [1, 0]; } }, {
+          windowSize: 2, topK: 1, mode: "intent", minSegmentMessages: 1,
+          diagnostics: { onMemorySelection: event => events.push({ ...event }) },
+        });
+      await pipeline.runText("Text", "s", { segmentation: { strategy: "single" }, memoryBudget: { maxPerDocument: mode === "zero" ? 0 : 1 }, qualityPolicy: { mode: "observe", minExplicitness: 0.8 } });
+      expect(events[0]?.rejected).toBe(0);
+      expect(events[0]?.selected).toBe(mode === "zero" ? 0 : 1);
+      expect(events[0]?.acknowledged).toBe(mode === "zero" || mode === "failure" ? 0 : 1);
+      if (mode === "count") expect(events[0]?.persisted).toBe(1);
+      if (mode === "zero") expect(embedded.filter(text => text.startsWith("fact:"))).toHaveLength(0);
+    }
+  });
+});
