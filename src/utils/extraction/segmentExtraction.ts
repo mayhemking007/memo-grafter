@@ -8,7 +8,7 @@ import type {
 } from "../../core/types.js";
 import { MemoGrafterError, emitWarning, type MemoGrafterDiagnostics } from "../../diagnostics.js";
 
-export function parseSegmentExtraction(raw: string, diagnostics?: MemoGrafterDiagnostics): SegmentExtractionResult {
+export function parseSegmentExtraction(raw: string, diagnostics?: MemoGrafterDiagnostics, counts?: { extracted: number; rejected: number }): SegmentExtractionResult {
   try {
     const parsedValue: unknown = JSON.parse(raw.trim());
     if (!parsedValue || typeof parsedValue !== "object" || Array.isArray(parsedValue)) throw new Error("Expected an object.");
@@ -21,7 +21,7 @@ export function parseSegmentExtraction(raw: string, diagnostics?: MemoGrafterDia
       userIntent: stringValue(parsed.user_intent),
       outcome: stringValue(parsed.outcome),
       open: nullableStringValue(parsed.open),
-      memories: parseExtractedMemories(parsed.memories, diagnostics),
+      memories: parseExtractedMemories(parsed.memories, diagnostics, counts),
     };
   } catch (error) {
     if (raw.trim().startsWith("{") || raw.trim().startsWith("[")) {
@@ -56,18 +56,20 @@ export function buildSegmentSummary(extracted: SegmentExtractionResult): string 
   return parts.join(" ");
 }
 
-export function formatMemoryEmbeddingText(memory: ExtractedMemory): string {
+export function formatMemoryEmbeddingText(memory: Pick<ExtractedMemory, "memoryType" | "subject" | "predicate" | "value">): string {
   return `${memory.memoryType}: ${memory.subject} ${memory.predicate}: ${memory.value}`;
 }
 
-function parseExtractedMemories(value: unknown, diagnostics?: MemoGrafterDiagnostics): ExtractedMemory[] {
+function parseExtractedMemories(value: unknown, diagnostics?: MemoGrafterDiagnostics, counts?: { extracted: number; rejected: number }): ExtractedMemory[] {
   if (!Array.isArray(value)) return [];
 
   const validTypes = new Set<MemoryType>(["fact", "insight", "question", "task", "reference"]);
   const memories: ExtractedMemory[] = [];
 
+  if (counts) counts.extracted += value.length;
   for (const item of value) {
     if (!item || typeof item !== "object") {
+      if (counts) counts.rejected++;
       console.warn("SegmentProcessor skipped invalid memory item:", item);
       continue;
     }
@@ -80,6 +82,7 @@ function parseExtractedMemories(value: unknown, diagnostics?: MemoGrafterDiagnos
     const provenance = parseProvenance(record.provenance);
 
     if (!validTypes.has(memoryType) || !subject || !predicate || !memoryValue || !provenance) {
+      if (counts) counts.rejected++;
       console.warn("SegmentProcessor skipped incomplete memory item:", item);
       continue;
     }

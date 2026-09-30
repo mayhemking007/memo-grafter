@@ -1,3 +1,4 @@
+import { validateProviderOptions } from "../../ingestion/providerWork.js";
 import type { IngestTextOptions } from "../../core/types.js";
 import { MemoGrafterError } from "../../diagnostics.js";
 import { splitTextForIngestion } from "./splitTextForIngestion.js";
@@ -10,6 +11,7 @@ function invalid(message: string): never {
 }
 
 export function prepareTextChunks(text: string, options: IngestTextOptions = {}): TextChunk[] {
+  validateProviderOptions(options);
   const c = options.chunking ?? {}, s = options.segmentation ?? {};
   const strategy = c.strategy ?? "sentence";
   if (!["sentence", "paragraph", "section", "fixed", "single"].includes(strategy)) invalid("Unknown chunking strategy.");

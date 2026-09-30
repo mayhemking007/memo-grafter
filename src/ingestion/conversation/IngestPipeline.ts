@@ -1,3 +1,5 @@
+import { IngestionProviderWork, embedTexts } from "../providerWork.js";
+import type { MemorySelectionStats } from "../../diagnostics.js";
 import type { GraphStore } from "../../store/index.js";
 import type {
   DriftSensitivity,
@@ -20,7 +22,6 @@ import { TopicAssigner } from "./TopicAssigner.js";
 import { TopicClusterAssigner } from "../clustering/TopicClusterAssigner.js";
 import { type DriftSegment, TopicDriftDetector } from "./TopicDriftDetector.js";
 import { enrichMemoGrafterError, isMemoGrafterError, MemoGrafterError } from "../../diagnostics.js";
-import { validateEmbedding } from "../../adapters/validation.js";
 import { emitWarning, type MemoGrafterWarning } from "../../diagnostics.js";
 import type { IngestionRun, PreparedIngestion } from "../types.js";
 
@@ -28,6 +29,7 @@ const INGEST_OVERLAP_MESSAGES = 6;
 const INCREMENTAL_SEMANTIC_THRESHOLD = 0.6;
 
 export class IngestPipeline {
+  private readonly providerWork: IngestionProviderWork;
   private readonly segmentProcessor: SegmentProcessor;
   private readonly topicAssigner: TopicAssigner;
   readonly clusterAssigner: TopicClusterAssigner;
@@ -43,6 +45,7 @@ export class IngestPipeline {
     private readonly embedder: EmbedAdapter,
     /** @internal */
     private readonly config: {
+      concurrency?: import("../../core/types.js").IngestionConcurrency;
       windowSize: number;
       threshold?: number;
       driftSensitivity?: DriftSensitivity;
@@ -59,15 +62,18 @@ export class IngestPipeline {
       clustering?: MemoGrafterConfig["clustering"];
     },
   ) {
+    this.providerWork = new IngestionProviderWork(config.concurrency);
+    this.llm = this.providerWork.wrapLLM(llm);
+    this.embedder = this.providerWork.wrapEmbedder(embedder);
     this.baseDriftThreshold = resolveDriftThreshold(config);
-    this.segmentProcessor = new SegmentProcessor(store, llm, embedder, {
+    this.segmentProcessor = new SegmentProcessor(store, this.llm, this.embedder, {
       topK: config.topK,
       semanticThreshold: 0.6,
       ...(config.topicAssignment ? { topicAssignment: config.topicAssignment } : {}),
       ...(config.diagnostics !== undefined ? { diagnostics: config.diagnostics } : {}),
     });
     this.topicAssigner = new TopicAssigner(store, config.topicAssignment);
-    this.clusterAssigner = new TopicClusterAssigner(store, llm, embedder, config.clustering, config.diagnostics);
+    this.clusterAssigner = new TopicClusterAssigner(store, this.llm, this.embedder, config.clustering, config.diagnostics);
   }
 
   async run(messages: Message[], sessionId: string, options: IngestPipelineOptions = {}): Promise<TopicNode[]> {
@@ -140,6 +146,7 @@ export class IngestPipeline {
     options: IngestPipelineOptions = {},
     knownFirstNewMessageIndex?: number,
     messagesAlreadyPersisted = false,
+    selectionStats?: MemorySelectionStats,
   ): Promise<TopicNode[]> {
     if (messages.length === 0) return [];
 
@@ -195,8 +202,9 @@ export class IngestPipeline {
     const savedReentryPairs = new Set<string>();
     const { label, minSegmentMessages: _minSegmentMessages, ...segmentOptions } = options;
 
+    const documentPrepared = selectionStats ? await this.segmentProcessor.prepareDocument(absoluteSegments.map((item) => item.segment), contextMessages, sessionId, options, contextStartIndex, selectionStats) : undefined;
     for (const [index, { segment, detectorTopicOrder }] of absoluteSegments.entries()) {
-      const node = await this.segmentProcessor.process(
+      const node = documentPrepared ? await this.segmentProcessor.persistPrepared(documentPrepared[index]!, sessionId, selectionStats) : await this.segmentProcessor.process(
         segment,
         contextMessages,
         sessionId,
@@ -349,7 +357,11 @@ export class IngestPipeline {
     return warnings;
   }
 
-  async runText(
+  runText(text: string, sessionId: string, options: IngestPipelineOptions = {}): Promise<TopicNode[]> {
+    return this.providerWork.run(options, () => this.runTextInternal(text, sessionId, options));
+  }
+
+  private async runTextInternal(
     text: string,
     sessionId: string,
     options: IngestPipelineOptions = {},
@@ -362,14 +374,19 @@ export class IngestPipeline {
     }
 
     const messages = await this.store.getMessagesBySession(sessionId);
-    return this.run([
-      ...messages,
-      ...chunks.map((content): Message => ({ role: "user", content })),
-    ], sessionId, {
-      ...options,
-      sourceType: options.sourceType ?? "document",
-      minSegmentMessages: options.segmentation?.minChunks ?? options.minSegmentMessages ?? (options.chunking || options.segmentation ? this.config.minSegmentMessages : 1),
-    });
+    const combined: Message[] = [...messages, ...chunks.map((content): Message => ({ role: "user", content }))];
+    const ingestState = await this.store.getSessionIngestState(sessionId);
+    const first = (ingestState?.lastIngestedMessageIndex ?? -1) + 1;
+    const stats: MemorySelectionStats = { sessionId, extracted: 0, rejected: 0, deduplicated: 0, budgetExcluded: 0, selected: 0, acknowledged: 0, persisted: 0 };
+    try {
+      return await this.runIncremental(combined.slice(first), sessionId, first, {
+        ...options,
+        sourceType: options.sourceType ?? "document",
+        minSegmentMessages: options.segmentation?.minChunks ?? options.minSegmentMessages ?? (options.chunking || options.segmentation ? this.config.minSegmentMessages : 1),
+      }, first, false, stats);
+    } finally {
+      try { this.config.diagnostics?.onMemorySelection?.({ ...stats }); } catch { /* telemetry cannot change ingestion */ }
+    }
   }
 
   private async segmentMessages(messages: Message[], overlap: number, existingNodes: TopicNode[], sessionId: string, options: IngestPipelineOptions) {
@@ -380,7 +397,7 @@ export class IngestPipeline {
         : messages.slice(overlap).map((_, index) => ({ start: overlap + index, end: overlap + index, topicOrder: index + 1, driftScore: 0 }));
       return { segments, reentryMap: new Map<number, string>(), contextEmbeddings: [] as number[][] };
     }
-    const contextEmbeddings = await Promise.all(messages.map((message) => this.embedMessage(message)));
+    const contextEmbeddings = await embedTexts(this.embedder, messages.map((message) => normalizeText(message.content) ?? message.content));
     const detector = await this.createDriftDetector(sessionId, options.minSegmentMessages);
     const detected = await detector.detectSegments(messages, contextEmbeddings, existingNodes);
     if (options.segmentation?.maxTopics === undefined) return { ...detected, contextEmbeddings };
@@ -474,11 +491,6 @@ export class IngestPipeline {
         });
       }
     }
-  }
-
-  private async embedMessage(message: Message): Promise<number[]> {
-    const content = normalizeText(message.content) ?? message.content;
-    return validateEmbedding(await this.embedder.embed(content), this.embedder.dimensions);
   }
 
   private async createDriftDetector(sessionId: string, minSegmentMessages?: number): Promise<TopicDriftDetector> {

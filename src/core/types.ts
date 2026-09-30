@@ -440,7 +440,21 @@ export interface TextSegmentationOptions {
   maxTopics?: number;
 }
 
+export interface IngestionConcurrency {
+  extraction?: number;
+  embedding?: number;
+}
+
+export interface MemoryBudget {
+  maxPerSegment?: number;
+  maxPerDocument?: number;
+  deduplicate?: boolean;
+  preferredTypes?: MemoryType[];
+}
+
 export interface IngestTextOptions extends IngestOptions {
+  memoryBudget?: MemoryBudget;
+  concurrency?: IngestionConcurrency;
   chunking?: TextChunkingOptions;
   segmentation?: TextSegmentationOptions;
   minSegmentMessages?: number;
@@ -535,6 +549,7 @@ export interface LLMAdapter {
 }
 
 export interface EmbedAdapter {
+  embedMany?(texts: string[], options?: MemoGrafterOperationOptions): Promise<number[][]>;
   embed(text: string, options?: MemoGrafterOperationOptions): Promise<number[]>;
   validate?(): Promise<import("../diagnostics.js").AdapterReadiness>;
   dimensions?: number;
@@ -659,5 +674,5 @@ export interface MemoGrafterConfig {
   queue?: MemoGrafterQueueConfig;
   cache?: MemoGrafterCacheConfig;
   diagnostics?: import("../diagnostics.js").MemoGrafterDiagnostics;
-  ingestion?: { requirements?: import("../ingestion/types.js").IngestionRequirements };
+  ingestion?: { concurrency?: IngestionConcurrency; requirements?: import("../ingestion/types.js").IngestionRequirements };
 }

@@ -109,6 +109,27 @@ export class OpenAIEmbedAdapter implements EmbedAdapter {
     }
   }
 
+  async embedMany(texts: string[], operationOptions?: MemoGrafterOperationOptions): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    try {
+      const client = await this.getClient();
+      const request = { model: this.model, input: texts };
+      const response = operationOptions?.signal
+        ? await client.embeddings.create(request, { signal: operationOptions.signal })
+        : await client.embeddings.create(request);
+      const ordered: number[][] = new Array(texts.length);
+      if (response.data.length !== texts.length) throw new MemoGrafterError("OpenAI returned an incorrect batch size.", { code: "EMBEDDING_RESPONSE_INVALID", operation: "ingest", stage: "embedding" });
+      for (const item of response.data) {
+        if (!Number.isInteger(item.index) || item.index < 0 || item.index >= texts.length || ordered[item.index]) throw new MemoGrafterError("OpenAI returned invalid batch indexes.", { code: "EMBEDDING_RESPONSE_INVALID", operation: "ingest", stage: "embedding" });
+        ordered[item.index] = validateEmbedding(item.embedding, this.dimensions);
+      }
+      return ordered;
+    } catch (error) {
+      if (isMemoGrafterError(error)) throw error;
+      throw new MemoGrafterError("OpenAI batch embedding failed.", { code: "PROVIDER_REQUEST_FAILED", operation: "ingest", stage: "provider-request", retryable: true, cause: error });
+    }
+  }
+
   validate(): Promise<AdapterReadiness> { return validateOpenAI("embedder"); }
 
   private getClient(): Promise<OpenAI> {

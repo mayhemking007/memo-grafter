@@ -42,7 +42,21 @@ export interface MemoGrafterLogger {
   warn?(warning: MemoGrafterWarning): void;
 }
 
+export interface MemorySelectionStats {
+  sessionId: string;
+  extracted: number;
+  rejected: number;
+  deduplicated: number;
+  budgetExcluded: number;
+  selected: number;
+  /** Successful insert submissions; stores may canonicalize multiple candidates into one row. */
+  acknowledged: number;
+  /** Unknown for stores whose insertMemories returns void. */
+  persisted: number | null;
+}
+
 export interface MemoGrafterDiagnostics {
+  onMemorySelection?: (stats: Readonly<MemorySelectionStats>) => void;
   onWarning?: (warning: MemoGrafterWarning) => void;
   logger?: MemoGrafterLogger;
 }

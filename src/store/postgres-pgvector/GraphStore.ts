@@ -1119,17 +1119,18 @@ export class PostgresGraphStore implements GraphStore {
     return rows.map((row) => this.rowToSegment(row));
   }
 
-  async insertMemories(nodes: MemoryNodeInsert[]): Promise<void> {
-    if (nodes.length === 0) return;
-    await this.sql.begin(async (transaction) => {
+  async insertMemories(nodes: MemoryNodeInsert[]): Promise<{ inserted: number }> {
+    if (nodes.length === 0) return { inserted: 0 };
+    return this.sql.begin(async (transaction) => {
       for (const sessionId of [...new Set(nodes.map((node) => node.sessionId))]) {
         await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${sessionId}`}))`;
       }
-      await this.reconcileAndInsertMemories(transaction, nodes);
+      return { inserted: await this.reconcileAndInsertMemories(transaction, nodes) };
     });
   }
 
-  private async reconcileAndInsertMemories(transaction: TransactionSql, nodes: MemoryNodeInsert[]): Promise<void> {
+  private async reconcileAndInsertMemories(transaction: TransactionSql, nodes: MemoryNodeInsert[]): Promise<number> {
+    let insertedCount = 0;
     for (const input of nodes) {
       const normalized = normalizeMemoryQualityWithDefaults(input.quality);
       const node = { ...input, quality: normalized.quality, qualityDefaulted: [...new Set([...(input.qualityDefaulted ?? []), ...normalized.defaulted])] };
@@ -1167,7 +1168,7 @@ export class PostgresGraphStore implements GraphStore {
         }
         continue;
       }
-      await transaction`INSERT INTO mg_memory_nodes (
+      const inserted = await transaction`INSERT INTO mg_memory_nodes (
         id,segment_id,topic_node_id,agent_id,session_id,memory_type,source_type,subject,predicate,value,
         canonical_subject,canonical_predicate,canonical_value,canonical_fact_key,canonical_value_key,canonicalization_version,
         quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at,embedding,tags,source,source_url,source_title,provenance_speaker,provenance_message_indexes,
@@ -1176,7 +1177,8 @@ export class PostgresGraphStore implements GraphStore {
         ${canonical.subject},${canonical.predicate},${canonical.value},${canonical.factKey},${canonical.valueKey},${canonical.version},
         ${node.quality.explicitness},${node.quality.sourceReliability},${node.quality.stability},${node.quality.salience},${transaction.array(node.qualityDefaulted ?? [])}::text[],${node.qualityOrigin ?? "provided"},NOW(),${toVectorLiteral(node.embedding)}::vector,${transaction.array(normalizeTags(node.tags))}::text[],${node.source ?? null},${node.sourceUrl},${node.sourceTitle},
         ${node.provenance?.speaker ?? null},${node.provenance ? transaction.array(node.provenance.messageIndexes) : null}::int[],${node.provenance?.sessionId ?? null},${node.provenance?.extractionMethod ?? null},
-        ${node.supersededBy},${node.decayed},${node.forgotten ?? false},${classification === "conflict" || node.hasConflict === true},${node.agentColor},${node.fleetId}) ON CONFLICT (id) DO NOTHING`;
+        ${node.supersededBy},${node.decayed},${node.forgotten ?? false},${classification === "conflict" || node.hasConflict === true},${node.agentColor},${node.fleetId}) ON CONFLICT (id) DO NOTHING RETURNING id`;
+      insertedCount += inserted.length;
       await this.insertMemoryEvidence(transaction, memoryNodeId, node);
       if (classification === "update") {
         for (const previous of active) {
@@ -1188,6 +1190,7 @@ export class PostgresGraphStore implements GraphStore {
         for (const previous of active) await transaction`INSERT INTO mg_memory_edges (source_id,target_id,edge_type,weight) SELECT ${memoryNodeId}::uuid,${previous.id}::uuid,'conflicts',1 WHERE NOT EXISTS (SELECT 1 FROM mg_memory_edges WHERE edge_type='conflicts' AND ((source_id=${memoryNodeId}::uuid AND target_id=${previous.id}::uuid) OR (source_id=${previous.id}::uuid AND target_id=${memoryNodeId}::uuid)))`;
       }
     }
+    return insertedCount;
   }
 
   private async insertMemoryEvidence(transaction: TransactionSql, memoryNodeId: string, node: MemoryNodeInsert): Promise<boolean> {

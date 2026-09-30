@@ -130,3 +130,24 @@ describe("OpenAILLMAdapter", () => {
     expect((error as Error).cause).toBe(providerError);
   });
 });
+
+
+describe("OpenAI batch embedding", () => {
+  it("restores provider indexes and forwards abort signals", async () => {
+    mocks.embeddingsCreate.mockReset();
+    mocks.embeddingsCreate.mockResolvedValueOnce({ data: [{ index: 1, embedding: [0, 1] }, { index: 0, embedding: [1, 0] }] });
+    const signal = new AbortController().signal;
+    await expect(new OpenAIEmbedAdapter("embed-test", 2).embedMany(["first", "second"], { signal })).resolves.toEqual([[1, 0], [0, 1]]);
+    expect(mocks.embeddingsCreate).toHaveBeenCalledWith({ model: "embed-test", input: ["first", "second"] }, { signal });
+  });
+  it("rejects duplicate indexes and preserves provider failures", async () => {
+    mocks.embeddingsCreate.mockReset();
+    mocks.embeddingsCreate.mockResolvedValueOnce({ data: [{ index: 0, embedding: [1, 0] }, { index: 0, embedding: [1, 0] }] });
+    const adapter = new OpenAIEmbedAdapter("embed-test", 2);
+    await expect(adapter.embedMany(["a", "b"])).rejects.toMatchObject({ code: "EMBEDDING_RESPONSE_INVALID" });
+    const error = new Error("rate limit");
+    mocks.embeddingsCreate.mockRejectedValueOnce(error);
+    await expect(adapter.embedMany(["a"])).rejects.toMatchObject({ cause: error });
+    await expect(adapter.embedMany([])).resolves.toEqual([]);
+  });
+});

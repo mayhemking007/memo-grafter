@@ -2101,3 +2101,46 @@ Validation commands:
 - `npm run test:run` covers classification decisions, cooldowns, timeouts, ingestion failure isolation, retrieval invariance, and Studio grouping.
 - `npm run manual:clusters` uses `DATABASE_URL` for isolated PostgreSQL schema checks, including concurrent creation, foreign keys, upgrade migration, and graft isolation. No provider calls.
 - `npm run accuracy:clusters -- /path/to/mg.config.ts` evaluates the configured providers on labeled domain fixtures without database writes. It reports pair precision/recall, domain fragmentation, abstentions, provider calls, and classification latency. Run against your own representative data before enabling broadly; provider calls incur their usual costs.
+
+### Selecting document memories and limiting provider work
+
+Text ingestion extracts candidates across the current document before embedding memories. Opt into selection limits:
+
+```ts
+await memo.ingestText(markdown, sessionId, {
+  chunking: { strategy: "section", maxCharacters: 3000 },
+  segmentation: { strategy: "per-chunk" },
+  memoryBudget: {
+    maxPerSegment: 4,
+    maxPerDocument: 12,
+    deduplicate: true,
+    preferredTypes: ["task", "fact", "insight"],
+  },
+  concurrency: { extraction: 2, embedding: 4 },
+  qualityPolicy: { mode: "enforce", minExplicitness: 0.65 },
+});
+```
+
+Budgets are non-negative integers; zero means no memory embeddings or inserts, while topics are still produced. Omitted budgets are unlimited and deduplication defaults to off. Existing quality policies retain their observe/enforce behavior. Budget validation occurs before replacement clears a session. These controls also pass through agent text ingestion and queued text jobs.
+
+Candidates first pass schema/provenance validation and quality admission. Ranking uses salience × 0.4 + explicitness × 0.25 + stability × 0.2 + source reliability × 0.15. Type preferences break equal-score ties, followed by source order. Textual deduplication compares memory type, subject, predicate, and value after Unicode NFC and whitespace normalization. It intentionally preserves case, punctuation, negations, dates, numbers, decisions, and conflicting values; paraphrases are not deduplicated. The highest-ranked equivalent retains its original provenance. Per-segment and document caps then select candidates, with embeddings and writes restored to source order. Rejected, duplicate, and over-budget memories incur no memory embedding calls.
+
+Instance-wide provider ceilings live in `MemoGrafterConfig.ingestion.concurrency` (defaults: extraction 2, embedding 8). Per-call concurrency can lower the effective limit; it cannot exceed the instance ceiling. Shared schedulers cover nested ingestion calls, drift ambiguity requests, topic classification, and overlapping imports on the same instance. Separate instances/processes have separate limits. Retrieval and other non-ingestion operations are outside this scheduler. Limits count in-flight requests, not tokens or requests per minute.
+
+Adapters may implement `embedMany(texts, operationOptions?)`, returning vectors in input order. Ingestion uses batches of at most 32 inputs and validates count, dimensions when declared, and finite vector values. OpenAI's adapter restores response indexes explicitly. Custom adapters must preserve input order. Without batch support, individual requests use the same embedding limiter. Batch failures are never retried as individual calls. Topic embedding failures fail ingestion; memory embedding failures retain the existing best-effort behavior for the affected segment and emit a warning. Batch size bounds input count, not provider token limits.
+
+`diagnostics.onMemorySelection(stats)` receives an end-of-attempt snapshot for nonempty documents, including failed attempts:
+
+| Field | Meaning |
+| --- | --- |
+| `extracted` | Raw memory items returned by successful extraction responses |
+| `rejected` | Schema, provenance, or enforced quality rejections |
+| `deduplicated` | Equivalent candidates removed before budgets |
+| `budgetExcluded` | Remaining candidates excluded by either budget |
+| `selected` | Candidates selected for memory embedding |
+| `acknowledged` | Candidates submitted in successful memory insert calls, including reinforcement |
+| `persisted` | Newly inserted rows; PostgreSQL reports the exact count, custom stores returning void yield null after successful writes |
+
+Embedding or persistence failures can make acknowledged/persisted counts lower than selected. Counts describe this attempt and are not stored as durable receipts. Optional store insert results use `{ inserted: number }`; existing `Promise<void>` stores remain compatible. No database migration is required.
+
+Run `npm run benchmark:document-ingestion` for a credential-free, deterministic provider simulation comparing sequential preparation with selection, bounded work, and batching. Its elapsed times are synthetic, not predictions of live provider latency.
