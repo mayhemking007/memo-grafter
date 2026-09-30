@@ -24,7 +24,7 @@ import type {
   TopicSegment,
 } from "../core/types.js";
 import { normalizeTags } from "../utils/tags.js";
-import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
+import { prepareTextChunks } from "../utils/text/prepareTextChunks.js";
 import { resolveMemoGrafterConfig } from "../config.js";
 import type { MemoGrafterConfigOverrides, MemoGrafterConfigSource } from "../config.js";
 import { buildInvocationPlan } from "../invocation/InvocationPlanner.js";
@@ -121,7 +121,7 @@ export class MemoGrafterAgent {
   }
 
   ingestText(text: string, options: IngestTextOptions = {}): Promise<void> {
-    const chunks = splitTextForIngestion(text);
+    const chunks = prepareTextChunks(text, options).map((chunk) => chunk.content);
     if (chunks.length === 0) return Promise.resolve();
 
     const run = async (): Promise<void> => {

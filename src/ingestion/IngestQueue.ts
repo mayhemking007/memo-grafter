@@ -4,7 +4,7 @@ import { Redis } from "ioredis";
 import type { IngestPipeline } from "./conversation/IngestPipeline.js";
 import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../core/types.js";
 import type { QueueJobTelemetryEvent } from "../core/types.js";
-import { splitTextForIngestion } from "../utils/text/splitTextForIngestion.js";
+import { prepareTextChunks } from "../utils/text/prepareTextChunks.js";
 import type { GraphStore } from "../store/index.js";
 import type { IngestionEvent, IngestionRun } from "./types.js";
 
@@ -161,6 +161,7 @@ export class IngestQueue {
   }
 
   async enqueueText(text: string, sessionId: string, options: IngestPipelineOptions = {}): Promise<void> {
+    prepareTextChunks(text, options);
     try {
       await this.withTimeout(
         this.queue.add(
@@ -318,7 +319,7 @@ export class IngestQueue {
 }
 
 export function countIngestJobMessages(data: IngestJobData): number {
-  if (data.kind === "text") return splitTextForIngestion(data.text).length;
+  if (data.kind === "text") return prepareTextChunks(data.text, data.options).length;
   if (data.kind === "run") return data.endIndex - data.startIndex + 1;
   return data.messages.length;
 }

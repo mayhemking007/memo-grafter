@@ -248,3 +248,19 @@ describe("MemoGrafterAgent.remember", () => {
     expect(privateAgent.ingestionHistory).toEqual([]);
   });
 });
+
+it("shares configured chunks with agent history and subsequent append indexes", async () => {
+  const agent = createAgent();
+  const internal = internals(agent);
+  let forwarded: IngestTextOptions | undefined;
+  internal.core.enqueueTextIngest = async (_text, _session, options) => { forwarded = options; };
+  internal.core.store.getSessionNodeCount = async () => 0;
+  let nextIndex = -1;
+  internal.core.enqueueIncrementalIngest = async (_messages, _session, start) => { nextIndex = start; };
+  const options: IngestTextOptions = { chunking: { strategy: "single" }, segmentation: { strategy: "single" } };
+  await agent.ingestText("First. Second.", options);
+  expect(internal.ingestionHistory).toEqual([{ role: "user", content: "First. Second." }]);
+  expect(forwarded).toMatchObject(options);
+  await agent.invoke("Next conversation turn");
+  expect(nextIndex).toBe(1);
+});

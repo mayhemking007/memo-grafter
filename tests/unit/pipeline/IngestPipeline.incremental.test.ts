@@ -167,7 +167,7 @@ class IncrementalStore {
   }
 }
 
-function createPipeline(store: IncrementalStore): IngestPipeline {
+function createPipeline(store: IncrementalStore, minimum = 1): IngestPipeline {
   return new IngestPipeline(
     store as unknown as GraphStore,
     new FakeLLMAdapter(),
@@ -176,7 +176,7 @@ function createPipeline(store: IncrementalStore): IngestPipeline {
       windowSize: 5,
       topK: 3,
       mode: "intent",
-      minSegmentMessages: 1,
+      minSegmentMessages: minimum,
       driftSensitivity: "medium" satisfies DriftSensitivity,
     },
   );
@@ -477,4 +477,41 @@ describe("IngestPipeline incremental ingest", () => {
       [2, 3],
     ]);
   });
+});
+
+ describe("document segmentation controls", () => {
+  it("uses explicit segments without context embeddings and preserves append ranges", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    const embed = vi.spyOn(FakeEmbedAdapter.prototype, "embed");
+    await pipeline.runText("First unique sentence. Second unique sentence.", "s", { segmentation: { strategy: "per-chunk" } });
+    expect(store.segments.map(s => [s.startIndex, s.endIndex])).toEqual([[0, 0], [1, 1]]);
+    expect(embed.mock.calls.some(([text]) => text === "First unique sentence.")).toBe(false);
+    await pipeline.runText("Third. Fourth.", "s", { segmentation: { strategy: "single" } });
+    expect(store.segments.at(-1)).toMatchObject({ startIndex: 2, endIndex: 3 });
+    embed.mockRestore();
+  });
+  it("caps drift segments and validates before replacement", async () => {
+    const store = new IncrementalStore();
+    const pipeline = createPipeline(store);
+    await pipeline.runText("Japan trip. Local cafes. Budget approval. Budget costs.", "s", { segmentation: { minChunks: 1, maxTopics: 1 } });
+    expect(store.segments).toHaveLength(1);
+    const before = [...store.messages];
+    await expect(pipeline.runText("Too long", "s", { replace: true, chunking: { strategy: "single", maxCharacters: 2 } })).rejects.toThrow();
+    expect(store.messages).toEqual(before);
+  });
+});
+
+it("uses configured document minimums while retaining legacy defaults and explicit overrides", async () => {
+  const text = "Japan travel. Japan cafes. Budget planning. Budget approval.";
+  for (const [options, count] of [
+    [{}, 2],
+    [{ chunking: { strategy: "sentence" } }, 1],
+    [{ chunking: { strategy: "sentence" }, segmentation: { minChunks: 1 } }, 2],
+    [{ minSegmentMessages: 8 }, 1],
+  ] as const) {
+    const store = new IncrementalStore();
+    await createPipeline(store, 8).runText(text, "s", options);
+    expect(store.segments).toHaveLength(count);
+  }
 });

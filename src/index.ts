@@ -55,6 +55,8 @@ export type {
   InjectionResult,
   IngestOptions,
   IngestTextOptions,
+  TextChunkingOptions,
+  TextSegmentationOptions,
   LLMAdapter,
   MemoryEdge,
   MemoryDiff,
