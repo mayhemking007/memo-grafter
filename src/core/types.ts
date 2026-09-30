@@ -425,7 +425,25 @@ export interface IngestOptions {
   tags?: string[];
 }
 
+export interface TextChunkingOptions {
+  strategy?: "sentence" | "paragraph" | "section" | "fixed" | "single";
+  targetCharacters?: number;
+  maxCharacters?: number;
+  maxChunks?: number;
+  overlapCharacters?: number;
+  preserveHeadings?: boolean;
+}
+
+export interface TextSegmentationOptions {
+  strategy?: "drift" | "per-chunk" | "single";
+  minChunks?: number;
+  maxTopics?: number;
+}
+
 export interface IngestTextOptions extends IngestOptions {
+  chunking?: TextChunkingOptions;
+  segmentation?: TextSegmentationOptions;
+  minSegmentMessages?: number;
   replace?: boolean;
   label?: string;
   source?: string;
@@ -434,7 +452,7 @@ export interface IngestTextOptions extends IngestOptions {
 export type RememberOptions = IngestTextOptions;
 
 /** @internal */
-export interface IngestPipelineOptions extends IngestOptions {
+export interface IngestPipelineOptions extends IngestTextOptions {
   replace?: boolean;
   label?: string;
   source?: string;

@@ -13,7 +13,7 @@ import { resolveAdaptiveDriftThreshold } from "../../utils/drift/adaptiveDriftSe
 import { cosineSimilarity } from "../../utils/drift/cosineSimilarity.js";
 import { resolveDriftThreshold } from "../../utils/drift/driftThreshold.js";
 import { normalizeText } from "../../utils/text/normalizeText.js";
-import { splitTextForIngestion } from "../../utils/text/splitTextForIngestion.js";
+import { prepareTextChunks } from "../../utils/text/prepareTextChunks.js";
 import { edgePairKey, findCurrentRunReentryEdges } from "../../utils/reentry/reentryEdges.js";
 import { SegmentProcessor } from "./SegmentProcessor.js";
 import { TopicAssigner } from "./TopicAssigner.js";
@@ -181,13 +181,7 @@ export class IngestPipeline {
       this.store.getNodesBySession(sessionId),
       typeof this.store.getSegmentsBySession === "function" ? this.store.getSegmentsBySession(sessionId) : Promise.resolve([]),
     ]);
-    const contextEmbeddings = await Promise.all(contextMessages.map((message) => this.embedMessage(message)));
-    const driftDetector = await this.createDriftDetector(sessionId, options.minSegmentMessages);
-    const { segments, reentryMap } = await driftDetector.detectSegments(
-      contextMessages,
-      contextEmbeddings,
-      existingNodes,
-    );
+    const { segments, reentryMap, contextEmbeddings } = await this.segmentMessages(contextMessages, overlapMessages.length, existingNodes, sessionId, options);
     const absoluteSegments = this.toNewAbsoluteSegments(
       segments,
       contextStartIndex,
@@ -230,7 +224,7 @@ export class IngestPipeline {
       }
     }
 
-    if (this.config.reentryDetection !== false) {
+    if (this.config.reentryDetection !== false && contextEmbeddings.length > 0) {
       const currentRunReentryEdges = findCurrentRunReentryEdges({
         segments: absoluteSegments.map(({ relativeSegment }) => relativeSegment),
         messages: contextMessages,
@@ -304,9 +298,7 @@ export class IngestPipeline {
       this.store.getNodesBySession(run.sessionId),
       typeof this.store.getSegmentsBySession === "function" ? this.store.getSegmentsBySession(run.sessionId) : Promise.resolve([]),
     ]);
-    const contextEmbeddings = await Promise.all(contextMessages.map((message) => this.embedMessage(message)));
-    const detector = await this.createDriftDetector(run.sessionId, options.minSegmentMessages);
-    const { segments, reentryMap } = await detector.detectSegments(contextMessages, contextEmbeddings, existingNodes);
+    const { segments, reentryMap, contextEmbeddings } = await this.segmentMessages(contextMessages, overlapMessages.length, existingNodes, run.sessionId, options);
     const absoluteSegments = this.toNewAbsoluteSegments(segments, contextStartIndex, run.startIndex, existingNodes, existingSegments);
     const prepared: PreparedIngestion = { runId: run.id, sessionId: run.sessionId, startIndex: run.startIndex, endIndex: run.endIndex, expectedCursor, segments: [], nodes: [], topicUpdates: [], episodes: [], memories: [], requiredEdges: [] };
     const nodeByDetectorTopicOrder = new Map<number, TopicNode>();
@@ -338,7 +330,7 @@ export class IngestPipeline {
       const temporal = index === 0 ? existingNodes.reduce<TopicNode | undefined>((latest, node) => !latest || (node.lastActiveAt ?? node.createdAt) > (latest.lastActiveAt ?? latest.createdAt) ? node : latest, undefined) : nodeByDetectorTopicOrder.get(absoluteSegments[index - 1]!.detectorTopicOrder);
       if (temporal && temporal.id !== assignment.topic.id) prepared.requiredEdges.push({ srcId: assignment.topic.id, dstId: temporal.id, weight: cosineSimilarity(assignment.topic.embedding, temporal.embedding), type: "temporal" });
     }
-    if (this.config.reentryDetection !== false) prepared.requiredEdges.push(...findCurrentRunReentryEdges({ segments: absoluteSegments.map((item) => item.relativeSegment), messages: contextMessages, embeddings: contextEmbeddings, nodeByTopicOrder: nodeByDetectorTopicOrder, reentryThreshold: this.config.reentryThreshold ?? 0.85, existingPairs: new Set(prepared.requiredEdges.map((edge) => edgePairKey(edge.srcId, edge.dstId))) }));
+    if (this.config.reentryDetection !== false && contextEmbeddings.length > 0) prepared.requiredEdges.push(...findCurrentRunReentryEdges({ segments: absoluteSegments.map((item) => item.relativeSegment), messages: contextMessages, embeddings: contextEmbeddings, nodeByTopicOrder: nodeByDetectorTopicOrder, reentryThreshold: this.config.reentryThreshold ?? 0.85, existingPairs: new Set(prepared.requiredEdges.map((edge) => edgePairKey(edge.srcId, edge.dstId))) }));
     return prepared;
   }
 
@@ -362,14 +354,12 @@ export class IngestPipeline {
     sessionId: string,
     options: IngestPipelineOptions = {},
   ): Promise<TopicNode[]> {
-    if (text.trim().length === 0) return [];
+    const chunks = prepareTextChunks(text, options).map((chunk) => chunk.content);
+    if (chunks.length === 0) return [];
 
     if (options.replace) {
       await this.store.clearSession(sessionId);
     }
-
-    const chunks = splitTextForIngestion(text);
-    if (chunks.length === 0) return [];
 
     const messages = await this.store.getMessagesBySession(sessionId);
     return this.run([
@@ -378,8 +368,34 @@ export class IngestPipeline {
     ], sessionId, {
       ...options,
       sourceType: options.sourceType ?? "document",
-      minSegmentMessages: options.minSegmentMessages ?? 1,
+      minSegmentMessages: options.segmentation?.minChunks ?? options.minSegmentMessages ?? (options.chunking || options.segmentation ? this.config.minSegmentMessages : 1),
     });
+  }
+
+  private async segmentMessages(messages: Message[], overlap: number, existingNodes: TopicNode[], sessionId: string, options: IngestPipelineOptions) {
+    const mode = options.segmentation?.strategy ?? "drift";
+    if (mode !== "drift") {
+      const segments: DriftSegment[] = mode === "single"
+        ? [{ start: overlap, end: messages.length - 1, topicOrder: 1, driftScore: 0 }]
+        : messages.slice(overlap).map((_, index) => ({ start: overlap + index, end: overlap + index, topicOrder: index + 1, driftScore: 0 }));
+      return { segments, reentryMap: new Map<number, string>(), contextEmbeddings: [] as number[][] };
+    }
+    const contextEmbeddings = await Promise.all(messages.map((message) => this.embedMessage(message)));
+    const detector = await this.createDriftDetector(sessionId, options.minSegmentMessages);
+    const detected = await detector.detectSegments(messages, contextEmbeddings, existingNodes);
+    if (options.segmentation?.maxTopics === undefined) return { ...detected, contextEmbeddings };
+    const segments = detected.segments.filter((segment) => segment.end >= overlap);
+    const maxTopics = options.segmentation?.maxTopics ?? Infinity;
+    while (segments.length > maxTopics) {
+      let weakest = 1;
+      for (let i = 2; i < segments.length; i++) if (segments[i - 1]!.driftScore < segments[weakest - 1]!.driftScore) weakest = i;
+      const previous = segments[weakest - 1]!, removed = segments[weakest]!;
+      previous.end = removed.end;
+      previous.driftScore = removed.driftScore;
+      detected.reentryMap.delete(removed.topicOrder);
+      segments.splice(weakest, 1);
+    }
+    return { segments, reentryMap: detected.reentryMap, contextEmbeddings };
   }
 
   private toNewAbsoluteSegments(
