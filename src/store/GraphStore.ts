@@ -83,6 +83,9 @@ export interface GraphStore {
   getEpisodesByTopic?(topicId: string, limit?: number): Promise<Episode[]>;
   searchEpisodeCandidates?(embedding: number[], sessionId: string, limit: number, options?: TagFilterOptions): Promise<Array<Episode & { similarity: number }>>;
   saveEdge(edge: TopicEdge): Promise<void>;
+  /** Ordered upserts. Required durable writes must still use commitPreparedIngestion's transaction. */
+  saveEdges?(edges: TopicEdge[]): Promise<void>;
+  getMemoryEvidence?(memoryNodeId: string): Promise<import("../core/types.js").MemoryEvidence[]>;
   getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]>;
   getEdgesBySession(sessionId: string): Promise<TopicEdge[]>;
   getMemoriesBySession(sessionId: string): Promise<MemoryNode[]>;

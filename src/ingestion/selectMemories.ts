@@ -1,4 +1,5 @@
 import type { MemoryBudget, MemoryNodeInsert } from "../core/types.js";
+import { mergeSourceSpans } from "./structuredDocument.js";
 
 /** Conservative: preserve case, punctuation, negation, dates, and numeric values. */
 const normalize = (value: string) => value.normalize("NFC").replace(/\s+/gu, " ").trim();
@@ -10,12 +11,16 @@ export function selectMemories(groups: MemoryNodeInsert[][], budget: MemoryBudge
     return index < 0 ? Infinity : index;
   };
   const ranked = [...candidates].sort((a, b) => score(b.memory) - score(a.memory) || preference(a.memory) - preference(b.memory) || a.segment - b.segment || a.index - b.index);
-  const seen = new Set<string>();
+  const seen = new Map<string, MemoryNodeInsert>();
   const unique = ranked.filter(({ memory }) => {
     if (!budget.deduplicate) return true;
     const key = JSON.stringify([memory.memoryType, memory.subject, memory.predicate, memory.value].map(normalize));
-    if (seen.has(key)) return false;
-    seen.add(key); return true;
+    const winner = seen.get(key);
+    if (winner) {
+      if (memory.sourceSpans?.length) winner.sourceSpans = mergeSourceSpans([...(winner.sourceSpans ?? []), ...memory.sourceSpans]);
+      return false;
+    }
+    seen.set(key, memory); return true;
   });
   const selected = new Set<MemoryNodeInsert>();
   const counts = groups.map(() => 0);

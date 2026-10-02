@@ -1,3 +1,6 @@
+import { structuredDocumentMigrationSql } from "../../schema/structuredDocumentMigration.js";
+import { mergeSourceSpans } from "../../ingestion/structuredDocument.js";
+import { batches } from "../../ingestion/storeBatch.js";
 import { documentIngestionMigrationSql } from "../../schema/documentIngestionMigration.js";
 import { hydrateDocumentRun, documentReceipt, safeWarnings } from "../../ingestion/documentRun.js";
 import { topicClusterMigrationSql } from "../../schema/topicClusterMigration.js";
@@ -80,6 +83,7 @@ interface TopicSegmentRow {
 }
 
 interface MemoryNodeRow {
+  source_spans?: import("../../ingestion/structuredDocument.js").DocumentSourceSpan[];
   id: string;
   segment_id: string;
   topic_node_id: string;
@@ -205,13 +209,16 @@ export function safelyReportDatabaseQuery(
 
 export class PostgresGraphStore implements GraphStore {
   private readonly sql: Sql;
+  private readonly batchSize: number;
   // Enrichment holds one session-lock connection while calling other store methods.
   // Admit one callback per pool to leave connections available for those methods.
   private readonly documentFinishWork = new ProviderGate(1);
 
   agentRuns(access: AgentRunAccess): AgentRunAPI { return new PostgresAgentRunStore(this.sql, access); }
 
-  constructor(connectionString: string, options: { telemetry?: MemoGrafterDatabaseTelemetry } = {}) {
+  constructor(connectionString: string, options: { telemetry?: MemoGrafterDatabaseTelemetry; batchSize?: number } = {}) {
+    this.batchSize = options.batchSize ?? 100;
+    if (!Number.isSafeInteger(this.batchSize) || this.batchSize < 1 || this.batchSize > 1000) throw new MemoGrafterError("batchSize must be an integer between 1 and 1000.", { code: "CONFIGURATION_INVALID", operation: "storage" });
     this.sql = postgres(connectionString, {
       max: 10,
       idle_timeout: 30,
@@ -257,6 +264,7 @@ export class PostgresGraphStore implements GraphStore {
         WHERE table_schema = current_schema() AND table_name IN ('mg_memory_nodes', 'mg_memory_evidence', 'mg_topic_nodes')
       `;
       const required = ["quality_explicitness", "quality_source_reliability", "quality_stability", "quality_salience", "quality_defaulted", "quality_origin", "quality_updated_at"];
+      if (["mg_memory_nodes", "mg_memory_evidence"].some(table => !columns.some(row => row.table_name === table && row.column_name === "source_spans"))) throw new Error("MemoGrafter structured document migration is required. Run: npx memo-grafter migrate");
       if (["mg_memory_nodes", "mg_memory_evidence"].some(table => required.some(column => !columns.some(row => row.table_name === table && row.column_name === column)))) {
         throw new Error("MemoGrafter memory quality migration is required. Run: npx memo-grafter migrate");
       }
@@ -560,6 +568,7 @@ export class PostgresGraphStore implements GraphStore {
     `;
 
     await this.sql.unsafe(documentIngestionMigrationSql);
+    await this.sql.unsafe(structuredDocumentMigrationSql);
     await this.migrateExistingNodeTable();
     await this.createIndexes();
     await this.sql`
@@ -671,7 +680,7 @@ export class PostgresGraphStore implements GraphStore {
 
   private async acceptDocumentRun(request: AcceptIngestionRequest): Promise<IngestionRun> {
     const document = request.document!;
-    if (document.version !== 1 || !document.chunks.length || request.kind !== "text") throw new MemoGrafterError("Invalid document operation.", { code: "INPUT_INVALID", operation: "ingest" });
+    if (![1, 2].includes(document.version) || !document.chunks.length || request.kind !== "text") throw new MemoGrafterError("Invalid document operation.", { code: "INPUT_INVALID", operation: "ingest" });
     return this.sql.begin(async transaction => {
       await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${request.sessionId}`}))`;
       if (request.idempotencyKey) {
@@ -825,7 +834,7 @@ export class PostgresGraphStore implements GraphStore {
       const run = runRows[0];
       if (!run || run.status !== "running" || run.superseded_at || run.session_id !== prepared.sessionId || run.start_index !== prepared.startIndex || run.end_index !== prepared.endIndex) throw this.ingestionInvariant("Ingestion run does not match the prepared commit.", prepared.sessionId, prepared.runId);
       if (run.document_payload) {
-        if (run.document_payload.version !== 1 || run.cancel_requested_at || run.worker_id !== prepared.workerId || run.attempt_count !== prepared.attemptCount || !run.lease_expires_at || run.lease_expires_at.getTime() <= Date.now() || run.document_payload.baseCursor !== prepared.expectedCursor || !run.prepared_payload) throw this.ingestionInvariant("Document commit lost its worker lease or staged operation.", prepared.sessionId, prepared.runId);
+        if (![1, 2].includes(run.document_payload.version) || run.cancel_requested_at || run.worker_id !== prepared.workerId || run.attempt_count !== prepared.attemptCount || !run.lease_expires_at || run.lease_expires_at.getTime() <= Date.now() || run.document_payload.baseCursor !== prepared.expectedCursor || !run.prepared_payload) throw this.ingestionInvariant("Document commit lost its worker lease or staged operation.", prepared.sessionId, prepared.runId);
         const deadlineRows = await transaction<{ expired: boolean }[]>`SELECT (document_payload->>'deadlineAt')::timestamptz <= clock_timestamp() AS expired FROM mg_ingestion_runs WHERE id=${run.id}`;
         if (deadlineRows[0]?.expired) throw new MemoGrafterError("Document deadline expired before commit.", { code: "OPERATION_TIMEOUT", operation: "ingest" });
         const stagedRows = await transaction<{ matches: boolean }[]>`SELECT prepared_payload=${transaction.json(JSON.parse(JSON.stringify(prepared)))}::jsonb AS matches FROM mg_ingestion_runs WHERE id=${run.id}`;
@@ -846,15 +855,17 @@ export class PostgresGraphStore implements GraphStore {
           await transaction`DELETE FROM mg_segments WHERE session_id=${prepared.sessionId}`;
           await transaction`DELETE FROM mg_message_buffer WHERE session_id=${prepared.sessionId}`;
         }
-        for (const [offset, chunk] of run.document_payload.chunks.entries()) await transaction`INSERT INTO mg_message_buffer (session_id,message_index,role,content) VALUES (${prepared.sessionId},${prepared.startIndex + offset},'user',${chunk.content})`;
+        for (const batch of batches(run.document_payload.chunks.map((chunk, index) => ({ index: prepared.startIndex + index, content: chunk.content })), this.batchSize)) await transaction`INSERT INTO mg_message_buffer (session_id,message_index,role,content) SELECT ${prepared.sessionId},r.index,'user',r.content FROM jsonb_to_recordset(${transaction.json(batch)}) AS r(index int,content text)`;
       }
-      for (const segment of prepared.segments) await transaction`INSERT INTO mg_segments (id,session_id,start_index,end_index,topic_order,drift_score,created_at) VALUES (${segment.id},${segment.sessionId},${segment.startIndex},${segment.endIndex},${segment.topicOrder},${segment.driftScore},${segment.createdAt}) ON CONFLICT (session_id,start_index,end_index) DO UPDATE SET topic_order=EXCLUDED.topic_order,drift_score=EXCLUDED.drift_score`;
+      for (const batch of batches(prepared.segments, this.batchSize)) await transaction`INSERT INTO mg_segments (id,session_id,start_index,end_index,topic_order,drift_score,created_at)
+        SELECT r.id,r."sessionId",r."startIndex",r."endIndex",r."topicOrder",r."driftScore",r."createdAt" FROM jsonb_to_recordset(${transaction.json(JSON.parse(JSON.stringify(batch)))}) AS r(id text,"sessionId" text,"startIndex" int,"endIndex" int,"topicOrder" int,"driftScore" float,"createdAt" timestamptz)
+        ON CONFLICT (session_id,start_index,end_index) DO UPDATE SET topic_order=EXCLUDED.topic_order,drift_score=EXCLUDED.drift_score`;
       for (const node of prepared.nodes) await transaction`INSERT INTO mg_topic_nodes (id,session_id,segment_id,label,summary,embedding,tags,source,message_range,topic_order,drift_score,agent_color,fleet_id,agent_id,episode_count,embedding_count,first_active_at,last_active_at,last_episode_id,revision,created_at) VALUES (${node.id},${node.sessionId},${node.segmentId},${node.label},${node.summary},${toVectorLiteral(node.embedding)}::vector,${transaction.array(normalizeTags(node.tags))}::text[],${node.source ?? null},${node.messageRange},${node.topicOrder},${node.driftScore},${node.agentColor},${node.fleetId},${node.agentId},${node.episodeCount ?? 1},${node.embeddingCount ?? 1},${node.firstActiveAt ?? node.createdAt},${node.lastActiveAt ?? node.createdAt},${node.lastEpisodeId ?? null}::uuid,${node.revision ?? 1},${node.createdAt}) ON CONFLICT (segment_id) DO NOTHING`;
       for (const episode of prepared.episodes ?? []) await transaction`INSERT INTO mg_episodes (id,session_id,segment_id,topic_id,summary,intent,outcome,open_question,embedding,message_range,episode_order,source_type,source,tags,assignment_method,assignment_similarity,assignment_version,created_at)
         VALUES (${episode.id}::uuid,${episode.sessionId},${episode.segmentId},${episode.topicId},${episode.summary},${episode.intent},${episode.outcome},${episode.openQuestion},${toVectorLiteral(episode.embedding)}::vector,${episode.messageRange},${episode.episodeOrder},${episode.sourceType},${episode.source ?? null},${transaction.array(normalizeTags(episode.tags))}::text[],${episode.assignmentMethod},${episode.assignmentSimilarity},${episode.assignmentVersion},${episode.createdAt}) ON CONFLICT (segment_id) DO NOTHING`;
       for (const node of prepared.topicUpdates ?? []) await transaction`UPDATE mg_topic_nodes SET summary=${node.summary},embedding=${toVectorLiteral(node.embedding)}::vector,tags=${transaction.array(normalizeTags(node.tags))}::text[],episode_count=${node.episodeCount ?? 1},embedding_count=${node.embeddingCount ?? 1},first_active_at=${node.firstActiveAt ?? node.createdAt},last_active_at=${node.lastActiveAt ?? node.createdAt},last_episode_id=${node.lastEpisodeId ?? null}::uuid,revision=${node.revision ?? 1} WHERE id=${node.id} AND session_id=${node.sessionId}`;
       const inserted = await this.reconcileAndInsertMemories(transaction, prepared.memories);
-      for (const edge of prepared.requiredEdges) await transaction`INSERT INTO mg_topic_edges (src_id,dst_id,weight,type) VALUES (${edge.srcId},${edge.dstId},${edge.weight},${edge.type}) ON CONFLICT (src_id,dst_id) DO UPDATE SET weight=EXCLUDED.weight,type=EXCLUDED.type`;
+      await this.writeEdges(transaction, prepared.requiredEdges);
       await transaction`INSERT INTO mg_session_ingest_state (session_id,last_ingested_message_index,updated_at) VALUES (${prepared.sessionId},${prepared.endIndex},NOW()) ON CONFLICT (session_id) DO UPDATE SET last_ingested_message_index=EXCLUDED.last_ingested_message_index,updated_at=NOW()`;
       const committedNodes = [...new Map([...prepared.nodes, ...(prepared.topicUpdates ?? [])].map((node) => [node.id, node])).values()];
       const warnings = prepared.warnings ?? [];
@@ -1118,6 +1129,26 @@ export class PostgresGraphStore implements GraphStore {
     `;
   }
 
+  async saveEdges(edges: TopicEdge[]): Promise<void> {
+    await this.sql.begin(transaction => this.writeEdges(transaction, edges));
+  }
+
+  private async writeEdges(transaction: TransactionSql, edges: TopicEdge[]): Promise<void> {
+    const unique = [...new Map(edges.map(edge => [JSON.stringify([edge.srcId, edge.dstId]), edge])).values()];
+    for (const batch of batches(unique, this.batchSize)) await transaction`INSERT INTO mg_topic_edges (src_id,dst_id,weight,type)
+      SELECT r."srcId",r."dstId",r.weight,r.type FROM jsonb_to_recordset(${transaction.json(JSON.parse(JSON.stringify(batch)))}) AS r("srcId" text,"dstId" text,weight float,type text)
+      ON CONFLICT (src_id,dst_id) DO UPDATE SET weight=EXCLUDED.weight,type=EXCLUDED.type`;
+  }
+
+  async getMemoryEvidence(memoryNodeId: string): Promise<import("../../core/types.js").MemoryEvidence[]> {
+    const rows = await this.sql<(MemoryNodeRow & { memory_node_id: string; original_subject: string; original_predicate: string; original_value: string; episode_id: string | null })[]>`SELECT * FROM mg_memory_evidence WHERE memory_node_id=${memoryNodeId}::uuid ORDER BY created_at,id`;
+    return rows.map(row => ({ id: row.id, memoryNodeId: row.memory_node_id, segmentId: row.segment_id, topicNodeId: row.topic_node_id, sessionId: row.session_id,
+      originalSubject: row.original_subject, originalPredicate: row.original_predicate, originalValue: row.original_value,
+      quality: normalizeMemoryQuality({ explicitness: row.quality_explicitness, sourceReliability: row.quality_source_reliability, stability: row.quality_stability, salience: row.quality_salience }),
+      sourceSpans: row.source_spans ?? [], provenance: row.provenance_speaker && row.provenance_message_indexes && row.provenance_session_id && row.extraction_method ? { speaker: row.provenance_speaker, messageIndexes: row.provenance_message_indexes, sessionId: row.provenance_session_id, extractionMethod: row.extraction_method } : null,
+      createdAt: row.created_at, episodeId: row.episode_id }));
+  }
+
   async getEdgesByType(sessionId: string, type: string): Promise<TopicEdge[]> {
     const rows = await this.sql<EdgeRow[]>`
       SELECT e.*
@@ -1305,7 +1336,7 @@ export class PostgresGraphStore implements GraphStore {
           const stronger = compareQualityEvidence(node.quality, existing.quality) > 0;
           const defaulted = [...(existing.qualityDefaulted ?? [])].filter(key => !stronger || (key !== "explicitness" && key !== "sourceReliability"));
           if (stronger) defaulted.push(...(node.qualityDefaulted ?? []).filter(key => key === "explicitness" || key === "sourceReliability"));
-          await transaction`UPDATE mg_memory_nodes SET reinforcement_count=reinforcement_count+1,last_reinforced_at=NOW(),quality_explicitness=${quality.explicitness},quality_source_reliability=${quality.sourceReliability},quality_defaulted=${transaction.array(defaulted)}::text[] WHERE id=${memoryNodeId}::uuid`;
+          await transaction`UPDATE mg_memory_nodes SET source_spans=${transaction.json(JSON.parse(JSON.stringify(mergeSourceSpans([...(equivalent.source_spans ?? []), ...(node.sourceSpans ?? [])]))))},reinforcement_count=reinforcement_count+1,last_reinforced_at=NOW(),quality_explicitness=${quality.explicitness},quality_source_reliability=${quality.sourceReliability},quality_defaulted=${transaction.array(defaulted)}::text[] WHERE id=${memoryNodeId}::uuid`;
 
         }
         continue;
@@ -1313,11 +1344,11 @@ export class PostgresGraphStore implements GraphStore {
       const inserted = await transaction`INSERT INTO mg_memory_nodes (
         id,segment_id,topic_node_id,agent_id,session_id,memory_type,source_type,subject,predicate,value,
         canonical_subject,canonical_predicate,canonical_value,canonical_fact_key,canonical_value_key,canonicalization_version,
-        quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at,embedding,tags,source,source_url,source_title,provenance_speaker,provenance_message_indexes,
+        quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at,embedding,tags,source,source_url,source_title,source_spans,provenance_speaker,provenance_message_indexes,
         provenance_session_id,extraction_method,superseded_by,decayed,forgotten,has_conflict,agent_color,fleet_id
       ) VALUES (${node.id},${node.segmentId},${node.topicNodeId},${node.agentId},${node.sessionId},${node.memoryType},${node.sourceType},${node.subject},${node.predicate},${node.value},
         ${canonical.subject},${canonical.predicate},${canonical.value},${canonical.factKey},${canonical.valueKey},${canonical.version},
-        ${node.quality.explicitness},${node.quality.sourceReliability},${node.quality.stability},${node.quality.salience},${transaction.array(node.qualityDefaulted ?? [])}::text[],${node.qualityOrigin ?? "provided"},NOW(),${toVectorLiteral(node.embedding)}::vector,${transaction.array(normalizeTags(node.tags))}::text[],${node.source ?? null},${node.sourceUrl},${node.sourceTitle},
+        ${node.quality.explicitness},${node.quality.sourceReliability},${node.quality.stability},${node.quality.salience},${transaction.array(node.qualityDefaulted ?? [])}::text[],${node.qualityOrigin ?? "provided"},NOW(),${toVectorLiteral(node.embedding)}::vector,${transaction.array(normalizeTags(node.tags))}::text[],${node.source ?? null},${node.sourceUrl},${node.sourceTitle},${transaction.json(JSON.parse(JSON.stringify(node.sourceSpans ?? [])))},
         ${node.provenance?.speaker ?? null},${node.provenance ? transaction.array(node.provenance.messageIndexes) : null}::int[],${node.provenance?.sessionId ?? null},${node.provenance?.extractionMethod ?? null},
         ${node.supersededBy},${node.decayed},${node.forgotten ?? false},${classification === "conflict" || node.hasConflict === true},${node.agentColor},${node.fleetId}) ON CONFLICT (id) DO NOTHING RETURNING id`;
       insertedCount += inserted.length;
@@ -1345,8 +1376,8 @@ export class PostgresGraphStore implements GraphStore {
       `;
       if (existing.length) return false;
     }
-    const rows = await transaction<{ id: string }[]>`INSERT INTO mg_memory_evidence (memory_node_id,segment_id,topic_node_id,session_id,episode_id,original_subject,original_predicate,original_value,quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at,provenance_speaker,provenance_message_indexes,provenance_session_id,extraction_method)
-      VALUES (${memoryNodeId}::uuid,${node.segmentId},${node.topicNodeId},${node.sessionId},(SELECT id FROM mg_episodes WHERE segment_id=${node.segmentId} LIMIT 1),${node.subject},${node.predicate},${node.value},${node.quality.explicitness},${node.quality.sourceReliability},${node.quality.stability},${node.quality.salience},${transaction.array(node.qualityDefaulted ?? [])}::text[],${node.qualityOrigin ?? "provided"},NOW(),${node.provenance?.speaker ?? null},${node.provenance ? transaction.array(node.provenance.messageIndexes) : null}::int[],${node.provenance?.sessionId ?? null},${node.provenance?.extractionMethod ?? null})
+    const rows = await transaction<{ id: string }[]>`INSERT INTO mg_memory_evidence (memory_node_id,segment_id,topic_node_id,session_id,episode_id,original_subject,original_predicate,original_value,quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at,provenance_speaker,provenance_message_indexes,provenance_session_id,extraction_method,source_spans)
+      VALUES (${memoryNodeId}::uuid,${node.segmentId},${node.topicNodeId},${node.sessionId},(SELECT id FROM mg_episodes WHERE segment_id=${node.segmentId} LIMIT 1),${node.subject},${node.predicate},${node.value},${node.quality.explicitness},${node.quality.sourceReliability},${node.quality.stability},${node.quality.salience},${transaction.array(node.qualityDefaulted ?? [])}::text[],${node.qualityOrigin ?? "provided"},NOW(),${node.provenance?.speaker ?? null},${node.provenance ? transaction.array(node.provenance.messageIndexes) : null}::int[],${node.provenance?.sessionId ?? null},${node.provenance?.extractionMethod ?? null},${transaction.json(JSON.parse(JSON.stringify(node.sourceSpans ?? [])))})
       ON CONFLICT (memory_node_id,segment_id,provenance_message_indexes) DO NOTHING RETURNING id`;
     return rows.length > 0;
   }
@@ -2235,13 +2266,13 @@ export class PostgresGraphStore implements GraphStore {
         INSERT INTO mg_memory_nodes (
           segment_id, topic_node_id, agent_id, session_id, memory_type, source_type,
           subject, predicate, value, quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at, embedding, tags, source, source_url,
-          source_title, provenance_speaker, provenance_message_indexes, provenance_session_id,
+          source_title, source_spans, provenance_speaker, provenance_message_indexes, provenance_session_id,
           extraction_method, superseded_by, decayed, forgotten, has_conflict, agent_color, fleet_id
         )
         SELECT
           ${segmentId}, ${copiedTopicId}, agent_id, ${request.targetSessionId}, memory_type, source_type,
           subject, predicate, value, quality_explicitness,quality_source_reliability,quality_stability,quality_salience,quality_defaulted,quality_origin,quality_updated_at, embedding, tags, source, source_url,
-          source_title, provenance_speaker, provenance_message_indexes, provenance_session_id,
+          source_title, source_spans, provenance_speaker, provenance_message_indexes, provenance_session_id,
           extraction_method, NULL, FALSE, FALSE, has_conflict, agent_color, fleet_id
         FROM mg_memory_nodes
         WHERE topic_node_id = ${sourceTopicId} AND session_id = ${request.sourceSessionId}
@@ -2395,6 +2426,7 @@ export class PostgresGraphStore implements GraphStore {
         source,
         source_url,
         source_title,
+        source_spans,
         provenance_speaker,
         provenance_message_indexes,
         provenance_session_id,
@@ -2420,6 +2452,7 @@ export class PostgresGraphStore implements GraphStore {
         source,
         source_url,
         source_title,
+        source_spans,
         provenance_speaker,
         provenance_message_indexes,
         provenance_session_id,
@@ -3070,6 +3103,7 @@ export class PostgresGraphStore implements GraphStore {
       embedding: parseVector(row.embedding),
       tags: normalizeTags(row.tags ?? []),
       ...(row.source ? { source: row.source } : {}),
+      ...(row.source_spans?.length ? { sourceSpans: row.source_spans } : {}),
       sourceUrl: row.source_url,
       sourceTitle: row.source_title,
       provenance: row.provenance_speaker && row.provenance_message_indexes && row.provenance_session_id && row.extraction_method

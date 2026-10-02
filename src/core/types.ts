@@ -144,6 +144,7 @@ export interface MemoryQuality {
 }
 
 export interface MemoryNode {
+  sourceSpans?: import("../ingestion/structuredDocument.js").DocumentSourceSpan[];
   id: string;
   segmentId: string;
   topicNodeId: string;
@@ -186,6 +187,7 @@ export interface MemoryNode {
 export type MemoryNodeInsert = Omit<MemoryNode, "createdAt">;
 
 export interface MemoryEvidence {
+  sourceSpans?: import("../ingestion/structuredDocument.js").DocumentSourceSpan[];
   id: string;
   memoryNodeId: string;
   segmentId: string;
@@ -467,6 +469,8 @@ export type RememberOptions = IngestTextOptions;
 
 /** @internal */
 export interface IngestPipelineOptions extends IngestTextOptions {
+  /** @internal Prepared source mapping; never accepted from public ingestion options. */
+  documentContext?: { chunks: import("../utils/text/prepareTextChunks.js").TextChunk[]; startIndex: number };
   replace?: boolean;
   label?: string;
   source?: string;

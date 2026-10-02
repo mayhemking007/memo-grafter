@@ -1,4 +1,5 @@
 import type { MemoryNode, TopicNode } from "../core/types.js";
+import { formatDocumentSources } from "./documentSources.js";
 import { countApproxTokens } from "../utils/text/tokenCount.js";
 
 export function buildPinnedTopicPrompt(blocks: string[]): string {
@@ -14,7 +15,7 @@ export function buildPinnedTopicPrompt(blocks: string[]): string {
 export function formatPinnedTopicBlock(topic: TopicNode, memories: MemoryNode[], summary = topic.summary): string {
   const facts = memories
     .filter((memory) => !memory.forgotten && !memory.decayed && memory.supersededBy == null)
-    .map((memory) => `- ${memory.subject} ${memory.predicate}: ${memory.value}`);
+    .map((memory) => `- ${memory.subject} ${memory.predicate}: ${memory.value}${formatDocumentSources(memory)}`);
   return [
     `## ${topic.label}`,
     summary.replace(/\s+/g, " ").trim(),

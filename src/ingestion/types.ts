@@ -74,7 +74,8 @@ export class MemoGrafterShutdownError extends Error {
 
 export interface IngestTextDetailedOptions extends importTypes.IngestTextOptions { idempotencyKey?: string; }
 export interface DocumentIngestionPayload {
-  version: 1;
+  version: 1 | 2;
+  structured?: import("./structuredDocument.js").DocumentInput;
   text: string;
   chunks: import("../utils/text/prepareTextChunks.js").TextChunk[];
   options: importTypes.IngestPipelineOptions;

@@ -108,7 +108,7 @@ export async function processDocumentRun(
     void check().then(() => store.renewIngestionRunLease!(run.id, workerId, new Date(Date.now() + leaseMs))).catch(cause => stop(isMemoGrafterError(cause) ? cause : new MemoGrafterError("Document lease renewal failed.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true, cause }))).finally(() => { renewing = false; });
   }, Math.max(100, Math.min(1000, leaseMs / 3)));
   try {
-    if (run.document?.version !== 1 || !Number.isFinite(deadline)) throw new MemoGrafterError("Unsupported or invalid document payload.", { code: "INPUT_INVALID", operation: "ingest" });
+    if (![1, 2].includes(run.document?.version ?? 0) || !Number.isFinite(deadline)) throw new MemoGrafterError("Unsupported or invalid document payload.", { code: "INPUT_INVALID", operation: "ingest" });
     await check();
     const report: DocumentRunControl["report"] = async progress => {
       await check();

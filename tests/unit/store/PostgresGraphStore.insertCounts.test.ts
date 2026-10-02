@@ -10,7 +10,7 @@ it("counts only rows returned by successful inserts, including conflict no-ops",
       return inserted ? [] : (inserted = true, [{ id: "memory" }]);
     }
     return [];
-  }, { array: (values: unknown[]) => values, begin: async <T>(work: (transaction: unknown) => Promise<T>) => work(sql) });
+  }, { json: (value: unknown) => value, array: (values: unknown[]) => values, begin: async <T>(work: (transaction: unknown) => Promise<T>) => work(sql) });
   let inserted = false;
   const store = new PostgresGraphStore("postgres://user:pass@localhost:5432/test");
   Object.assign(store, { sql });

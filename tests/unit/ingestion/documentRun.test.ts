@@ -336,4 +336,24 @@ describe("detailed document ingestion API", () => {
     Object.assign(f.memo, { ingestQueue: { enqueueRun: vi.fn(async () => { throw new Error("Redis unavailable"); }) } });
     await expect(f.memo.ingestTextDetailed("Document", "session")).rejects.toMatchObject({ code: "INGESTION_FAILED", context: { jobId: "run", sessionId: "session", retrySafe: true } });
   });
+
+  it("shares the durable worker with structured ingestion and preserves duplicate section evidence", async () => {
+    const f = apiFixture();
+    const result = await f.memo.ingestDocumentDetailed({ id: "doc", title: "Architecture", sections: [
+      { id: "a", title: "Language", content: "Use TypeScript." },
+      { id: "b", title: "Build", content: "Use TypeScript." },
+    ] }, "session", { segmentation: { strategy: "per-chunk" }, memoryBudget: { deduplicate: true } });
+    expect(result).toMatchObject({ status: "completed", counts: { selected: 1, deduplicated: 1 } });
+    expect(f.read().document).toMatchObject({ version: 2, structured: { id: "doc" } });
+    expect(f.read().prepared?.memories[0]?.sourceSpans?.map(span => span.section.id)).toEqual(["a", "b"]);
+    expect(vi.mocked(f.llm.complete).mock.calls[0]?.[0]?.[0]?.content).toContain("Language");
+  });
+
+  it("supports the nodes-only structured wrapper and rejects ambiguous input before accepting a run", async () => {
+    const f = apiFixture();
+    await expect(f.memo.ingestDocument({ content: "Document" }, "session", { segmentation: { strategy: "single" } })).resolves.toHaveLength(1);
+    f.store.acceptIngestionRun.mockClear();
+    await expect(f.memo.ingestDocumentDetailed({ content: "text", sections: [] } as never, "session")).rejects.toMatchObject({ code: "INPUT_INVALID" });
+    expect(f.store.acceptIngestionRun).not.toHaveBeenCalled();
+  });
 });

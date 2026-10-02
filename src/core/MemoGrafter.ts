@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { documentReceipt, terminalDocumentStatus } from "../ingestion/documentRun.js";
 import { validateDocument } from "../ingestion/validateDocument.js";
+import { prepareStructuredDocument, type DocumentInput, type IngestDocumentOptions, type DocumentIngestionReceipt } from "../ingestion/structuredDocument.js";
 import type { IngestTextDetailedOptions, TextIngestionReceipt } from "../ingestion/types.js";
 import { Redis } from "ioredis";
 import { AgentRunError, type AgentRunAccess, type AgentRunAPI } from "../agents/runs/types.js";
@@ -370,10 +371,25 @@ export class MemoGrafter {
   }
 
   async ingestTextDetailed(text: string, sessionId: string, options: IngestTextDetailedOptions = {}, operationOptions?: MemoGrafterOperationOptions): Promise<TextIngestionReceipt> {
+    return this.ingestPreparedDocument(text, sessionId, options, operationOptions);
+  }
+
+  async ingestDocument(input: DocumentInput, sessionId: string, options: IngestDocumentOptions = {}): Promise<TopicNode[]> {
+    const receipt = await this.ingestDocumentDetailed(input, sessionId, options);
+    if (["failed", "cancelled", "abandoned"].includes(receipt.status)) throw new MemoGrafterError(`Document ingestion ${receipt.status}.`, { code: "INGESTION_FAILED", operation: "ingest", context: { sessionId, jobId: receipt.ingestionRunId } });
+    return receipt.nodes ?? [];
+  }
+
+  async ingestDocumentDetailed(input: DocumentInput, sessionId: string, options: IngestDocumentOptions = {}, operationOptions?: MemoGrafterOperationOptions): Promise<DocumentIngestionReceipt> {
+    const prepared = prepareStructuredDocument(input, options, operationOptions?.timeoutMs ?? 300_000);
+    return this.ingestPreparedDocument(prepared.text, sessionId, { ...options, chunking: { strategy: "paragraph", ...options.chunking } }, operationOptions, prepared);
+  }
+
+  private async ingestPreparedDocument(text: string, sessionId: string, options: IngestTextDetailedOptions, operationOptions?: MemoGrafterOperationOptions, structured?: ReturnType<typeof prepareStructuredDocument>): Promise<TextIngestionReceipt> {
     sessionId = this.requireNonBlankString(sessionId, "sessionId");
     if (operationOptions?.signal && (typeof operationOptions.signal.aborted !== "boolean" || typeof operationOptions.signal.addEventListener !== "function" || typeof operationOptions.signal.removeEventListener !== "function")) throw new MemoGrafterError("signal must be an AbortSignal.", { code: "INPUT_INVALID", operation: "ingest" });
     const timeoutMs = operationOptions?.timeoutMs ?? 300_000;
-    const validated = validateDocument(text, options, timeoutMs);
+    const validated = structured ?? validateDocument(text, options, timeoutMs);
     if (!this.storageInitialized) throw new MemoGrafterError("MemoGrafter must be initialized before ingestTextDetailed().", { code: "STORAGE_INITIALIZATION_FAILED", operation: "ingest" });
     if (!this.store.stageDocumentIngestion || !this.store.recordDocumentProgress || !this.store.finishDocumentIngestion || !this.store.cancelIngestionRun || !this.store.getIngestionRun || !this.store.acceptIngestionRun || !this.store.commitPreparedIngestion || !this.store.transitionIngestionRun || !this.store.renewIngestionRunLease) throw new MemoGrafterError("Detailed document ingestion requires a store supporting atomic staged document commits.", { code: "CONFIGURATION_INVALID", operation: "ingest" });
     const checkAbort = () => { if (operationOptions?.signal?.aborted) throw new MemoGrafterError("Document ingestion aborted before acceptance.", { code: "OPERATION_ABORTED", operation: "ingest" }); };
@@ -387,7 +403,7 @@ export class MemoGrafter {
     };
     checkAbort();
     let run = await this.store.acceptIngestionRun({ sessionId, kind: "text", messages: validated.chunks.map(chunk => ({ role: "user", content: chunk.content })), ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-      document: JSON.parse(JSON.stringify({ version: 1, text, chunks: validated.chunks, options: resolved, pipeline, deadlineAt: new Date(Date.now() + timeoutMs).toISOString(), requestFingerprint: validated.requestFingerprint })) });
+      document: JSON.parse(JSON.stringify({ version: structured ? 2 : 1, ...(structured ? { structured: structured.structured } : {}), text, chunks: validated.chunks, options: resolved, pipeline, deadlineAt: new Date(Date.now() + timeoutMs).toISOString(), requestFingerprint: validated.requestFingerprint })) });
     try {
     if (operationOptions?.signal?.aborted) return documentReceipt(await this.store.cancelIngestionRun(run.id));
     if (terminalDocumentStatus(run.status) && run.result?.postProcessing !== "pending") return documentReceipt(run);

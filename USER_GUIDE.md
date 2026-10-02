@@ -608,6 +608,42 @@ Upgrade the database using the normal migration command before using this API. T
 
 The opt-in PostgreSQL tests use `MEMOGRAFTER_DOCUMENT_TEST_DB` and create/drop only a randomly named test schema. Run `npm run test:run -- tests/unit/store/documentIngestion.integration.test.ts` against a disposable PostgreSQL database with pgvector available.
 
+### Structured Document Ingestion
+
+`MemoGrafter.ingestDocument(input, sessionId, options?)` returns topic nodes; queued work returns an empty array. `ingestDocumentDetailed(input, sessionId, options?, operationOptions?)` returns the same durable receipt and supports the same idempotency, cancellation, deadline, queue, and replacement behavior as `ingestTextDetailed()`. The convenience wrapper throws for terminal failed/cancelled runs. These are APIs on the initialized `MemoGrafter` instance; existing agent/text methods are unchanged.
+
+```ts
+const receipt = await memo.ingestDocumentDetailed({
+  id: "notion-page-123",
+  title: "Deployment guide",
+  url: "https://example.com/deployment",
+  metadata: { revision: 7, labels: ["operations"] },
+  sections: [
+    { id: "requirements", title: "Requirements", content: "Keep audit logs for every deployment." },
+    { id: "commands", title: "Commands", url: "https://example.com/deployment#commands",
+      content: "```sh\nnpm run build\n```", metadata: { owner: "platform" } },
+  ],
+}, sessionId, {
+  idempotencyKey: "deployment-revision-7",
+  chunking: { maxCharacters: 2000, maxChunks: 20 },
+  segmentation: { strategy: "per-chunk" },
+  memoryBudget: { deduplicate: true, maxPerDocument: 30 },
+});
+const run = await memo.getIngestionRun(receipt.ingestionRunId);
+```
+
+`DocumentInput` contains document-level `id`, `title`, `url`, and JSON-object `metadata`, plus exactly one of `content` or an ordered nonempty `sections` array. Each section has nonblank `content` and optional ID, title, URL, and metadata. IDs must be unique within the document when provided; sections without IDs remain identifiable by their zero-based `sectionIndex`. Both content and sections, blank sections, cyclic/non-JSON metadata, and invalid limits are rejected before acceptance. URLs accept `http:`, `https:`, and `file:`; no URL is fetched automatically. Metadata stays caller-owned data, not extraction instructions.
+
+Structured input defaults to paragraph chunking within each explicit section. Large sections split using the shared text chunker. Titles are supplied separately as extraction context, without inserting synthetic characters into source ranges. Explicit sections normally remain separate; `single` chunking or a hard `maxChunks` cap may merge them. All participating section spans remain attached. Fixed-window overlap retains its overlapping spans. Limits are global to the document, with `maxCharacters` measured per chunk; incompatible limits fail without dropping content.
+
+`run.document.structured` preserves the normalized input in a version-2 durable payload. Version-1 text runs remain supported. Chunk `sourceSpans` and retrieved memory `sourceSpans` contain a document descriptor, section descriptor, section index, and half-open UTF-16 `start`/`end` bounds relative to the original section content. Document and section metadata stay separate rather than overwriting one another. These spans identify supporting chunk ranges, **not exact fact quotations**. A merged chunk can support a memory with spans from multiple sections. Memory selection combines spans of textual duplicates; canonical reinforcement retains new spans alongside earlier evidence. Source metadata and section structure participate in the idempotency fingerprint.
+
+PostgreSQL persists source spans on both canonical memory nodes and immutable evidence rows. `memo.store.getMemoryEvidence?.(memoryId)` exposes those observations. Memory search results retain spans, and generated fact/pinned context includes source titles and URLs. `sourceTitle` and `sourceUrl` remain convenient primary-source fields; use `sourceSpans` for the complete set. Older rows have no source spans. Apply migration `014_structured_documents.sql` using the normal migration command before deploying.
+
+PostgreSQL batches document message inserts, segment inserts, and edge upserts within the existing commit transaction. Memory reconciliation, episode creation, and stable-topic updates retain their ordered dependency handling. The optional `GraphStore.saveEdges()` method accelerates graph enrichment; stores without it receive ordered `saveEdge()` calls, stopping on failure. This fallback does not claim atomicity. Required durable writes still require an atomic `commitPreparedIngestion()` implementation. `PostgresGraphStore` accepts `batchSize` (default 100, range 1–1000); setting it to 1 allows a comparable single-row-write benchmark. Replacement and deadline/lease checks remain unchanged. Semantic deduplication is not enabled by this API; textual deduplication remains opt-in through `memoryBudget.deduplicate`.
+
+Run `npm run benchmark:document-ingestion` for simulated-provider preparation measurements. For end-to-end provider requests, PostgreSQL operations, and wall time, set `MEMOGRAFTER_DOCUMENT_TEST_DB` to a disposable pgvector database and run `npm run benchmark:structured-ingestion`. It creates and drops an isolated schema, runs three samples per mode, and reports median timings. See [benchmark methodology and results](tests/manual/benchmarks/STRUCTURED_RESULTS.md).
+
 ### Remembering Explicit Facts
 
 Use `remember()` when your application already knows a fact, preference, or note and wants to store it without running an assistant turn:
