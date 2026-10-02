@@ -640,6 +640,7 @@ export interface MemoGrafterQueueTelemetry {
   onCompleted?: (event: import("../ingestion/types.js").IngestionEvent) => void;
   onCompletedWithWarnings?: (event: import("../ingestion/types.js").IngestionEvent) => void;
   onFailed?: (event: import("../ingestion/types.js").IngestionEvent) => void;
+  onCancelled?: (event: import("../ingestion/types.js").IngestionEvent) => void;
   onAbandoned?: (event: import("../ingestion/types.js").IngestionEvent) => void;
 }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Queue, Worker, type Job, type JobsOptions } from "bullmq";
+import { Queue, Worker, UnrecoverableError, type Job, type JobsOptions } from "bullmq";
+import { isMemoGrafterError } from "../diagnostics.js";
 import { Redis } from "ioredis";
 import type { IngestPipeline } from "./conversation/IngestPipeline.js";
 import type { IngestPipelineOptions, MemoGrafterQueueConfig, Message } from "../core/types.js";
@@ -87,10 +88,14 @@ export class IngestQueue {
   async enqueueRun(run: IngestionRun, options: IngestPipelineOptions = {}): Promise<{ id: string; queueName: string }> {
     if (!this.store?.transitionIngestionRun) throw new Error("Durable queue ingestion requires ingestion-run store support.");
     try {
+      if (run.document && run.status === "running" && run.leaseExpiresAt && run.leaseExpiresAt.getTime() <= Date.now()) {
+        run = await this.store.transitionIngestionRun({ runId: run.id, from: ["running"], to: "retry_pending", ...(run.workerId ? { expectedWorkerId: run.workerId } : {}), expectedAttemptCount: run.attemptCount, leaseExpiredBefore: new Date() });
+      }
       this.reportLifecycle(this.telemetry?.onAccepted, run, "accepted");
       let job: Job<IngestJobData> | undefined = await this.queue.getJob(run.id);
+      if (run.document && job && await job.getState() === "completed" && ["accepted", "retry_pending"].includes(run.status)) { await job.remove(); job = undefined; }
       if (job && await job.getState() === "failed") await job.retry();
-      if (!job) job = await this.withTimeout(this.queue.add("ingestion-run", { kind: "run", ingestionRunId: run.id, sessionId: run.sessionId, startIndex: run.startIndex, endIndex: run.endIndex, options }, { ...this.defaultJobOptions, jobId: run.id }), this.enqueueTimeoutMs, "MemoGrafter ingestion-run enqueue timed out.");
+      if (!job) job = await this.withTimeout(this.queue.add("ingestion-run", { kind: "run", ingestionRunId: run.id, sessionId: run.sessionId, startIndex: run.startIndex, endIndex: run.endIndex, ...(!run.document ? { options } : {}) }, { ...this.defaultJobOptions, jobId: run.id }), this.enqueueTimeoutMs, "MemoGrafter ingestion-run enqueue timed out.");
       if (!job) throw new Error("MemoGrafter queue did not return an ingestion job.");
       const queued = await this.store.transitionIngestionRun({ runId: run.id, from: ["accepted", "retry_pending"], to: "queued" });
       this.reportLifecycle(this.telemetry?.onQueued, queued, "queued", job.id);
@@ -98,7 +103,7 @@ export class IngestQueue {
       return { id: job.id ?? run.id, queueName: this.queueName };
     } catch (error) {
       const current = await this.store.getIngestionRun?.(run.id);
-      if (current && ["running", "completed", "completed_with_warnings"].includes(current.status)) return { id: run.id, queueName: this.queueName };
+      if (current && ["queued", "running", "completed", "completed_with_warnings", "cancelled"].includes(current.status)) { this.ensureWorker(); return { id: run.id, queueName: this.queueName }; }
       await this.store.transitionIngestionRun({ runId: run.id, from: ["accepted"], to: "retry_pending", error: { message: "Queue enqueue failed.", retryable: true } }).catch(() => undefined);
       throw error;
     }
@@ -220,7 +225,13 @@ export class IngestQueue {
             const run = await this.store?.getIngestionRun?.(job.data.ingestionRunId);
             if (!run) throw new Error(`Ingestion run ${job.data.ingestionRunId} was not found.`);
             this.reportLifecycle(this.telemetry?.onStarted, { ...run, attemptCount: run.attemptCount + 1 }, "started", job.id);
-            await this.pipeline.processIngestionRun(run, job.data.options ?? {}, `bullmq-${job.id ?? "unknown"}`, this.processingTimeoutMs);
+            try {
+              const processed = await this.pipeline.processIngestionRun(run, job.data.options ?? {}, `bullmq-${randomUUID()}`, this.processingTimeoutMs);
+              if (run.document && ["failed", "abandoned"].includes(processed.run.status)) throw new UnrecoverableError(processed.run.lastErrorSafeMessage ?? "Document ingestion failed.");
+            } catch (error) {
+              if (run.document && isMemoGrafterError(error) && !error.retryable) throw new UnrecoverableError(`Document ingestion failed (${error.code}).`);
+              throw error;
+            }
             return;
           }
           if (job.data.kind === "text") {
@@ -261,11 +272,16 @@ export class IngestQueue {
     });
     this.worker.on("completed", (job) => {
       this.reportQueueEvent(this.telemetry?.onJobCompleted, job, Date.now());
-      if (job.data.kind === "run") void this.store?.getIngestionRun?.(job.data.ingestionRunId).then((run) => { if (run) this.reportLifecycle(run.status === "completed_with_warnings" ? this.telemetry?.onCompletedWithWarnings : this.telemetry?.onCompleted, run, run.status === "completed_with_warnings" ? "completed_with_warnings" : "completed", job.id); });
+      if (job.data.kind === "run") void this.store?.getIngestionRun?.(job.data.ingestionRunId).then((run) => {
+        if (!run) return;
+        if (run.status === "cancelled") this.reportLifecycle(this.telemetry?.onCancelled, run, "cancelled", job.id);
+        else if (run.status === "completed_with_warnings") this.reportLifecycle(this.telemetry?.onCompletedWithWarnings, run, "completed_with_warnings", job.id);
+        else if (run.status === "completed") this.reportLifecycle(this.telemetry?.onCompleted, run, "completed", job.id);
+      }).catch(() => undefined);
     });
     this.worker.on("failed", (job) => {
       if (job) this.reportQueueEvent(this.telemetry?.onJobFailed, job, Date.now());
-      if (job?.data.kind === "run") void this.handleRunFailure(job);
+      if (job?.data.kind === "run") void this.handleRunFailure(job).catch(() => undefined);
     });
     this.worker.on("error", (error) => {
       console.warn("MemoGrafter ingest queue worker warning:", error.message);
@@ -299,6 +315,8 @@ export class IngestQueue {
     if (job.data.kind !== "run") return;
     let run = await this.store?.getIngestionRun?.(job.data.ingestionRunId);
     if (!run) return;
+    if (run.status === "cancelled") { this.reportLifecycle(this.telemetry?.onCancelled, run, "cancelled", job.id); return; }
+    if (["completed", "completed_with_warnings"].includes(run.status)) return;
     const exhausted = job.attemptsMade >= (job.opts.attempts ?? 1);
     if (exhausted && run.status === "retry_pending" && this.store?.transitionIngestionRun) run = await this.store.transitionIngestionRun({ runId: run.id, from: ["retry_pending"], to: "failed", error: { message: run.lastErrorSafeMessage ?? "Queue attempts exhausted.", retryable: false } });
     this.reportLifecycle(run.status === "retry_pending" ? this.telemetry?.onRetryScheduled : this.telemetry?.onFailed, run, run.status === "retry_pending" ? "retry_scheduled" : "failed", job.id);

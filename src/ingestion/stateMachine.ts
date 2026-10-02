@@ -3,8 +3,8 @@ import type { IngestionRunStatus } from "./types.js";
 
 const transitions: Readonly<Record<IngestionRunStatus, readonly IngestionRunStatus[]>> = {
   accepted: ["queued", "running", "retry_pending", "cancelled"], queued: ["running", "cancelled", "abandoned"],
-  running: ["completed", "completed_with_warnings", "retry_pending", "failed", "abandoned"],
-  retry_pending: ["queued", "running", "failed", "abandoned"], completed: ["completed_with_warnings"],
+  running: ["cancelled", "completed", "completed_with_warnings", "retry_pending", "failed", "abandoned"],
+  retry_pending: ["cancelled", "queued", "running", "failed", "abandoned"], completed: ["completed_with_warnings"],
   completed_with_warnings: [], failed: ["retry_pending", "abandoned"], cancelled: [], abandoned: [],
 };
 

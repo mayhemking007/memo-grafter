@@ -283,6 +283,22 @@ await agent.remember("The user prefers short examples with complete imports.");
 
 Both paths reuse the same topic detection, extraction, embedding, and graph storage pipeline as conversation ingestion.
 
+For durable document imports, use `memo.ingestTextDetailed(text, sessionId, options, operationOptions)`:
+
+```ts
+const receipt = await memo.ingestTextDetailed(markdown, "project-docs", {
+  idempotencyKey: "architecture-v2",
+  chunking: { strategy: "section", maxCharacters: 3000 },
+  segmentation: { strategy: "per-chunk" },
+  replace: true,
+}, { timeoutMs: 300_000 });
+
+const run = await memo.getIngestionRun(receipt.ingestionRunId);
+console.log(run?.status, run?.result?.counts);
+```
+
+This API persists the run, options, source offsets, progress, and results; queue jobs reference the run ID. PostgreSQL replacement stages the new document before atomically replacing the **entire session**. Use `cancelIngestionRun(id)` to persist cancellation. Existing `ingestText()` calls retain their return type and behavior. See the [detailed ingestion guide](USER_GUIDE.md#durable-document-ingestion) for deadlines, retries, migration requirements, and replacement semantics.
+
 ## Shared Fleet Memory
 
 Fleets can store common knowledge once and make it available to workers without copying it into each worker session.

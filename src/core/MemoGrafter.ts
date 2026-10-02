@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { documentReceipt, terminalDocumentStatus } from "../ingestion/documentRun.js";
+import { validateDocument } from "../ingestion/validateDocument.js";
+import type { IngestTextDetailedOptions, TextIngestionReceipt } from "../ingestion/types.js";
 import { Redis } from "ioredis";
 import { AgentRunError, type AgentRunAccess, type AgentRunAPI } from "../agents/runs/types.js";
 import { GraftRelevancePipeline } from "../retrieval/GraftRelevancePipeline.js";
@@ -365,6 +369,53 @@ export class MemoGrafter {
     await this.ingestPipeline.runIncremental(messages, sessionId, startIndex, options);
   }
 
+  async ingestTextDetailed(text: string, sessionId: string, options: IngestTextDetailedOptions = {}, operationOptions?: MemoGrafterOperationOptions): Promise<TextIngestionReceipt> {
+    sessionId = this.requireNonBlankString(sessionId, "sessionId");
+    if (operationOptions?.signal && (typeof operationOptions.signal.aborted !== "boolean" || typeof operationOptions.signal.addEventListener !== "function" || typeof operationOptions.signal.removeEventListener !== "function")) throw new MemoGrafterError("signal must be an AbortSignal.", { code: "INPUT_INVALID", operation: "ingest" });
+    const timeoutMs = operationOptions?.timeoutMs ?? 300_000;
+    const validated = validateDocument(text, options, timeoutMs);
+    if (!this.storageInitialized) throw new MemoGrafterError("MemoGrafter must be initialized before ingestTextDetailed().", { code: "STORAGE_INITIALIZATION_FAILED", operation: "ingest" });
+    if (!this.store.stageDocumentIngestion || !this.store.recordDocumentProgress || !this.store.finishDocumentIngestion || !this.store.cancelIngestionRun || !this.store.getIngestionRun || !this.store.acceptIngestionRun || !this.store.commitPreparedIngestion || !this.store.transitionIngestionRun || !this.store.renewIngestionRunLease) throw new MemoGrafterError("Detailed document ingestion requires a store supporting atomic staged document commits.", { code: "CONFIGURATION_INVALID", operation: "ingest" });
+    const checkAbort = () => { if (operationOptions?.signal?.aborted) throw new MemoGrafterError("Document ingestion aborted before acceptance.", { code: "OPERATION_ABORTED", operation: "ingest" }); };
+    checkAbort();
+    const pipeline = await this.ingestPipeline.documentSettings(sessionId);
+    const resolved: IngestPipelineOptions = {
+      ...this.toTextPipelineOptions(options),
+      minSegmentMessages: options.segmentation?.minChunks ?? options.minSegmentMessages ?? (options.chunking || options.segmentation ? pipeline.minSegmentMessages : 1),
+      qualityPolicy: { mode: "observe", minExplicitness: 0.3, minSourceReliability: 0.3, ...options.qualityPolicy },
+      concurrency: { ...pipeline.concurrency, ...options.concurrency },
+    };
+    checkAbort();
+    let run = await this.store.acceptIngestionRun({ sessionId, kind: "text", messages: validated.chunks.map(chunk => ({ role: "user", content: chunk.content })), ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+      document: JSON.parse(JSON.stringify({ version: 1, text, chunks: validated.chunks, options: resolved, pipeline, deadlineAt: new Date(Date.now() + timeoutMs).toISOString(), requestFingerprint: validated.requestFingerprint })) });
+    try {
+    if (operationOptions?.signal?.aborted) return documentReceipt(await this.store.cancelIngestionRun(run.id));
+    if (terminalDocumentStatus(run.status) && run.result?.postProcessing !== "pending") return documentReceipt(run);
+    if (run.status === "running" && (!run.leaseExpiresAt || run.leaseExpiresAt.getTime() > Date.now())) return documentReceipt(run);
+    if (run.status === "queued" && this.ingestQueue) return documentReceipt(run);
+    if (["completed", "completed_with_warnings"].includes(run.status)) {
+      const result = await this.ingestPipeline.processIngestionRun(run);
+      return documentReceipt(result.run);
+    }
+    if (this.ingestQueue) {
+      await this.ingestQueue.enqueueRun(run);
+      if (operationOptions?.signal?.aborted) run = await this.store.cancelIngestionRun(run.id);
+      else run = await this.store.getIngestionRun(run.id) ?? run;
+      return documentReceipt(run);
+    }
+    const processed = await this.ingestPipeline.processIngestionRun(run, {}, `document-${randomUUID()}`, 60_000, operationOptions);
+    return documentReceipt(processed.run);
+    } catch (cause) {
+      const error = isMemoGrafterError(cause) ? cause : new MemoGrafterError("Durable document ingestion failed.", { code: "INGESTION_FAILED", operation: "ingest", retryable: true, cause });
+      throw enrichMemoGrafterError(error, { context: { sessionId, jobId: run.id, retrySafe: error.retryable } });
+    }
+  }
+
+  cancelIngestionRun(runId: string): Promise<IngestionRun> {
+    if (!this.store.cancelIngestionRun) throw new MemoGrafterError("The store does not support durable document cancellation.", { code: "CONFIGURATION_INVALID", operation: "ingest" });
+    return this.store.cancelIngestionRun(this.requireNonBlankString(runId, "runId"));
+  }
+
   ingestText(text: string, sessionId: string, options: IngestTextOptions & IngestOptions = {}): Promise<TopicNode[]> {
     const pipelineOptions = this.toTextPipelineOptions(options);
     if (this.ingestQueue) {
@@ -571,8 +622,10 @@ export class MemoGrafter {
         if (!issue.runId) continue;
         const run = await this.store.getIngestionRun?.(issue.runId);
         if (!run) continue;
-        if (issue.code === "expired-worker-lease" && selected.has("recover-expired-lease") && run.status === "running" && run.leaseExpiresAt && run.leaseExpiresAt.getTime() < Date.now()) {
-          await this.store.transitionIngestionRun({ runId: run.id, from: ["running"], to: "retry_pending", error: { message: "Worker lease expired.", retryable: true } }); repaired.push(issue.code);
+        if (issue.code === "document-postprocessing-pending" && selected.has("finish-document")) {
+          await this.ingestPipeline.processIngestionRun(run); repaired.push(issue.code);
+        } else if (issue.code === "expired-worker-lease" && selected.has("recover-expired-lease") && run.status === "running" && run.leaseExpiresAt && run.leaseExpiresAt.getTime() < Date.now()) {
+          await this.store.transitionIngestionRun({ runId: run.id, from: ["running"], to: "retry_pending", expectedAttemptCount: run.attemptCount, ...(run.workerId ? { expectedWorkerId: run.workerId } : {}), leaseExpiredBefore: new Date(), error: { message: "Worker lease expired.", retryable: true } }); repaired.push(issue.code);
         } else if ((issue.code === "accepted-not-started" && selected.has("queue-accepted")) || (issue.code === "retryable-failure" && selected.has("requeue-retryable"))) {
           if (this.ingestQueue) {
             const queueable = run.status === "failed" ? await this.store.transitionIngestionRun({ runId: run.id, from: ["failed"], to: "retry_pending" }) : run;

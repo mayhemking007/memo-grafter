@@ -1,3 +1,5 @@
+import { processDocumentRun, safeWarnings, type DocumentRunControl } from "../documentRun.js";
+import { createOperationControl } from "../../utils/operationControl.js";
 import { IngestionProviderWork, embedTexts } from "../providerWork.js";
 import type { MemorySelectionStats } from "../../diagnostics.js";
 import type { GraphStore } from "../../store/index.js";
@@ -48,6 +50,8 @@ export class IngestPipeline {
       concurrency?: import("../../core/types.js").IngestionConcurrency;
       windowSize: number;
       threshold?: number;
+      /** Frozen threshold for a durable document; bypasses live adaptive settings. */
+      resolvedThreshold?: number;
       driftSensitivity?: DriftSensitivity;
       topK: number;
       mode: "window" | "intent";
@@ -65,7 +69,7 @@ export class IngestPipeline {
     this.providerWork = new IngestionProviderWork(config.concurrency);
     this.llm = this.providerWork.wrapLLM(llm);
     this.embedder = this.providerWork.wrapEmbedder(embedder);
-    this.baseDriftThreshold = resolveDriftThreshold(config);
+    this.baseDriftThreshold = config.resolvedThreshold ?? resolveDriftThreshold(config);
     this.segmentProcessor = new SegmentProcessor(store, this.llm, this.embedder, {
       topK: config.topK,
       semanticThreshold: 0.6,
@@ -259,7 +263,24 @@ export class IngestPipeline {
     options: IngestPipelineOptions = {},
     workerId = `local-${process.pid}`,
     leaseDurationMs = 60_000,
+    operationOptions?: import("../../core/types.js").MemoGrafterOperationOptions,
   ): Promise<{ nodes: TopicNode[]; warnings: MemoGrafterWarning[]; run: IngestionRun }> {
+    if (run.document) return processDocumentRun(this.store, run, workerId, leaseDurationMs, (accepted, control) => {
+      const warnings: MemoGrafterWarning[] = [];
+      const diagnostics = { ...this.config.diagnostics, onWarning: (warning: MemoGrafterWarning) => {
+        const context = warning.context as Record<string, unknown> | undefined;
+        const admissionSummary = warning.code === "MEMORY_QUALITY_ADMISSION" && context?.rejected === 0 && context?.wouldReject === 0;
+        if (!admissionSummary) warnings.push(...safeWarnings([warning]));
+        this.config.diagnostics?.onWarning?.(warning);
+      } };
+      const frozen = new IngestPipeline(this.store, this.llm, this.embedder, { ...accepted.document!.pipeline, diagnostics });
+      const reporting = { ...control, report: (progress: Parameters<DocumentRunControl["report"]>[0]) => control.report({ ...progress, warnings: [...warnings, ...progress.warnings] }) };
+      return this.providerWork.withControl(control, () => frozen.providerWork.run(accepted.document!.options, async () => {
+        const prepared = await frozen.prepareIngestion(accepted, accepted.document!.options, reporting);
+        prepared.warnings = [...warnings, ...(prepared.warnings ?? [])];
+        return prepared;
+      }));
+    }, operationOptions, accepted => this.finishDocumentRun(accepted));
     if (!this.store.transitionIngestionRun || !this.store.commitPreparedIngestion) {
       throw new MemoGrafterError("The configured store does not support durable ingestion.", { code: "CONFIGURATION_INVALID", operation: "ingest", retryable: false });
     }
@@ -293,29 +314,34 @@ export class IngestPipeline {
     }
   }
 
-  private async prepareIngestion(run: IngestionRun, options: IngestPipelineOptions): Promise<PreparedIngestion> {
-    const expectedCursor = run.startIndex - 1;
+  private async prepareIngestion(run: IngestionRun, options: IngestPipelineOptions, control?: DocumentRunControl): Promise<PreparedIngestion> {
+    await control?.report({ phase: "segmenting", warnings: [] });
+    const expectedCursor = run.document?.baseCursor ?? run.startIndex - 1;
     const currentCursor = (await this.store.getSessionIngestState(run.sessionId))?.lastIngestedMessageIndex ?? -1;
     if (currentCursor !== expectedCursor) throw new MemoGrafterError(`Ingestion range is waiting for the preceding cursor ${expectedCursor}.`, { code: "INGESTION_ORDER_PENDING", operation: "ingest", stage: "message-persistence", retryable: true });
-    const messages = await this.store.getMessagesBySession(run.sessionId, run.startIndex, run.endIndex);
+    const messages: Message[] = run.document ? run.document.chunks.map(chunk => ({ role: "user", content: chunk.content })) : await this.store.getMessagesBySession(run.sessionId, run.startIndex, run.endIndex);
     if (messages.length !== run.endIndex - run.startIndex + 1) throw new MemoGrafterError("Durable ingestion message range is incomplete.", { code: "INGESTION_FAILED", operation: "ingest", stage: "message-persistence", retryable: false });
-    const overlapMessages = await this.store.getRecentMessagesBefore(run.sessionId, run.startIndex, INGEST_OVERLAP_MESSAGES);
+    const overlapMessages = run.document ? [] : await this.store.getRecentMessagesBefore(run.sessionId, run.startIndex, INGEST_OVERLAP_MESSAGES);
     const contextStartIndex = run.startIndex - overlapMessages.length;
     const contextMessages = [...overlapMessages, ...messages];
     const [existingNodes, existingSegments] = await Promise.all([
-      this.store.getNodesBySession(run.sessionId),
-      typeof this.store.getSegmentsBySession === "function" ? this.store.getSegmentsBySession(run.sessionId) : Promise.resolve([]),
+      run.document?.options.replace ? Promise.resolve([] as TopicNode[]) : this.store.getNodesBySession(run.sessionId),
+      !run.document?.options.replace && typeof this.store.getSegmentsBySession === "function" ? this.store.getSegmentsBySession(run.sessionId) : Promise.resolve([]),
     ]);
     const { segments, reentryMap, contextEmbeddings } = await this.segmentMessages(contextMessages, overlapMessages.length, existingNodes, run.sessionId, options);
     const absoluteSegments = this.toNewAbsoluteSegments(segments, contextStartIndex, run.startIndex, existingNodes, existingSegments);
     const prepared: PreparedIngestion = { runId: run.id, sessionId: run.sessionId, startIndex: run.startIndex, endIndex: run.endIndex, expectedCursor, segments: [], nodes: [], topicUpdates: [], episodes: [], memories: [], requiredEdges: [] };
     const nodeByDetectorTopicOrder = new Map<number, TopicNode>();
     const { label, minSegmentMessages: _minSegmentMessages, ...segmentOptions } = options;
+    const counts: MemorySelectionStats = { sessionId: run.sessionId, extracted: 0, rejected: 0, deduplicated: 0, budgetExcluded: 0, selected: 0, acknowledged: 0, persisted: 0 };
+    const documents = run.document ? await this.segmentProcessor.prepareDocument(absoluteSegments.map(item => item.segment), contextMessages, run.sessionId, options, contextStartIndex, counts, this.config.requirements?.memories !== "best-effort", control ? (phase, counts, warnings) => control.report({ phase, counts, warnings }) : undefined) : undefined;
+    if (documents) prepared.documentCounts = counts;
     for (const [index, item] of absoluteSegments.entries()) {
-      const result = await this.segmentProcessor.prepare(item.segment, contextMessages, run.sessionId, { ...segmentOptions, ...(index === 0 && label ? { label } : {}) }, contextStartIndex, this.config.requirements?.memories !== "best-effort");
+      await control?.check();
+      const result = documents?.[index] ?? await this.segmentProcessor.prepare(item.segment, contextMessages, run.sessionId, { ...segmentOptions, ...(index === 0 && label ? { label } : {}) }, contextStartIndex, this.config.requirements?.memories !== "best-effort");
       const visibleTopics = [...existingNodes, ...prepared.nodes, ...(prepared.topicUpdates ?? [])];
       const assignment = this.store.saveEpisodeBundle
-        ? await this.topicAssigner.assign(result.episode, result.node, visibleTopics)
+        ? await this.topicAssigner.assign(result.episode, result.node, visibleTopics, !run.document?.options.replace)
         : { topic: result.node, createTopic: true, similarity: null };
       const assignedEpisode = {
         ...result.episode,
@@ -342,12 +368,35 @@ export class IngestPipeline {
     return prepared;
   }
 
-  private async runBestEffortGraphStages(nodes: TopicNode[], sessionId: string): Promise<MemoGrafterWarning[]> {
+  private async finishDocumentRun(run: IngestionRun): Promise<IngestionRun> {
+    if (!this.store.finishDocumentIngestion || run.result?.postProcessing !== "pending" || run.supersededAt) return run;
+    return this.store.finishDocumentIngestion(run.id, async run => {
+    const remaining = new Date(run.document!.deadlineAt).getTime() - Date.now();
+    const control = createOperationControl({ timeoutMs: Math.max(0, remaining) }, "ingest", "graph-processing");
+    const warnings = [...(run.result?.warnings ?? [])];
+    try {
+      const frozen = new IngestPipeline(this.store, this.llm, this.embedder, { ...run.document!.pipeline, ...(this.config.diagnostics ? { diagnostics: this.config.diagnostics } : {}) });
+      await this.providerWork.withControl({ signal: control.signal, check: async () => control.throwIfAborted() }, () => frozen.providerWork.run(run.document!.options, async () => {
+        if (remaining <= 0) throw new Error("Document deadline expired before optional graph processing.");
+        warnings.push(...await frozen.runBestEffortGraphStages(run.result!.nodes ?? [], run.sessionId, () => control.throwIfAborted()));
+        control.throwIfAborted();
+        warnings.push(...await frozen.clusterAssigner.classify(run.result!.nodes ?? []));
+      }));
+    } catch (cause) {
+      warnings.push({ code: "BEST_EFFORT_OPERATION_FAILED", operation: "ingest", stage: "graph-processing", cause });
+    } finally { control.dispose(); }
+    return safeWarnings(warnings);
+    });
+  }
+
+  private async runBestEffortGraphStages(nodes: TopicNode[], sessionId: string, check?: () => void): Promise<MemoGrafterWarning[]> {
     const warnings: MemoGrafterWarning[] = [];
     for (const node of nodes) {
+      check?.();
       try {
         const similar = await this.store.getSimilarNodes(node.embedding, sessionId, { k: this.config.topK, excludeNodeId: node.id, minSimilarity: INCREMENTAL_SEMANTIC_THRESHOLD });
-        for (const target of similar) await this.store.saveEdge({ srcId: node.id, dstId: target.id, weight: cosineSimilarity(node.embedding, target.embedding), type: "semantic" });
+        for (const target of similar) { check?.(); await this.store.saveEdge({ srcId: node.id, dstId: target.id, weight: cosineSimilarity(node.embedding, target.embedding), type: "semantic" }); }
+        check?.();
         await this.store.buildMemoryEdges(node.id, sessionId, INCREMENTAL_SEMANTIC_THRESHOLD);
       } catch (cause) {
         const warning: MemoGrafterWarning = { code: "BEST_EFFORT_OPERATION_FAILED", operation: "ingest", stage: "graph-processing", context: { sessionId }, cause };
@@ -355,6 +404,13 @@ export class IngestPipeline {
       }
     }
     return warnings;
+  }
+
+  async documentSettings(sessionId: string): Promise<import("../types.js").DocumentIngestionPayload["pipeline"]> {
+    const { diagnostics: _diagnostics, ...settings } = this.config;
+    const adaptive = settings.adaptiveSensitivity;
+    const threshold = adaptive?.enabled ? resolveAdaptiveDriftThreshold(this.baseDriftThreshold, await this.store.getSegmentsBySession(sessionId), adaptive).threshold : this.baseDriftThreshold;
+    return JSON.parse(JSON.stringify({ ...settings, resolvedThreshold: threshold, adaptiveSensitivity: { enabled: false }, concurrency: { extraction: settings.concurrency?.extraction ?? 2, embedding: settings.concurrency?.embedding ?? 8 } }));
   }
 
   runText(text: string, sessionId: string, options: IngestPipelineOptions = {}): Promise<TopicNode[]> {

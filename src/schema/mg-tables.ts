@@ -2,7 +2,7 @@ import { mgExtension, mgIndex, mgTable } from "./builders.js";
 import { agentRunTables, agentRunIndexes } from "./agentRunSchema.js";
 
 export const memoGrafterMigrationTableName = "mg_migrations";
-export const memoGrafterCurrentMigrationVersion = 8;
+export const memoGrafterCurrentMigrationVersion = 9;
 
 export const memoGrafterExtensions = [
   mgExtension({
@@ -260,6 +260,11 @@ export const memoGrafterTables = [
     name: "mg_ingestion_runs",
     description: "Durable lifecycle and retry state for accepted ingestion ranges.",
     columns: [
+      { name: "document_payload", type: "jsonb", nullable: true },
+      { name: "prepared_payload", type: "jsonb", nullable: true },
+      { name: "result_payload", type: "jsonb", nullable: true },
+      { name: "cancel_requested_at", type: "timestamptz", nullable: true },
+      { name: "superseded_at", type: "timestamptz", nullable: true },
       { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
       { name: "session_id", type: "text" }, { name: "kind", type: "text" },
       { name: "start_index", type: "int" }, { name: "end_index", type: "int" },
@@ -272,7 +277,7 @@ export const memoGrafterTables = [
       { name: "retryable", type: "boolean", nullable: true }, { name: "worker_id", type: "text", nullable: true },
       { name: "created_at", type: "timestamptz", default: "now()" }, { name: "updated_at", type: "timestamptz", default: "now()" },
     ],
-    constraints: ["CHECK (start_index >= 0)", "CHECK (end_index >= start_index)", "UNIQUE (session_id, start_index, end_index, kind)"],
+    constraints: ["CHECK (start_index >= 0)", "CHECK (end_index >= start_index)"],
   }),
   mgTable({
     name: "mg_graft_registry",
@@ -289,6 +294,7 @@ export const memoGrafterTables = [
 ] as const;
 
 export const memoGrafterIndexes = [
+  mgIndex({ name: "mg_ingestion_runs_current_message_range_idx", table: "mg_ingestion_runs", description: "Unique current message ranges; documents stage independently." }),
   ...agentRunIndexes,
   mgIndex({ name: "idx_topic_nodes_cluster", table: "mg_topic_nodes", description: "Session-scoped cluster membership lookup." }),
   mgIndex({ name: "mg_message_buffer_session_idx", table: "mg_message_buffer", description: "Message lookup by session and index." }),

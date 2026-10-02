@@ -52,6 +52,15 @@ export interface GraphStore {
   saveMessagesAt(sessionId: string, startIndex: number, messages: Message[]): Promise<void>;
   /** Atomically reserve indexes and append messages. Custom stores may omit this for legacy behavior. */
   appendMessages?(sessionId: string, messages: Message[]): Promise<{ startIndex: number; endIndex: number }>;
+  /** Presence advertises atomic staged document commits and cancellation fencing. */
+  stageDocumentIngestion?(runId: string, prepared: PreparedIngestion): Promise<IngestionRun>;
+  cancelIngestionRun?(runId: string): Promise<IngestionRun>;
+  recordDocumentProgress?(runId: string, workerId: string, attemptCount: number, progress: Pick<import("../ingestion/types.js").TextIngestionReceipt, "phase" | "counts" | "warnings">): Promise<void>;
+  /** Run optional enrichment at most once at a time, serialized against session replacement.
+   * The callback may call other store methods; implementations must not starve their connection pool.
+   * After a crash it may be retried, so its individual writes must be idempotent.
+   */
+  finishDocumentIngestion?(runId: string, warnings: import("../diagnostics.js").MemoGrafterWarning[] | ((run: IngestionRun) => Promise<import("../diagnostics.js").MemoGrafterWarning[]>)): Promise<IngestionRun>;
   acceptIngestionRun?(request: AcceptIngestionRequest): Promise<IngestionRun>;
   getIngestionRun?(runId: string): Promise<IngestionRun | null>;
   listIngestionRuns?(sessionId?: string, statuses?: IngestionRun["status"][]): Promise<IngestionRun[]>;

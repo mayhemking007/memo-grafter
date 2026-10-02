@@ -32,6 +32,7 @@ export class ProviderGate {
 
 export class IngestionProviderWork {
   private readonly scope = new AsyncLocalStorage<{ extraction: ProviderGate; embedding: ProviderGate }>();
+  private readonly control = new AsyncLocalStorage<{ signal: AbortSignal; check: () => Promise<void> }>();
   private readonly extraction: ProviderGate;
   private readonly embedding: ProviderGate;
   constructor(private readonly limits: IngestionConcurrency = {}) {
@@ -46,18 +47,27 @@ export class IngestionProviderWork {
       embedding: new ProviderGate(options.concurrency?.embedding ?? this.limits.embedding ?? 8),
     }, work);
   }
+  withControl<T>(control: { signal: AbortSignal; check: () => Promise<void> }, work: () => Promise<T>): Promise<T> { return this.control.run(control, work); }
   private request<T>(kind: "extraction" | "embedding", work: () => Promise<T>): Promise<T> {
     const local = this.scope.getStore()?.[kind];
-    return local ? local.run(() => this[kind].run(work)) : this[kind].run(work);
+    const control = this.control.getStore();
+    const guarded = async () => { await control?.check(); return work(); };
+    const pending = local ? local.run(() => this[kind].run(guarded)) : this[kind].run(guarded);
+    if (!control) return pending;
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(new MemoGrafterError("Document provider work aborted.", { code: "OPERATION_ABORTED", operation: "ingest" }));
+      if (control.signal.aborted) abort(); else control.signal.addEventListener("abort", abort, { once: true });
+      pending.then(resolve, reject).finally(() => control.signal.removeEventListener("abort", abort));
+    });
   }
   wrapLLM(adapter: LLMAdapter): LLMAdapter {
-    return { complete: (...args) => this.request("extraction", () => adapter.complete(...args)) };
+    return { complete: (...args) => this.request("extraction", () => adapter.complete(args[0], args[1], this.control.getStore() ? { ...args[2], signal: this.control.getStore()!.signal } : args[2])) };
   }
   wrapEmbedder(adapter: EmbedAdapter): EmbedAdapter {
     return {
       ...(adapter.dimensions !== undefined ? { dimensions: adapter.dimensions } : {}),
-      embed: (...args) => this.request("embedding", () => adapter.embed(...args)),
-      ...(adapter.embedMany ? { embedMany: (texts, options) => this.request("embedding", () => adapter.embedMany!(texts, options)) } satisfies Pick<EmbedAdapter, "embedMany"> : {}),
+      embed: (...args) => this.request("embedding", () => adapter.embed(args[0], this.control.getStore() ? { ...args[1], signal: this.control.getStore()!.signal } : args[1])),
+      ...(adapter.embedMany ? { embedMany: (texts, options) => this.request("embedding", () => adapter.embedMany!(texts, this.control.getStore() ? { ...options, signal: this.control.getStore()!.signal } : options)) } satisfies Pick<EmbedAdapter, "embedMany"> : {}),
     };
   }
 }

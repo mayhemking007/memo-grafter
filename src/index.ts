@@ -150,3 +150,5 @@ export type { MigrationReport, MigrationReportItem, MigrationItemStatus } from "
 export type { MemoryQuality } from "./core/types.js";
 export { normalizeMemoryQuality, computePersistenceScore } from "./utils/memoryQuality.js";
 export type { QualityAdmissionPolicy } from "./utils/memoryQuality.js";
+
+export type { IngestTextDetailedOptions, TextIngestionReceipt, DocumentIngestionPayload } from "./ingestion/types.js";

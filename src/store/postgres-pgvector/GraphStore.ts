@@ -1,3 +1,5 @@
+import { documentIngestionMigrationSql } from "../../schema/documentIngestionMigration.js";
+import { hydrateDocumentRun, documentReceipt, safeWarnings } from "../../ingestion/documentRun.js";
 import { topicClusterMigrationSql } from "../../schema/topicClusterMigration.js";
 import { agentRunMigrationSql } from "../../schema/agentRunMigration.js";
 import { PostgresAgentRunStore } from "./AgentRunStore.js";
@@ -26,6 +28,7 @@ import { parseVector, toVectorLiteral } from "../../utils/vector/vectorLiteral.j
 import type { AcceptIngestionRequest, IngestionRun, IngestionTransition, PreparedIngestion, ReconciliationIssue } from "../../ingestion/types.js";
 import { MemoGrafterError } from "../../diagnostics.js";
 import { assertIngestionTransition } from "../../ingestion/stateMachine.js";
+import { ProviderGate } from "../../ingestion/providerWork.js";
 import { canonicalizeFactParts, canonicalizeMemory, classifyCanonicalMemory } from "../../utils/extraction/memoryCanonicalization.js";
 
 interface TopicNodeRow {
@@ -135,6 +138,11 @@ interface SessionIngestStateRow {
 }
 
 interface IngestionRunRow {
+  document_payload?: IngestionRun["document"] | null;
+  prepared_payload?: PreparedIngestion | null;
+  result_payload?: IngestionRun["result"] | null;
+  cancel_requested_at?: Date | null;
+  superseded_at?: Date | null;
   id: string; session_id: string; kind: IngestionRun["kind"]; start_index: number; end_index: number;
   idempotency_key: string | null; status: IngestionRun["status"]; attempt_count: number;
   queued_at: Date | null; started_at: Date | null; completed_at: Date | null; failed_at: Date | null;
@@ -197,6 +205,9 @@ export function safelyReportDatabaseQuery(
 
 export class PostgresGraphStore implements GraphStore {
   private readonly sql: Sql;
+  // Enrichment holds one session-lock connection while calling other store methods.
+  // Admit one callback per pool to leave connections available for those methods.
+  private readonly documentFinishWork = new ProviderGate(1);
 
   agentRuns(access: AgentRunAccess): AgentRunAPI { return new PostgresAgentRunStore(this.sql, access); }
 
@@ -548,6 +559,7 @@ export class PostgresGraphStore implements GraphStore {
       )
     `;
 
+    await this.sql.unsafe(documentIngestionMigrationSql);
     await this.migrateExistingNodeTable();
     await this.createIndexes();
     await this.sql`
@@ -583,14 +595,17 @@ export class PostgresGraphStore implements GraphStore {
   }
 
   async saveMessagesAt(sessionId: string, startIndex: number, messages: Message[]): Promise<void> {
-    for (const [index, message] of messages.entries()) {
-      await this.sql`
+    if (!messages.length) return;
+    await this.sql.begin(async transaction => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${sessionId}`}))`;
+      await this.assertNoDocumentRun(transaction, sessionId);
+      for (const [index, message] of messages.entries()) await transaction`
         INSERT INTO mg_message_buffer (session_id, message_index, role, content)
         VALUES (${sessionId}, ${startIndex + index}, ${message.role}, ${message.content})
         ON CONFLICT (session_id, message_index)
         DO UPDATE SET role = EXCLUDED.role, content = EXCLUDED.content
       `;
-    }
+    });
   }
 
   async appendMessages(
@@ -599,6 +614,7 @@ export class PostgresGraphStore implements GraphStore {
   ): Promise<{ startIndex: number; endIndex: number }> {
     return this.sql.begin(async (transaction) => {
       await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${sessionId}`}))`;
+      await this.assertNoDocumentRun(transaction, sessionId);
       const rows = await transaction<{ start_index: number }[]>`
         SELECT COALESCE(MAX(message_index), -1)::int + 1 AS start_index
         FROM mg_message_buffer
@@ -621,6 +637,7 @@ export class PostgresGraphStore implements GraphStore {
   }
 
   async acceptIngestionRun(request: AcceptIngestionRequest): Promise<IngestionRun> {
+    if (request.document) return this.acceptDocumentRun(request);
     if (request.messages.length === 0) throw new MemoGrafterError("Cannot accept an empty ingestion run.", { code: "INPUT_INVALID", operation: "analyze", context: { field: "messages" } });
     return this.sql.begin(async (transaction) => {
       await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${request.sessionId}`}))`;
@@ -633,6 +650,7 @@ export class PostgresGraphStore implements GraphStore {
           return this.rowToIngestionRun(existing[0]);
         }
       }
+      await this.assertNoDocumentRun(transaction, request.sessionId);
       const rangeRows = await transaction<{ start_index: number }[]>`SELECT COALESCE(MAX(message_index), -1)::int + 1 AS start_index FROM mg_message_buffer WHERE session_id = ${request.sessionId}`;
       const startIndex = rangeRows[0]?.start_index ?? 0;
       for (const [offset, message] of request.messages.entries()) {
@@ -643,6 +661,88 @@ export class PostgresGraphStore implements GraphStore {
         VALUES (${request.sessionId}, ${request.kind}, ${startIndex}, ${startIndex + request.messages.length - 1}, ${request.idempotencyKey ?? null}, 'accepted') RETURNING *`;
       if (!rows[0]) throw this.ingestionInvariant("Accepted ingestion run was not returned.", request.sessionId);
       return this.rowToIngestionRun(rows[0]);
+    });
+  }
+
+  private async assertNoDocumentRun(transaction: TransactionSql, sessionId: string): Promise<void> {
+    const active = await transaction<{ id: string }[]>`SELECT id FROM mg_ingestion_runs WHERE session_id=${sessionId} AND document_payload IS NOT NULL AND status IN ('accepted','queued','running','retry_pending') LIMIT 1`;
+    if (active.length) throw new MemoGrafterError("A staged document is waiting to commit in this session.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+  }
+
+  private async acceptDocumentRun(request: AcceptIngestionRequest): Promise<IngestionRun> {
+    const document = request.document!;
+    if (document.version !== 1 || !document.chunks.length || request.kind !== "text") throw new MemoGrafterError("Invalid document operation.", { code: "INPUT_INVALID", operation: "ingest" });
+    return this.sql.begin(async transaction => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${request.sessionId}`}))`;
+      if (request.idempotencyKey) {
+        const rows = await transaction<IngestionRunRow[]>`SELECT * FROM mg_ingestion_runs WHERE session_id=${request.sessionId} AND idempotency_key=${request.idempotencyKey}`;
+        if (rows[0]) {
+          if (rows[0].document_payload?.requestFingerprint !== document.requestFingerprint) throw this.ingestionInvariant("An idempotency key was reused with different document input.", request.sessionId, rows[0].id);
+          return this.rowToIngestionRun(rows[0]);
+        }
+      }
+      const active = await transaction<{ id: string }[]>`SELECT id FROM mg_ingestion_runs WHERE session_id=${request.sessionId} AND status IN ('accepted','queued','running','retry_pending') LIMIT 1`;
+      if (active.length) throw new MemoGrafterError("Session ingestion must finish before accepting a document.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+      const endRows = await transaction<{ last: number }[]>`SELECT COALESCE(MAX(message_index),-1)::int AS last FROM mg_message_buffer WHERE session_id=${request.sessionId}`;
+      const cursors = await transaction<{ last_ingested_message_index: number }[]>`SELECT last_ingested_message_index FROM mg_session_ingest_state WHERE session_id=${request.sessionId}`;
+      const baseEnd = endRows[0]?.last ?? -1, baseCursor = cursors[0]?.last_ingested_message_index ?? -1;
+      if (baseEnd !== baseCursor) throw new MemoGrafterError("Session has unprocessed messages; reconcile them before accepting a document.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+      const start = document.options.replace ? 0 : baseEnd + 1;
+      const payload = { ...document, baseCursor, baseEnd };
+      const rows = await transaction<IngestionRunRow[]>`INSERT INTO mg_ingestion_runs (session_id,kind,start_index,end_index,idempotency_key,status,document_payload)
+        VALUES (${request.sessionId},'text',${start},${start + document.chunks.length - 1},${request.idempotencyKey ?? null},'accepted',${transaction.json(JSON.parse(JSON.stringify(payload)))}) RETURNING *`;
+      return this.rowToIngestionRun(rows[0]!);
+    });
+  }
+
+  async stageDocumentIngestion(runId: string, prepared: PreparedIngestion): Promise<IngestionRun> {
+    const rows = await this.sql<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET prepared_payload=${this.sql.json(JSON.parse(JSON.stringify(prepared)))},
+      result_payload=COALESCE(result_payload,'{}'::jsonb) || '{"phase":"prepared"}'::jsonb,updated_at=NOW()
+      WHERE id=${runId} AND document_payload IS NOT NULL AND status='running' AND cancel_requested_at IS NULL
+      AND worker_id=${prepared.workerId ?? null} AND attempt_count=${prepared.attemptCount ?? -1} AND lease_expires_at > clock_timestamp()
+      AND session_id=${prepared.sessionId} AND start_index=${prepared.startIndex} AND end_index=${prepared.endIndex}
+      AND (document_payload->>'baseCursor')::int=${prepared.expectedCursor}
+      AND (document_payload->>'deadlineAt')::timestamptz > clock_timestamp() RETURNING *`;
+    if (!rows[0]) throw new MemoGrafterError("Document staging lost its lease or deadline.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+    return this.rowToIngestionRun(rows[0]);
+  }
+
+  async recordDocumentProgress(runId: string, workerId: string, attemptCount: number, progress: Pick<import("../../ingestion/types.js").TextIngestionReceipt, "phase" | "counts" | "warnings">): Promise<void> {
+    const rows = await this.sql<{ id: string }[]>`UPDATE mg_ingestion_runs SET result_payload=COALESCE(result_payload,'{}'::jsonb) || ${this.sql.json(JSON.parse(JSON.stringify({ ...progress, warnings: safeWarnings(progress.warnings) })))},updated_at=NOW()
+      WHERE id=${runId} AND document_payload IS NOT NULL AND status='running' AND worker_id=${workerId} AND attempt_count=${attemptCount}
+      AND cancel_requested_at IS NULL AND lease_expires_at>clock_timestamp() RETURNING id`;
+    if (!rows.length) throw new MemoGrafterError("Document progress lost its worker lease.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+  }
+
+  async finishDocumentIngestion(runId: string, warnings: import("../../diagnostics.js").MemoGrafterWarning[] | ((run: IngestionRun) => Promise<import("../../diagnostics.js").MemoGrafterWarning[]>)): Promise<IngestionRun> {
+    const initial = await this.getIngestionRun(runId);
+    if (!initial?.document) throw this.ingestionInvariant("Document result was not found.", undefined, runId);
+    return this.documentFinishWork.run(() => this.sql.begin(async transaction => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${initial.sessionId}`}))`;
+      const current = await transaction<IngestionRunRow[]>`SELECT * FROM mg_ingestion_runs WHERE id=${runId}`;
+      const run = current[0] ? this.rowToIngestionRun(current[0]) : null;
+      if (!run) throw this.ingestionInvariant("Document result was not found.", undefined, runId);
+      if (run.supersededAt || !["completed", "completed_with_warnings"].includes(run.status) || run.result?.postProcessing !== "pending") return run;
+      const clean = safeWarnings(typeof warnings === "function" ? await warnings(run) : warnings);
+      const rows = await transaction<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET
+      status=CASE WHEN ${clean.length}>0 THEN 'completed_with_warnings' ELSE status END,
+      result_payload=result_payload || ${transaction.json({ warnings: clean, phase: "finished", postProcessing: "finished" })},updated_at=NOW()
+      WHERE id=${runId} AND document_payload IS NOT NULL AND status IN ('completed','completed_with_warnings')
+      AND result_payload->>'postProcessing'='pending' AND superseded_at IS NULL RETURNING *`;
+      return rows[0] ? this.rowToIngestionRun(rows[0]) : run;
+    }));
+  }
+
+  async cancelIngestionRun(runId: string): Promise<IngestionRun> {
+    return this.sql.begin(async transaction => {
+      const initial = await transaction<IngestionRunRow[]>`SELECT * FROM mg_ingestion_runs WHERE id=${runId}`;
+      if (!initial[0]?.document_payload) throw new MemoGrafterError("Document ingestion run was not found.", { code: "INPUT_INVALID", operation: "ingest" });
+      await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${initial[0].session_id}`}))`;
+      const rows = await transaction<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET status='cancelled',cancel_requested_at=NOW(),failed_at=NOW(),lease_expires_at=NULL,updated_at=NOW(),retryable=FALSE
+        WHERE id=${runId} AND status IN ('accepted','queued','running','retry_pending') RETURNING *`;
+      if (rows[0]) return this.rowToIngestionRun(rows[0]);
+      const current = await transaction<IngestionRunRow[]>`SELECT * FROM mg_ingestion_runs WHERE id=${runId}`;
+      return this.rowToIngestionRun(current[0]!);
     });
   }
 
@@ -669,6 +769,7 @@ export class PostgresGraphStore implements GraphStore {
     const runs = await this.listIngestionRuns(sessionId);
     const now = Date.now();
     for (const run of runs) {
+      if (!run.supersededAt && ["completed", "completed_with_warnings"].includes(run.status) && run.result?.postProcessing === "pending") issues.push({ code: "document-postprocessing-pending", severity: "warning", sessionId: run.sessionId, runId: run.id, message: "Document committed; optional graph processing is pending.", repairable: true });
       if (run.status === "accepted") issues.push({ code: "accepted-not-started", severity: "warning", sessionId: run.sessionId, runId: run.id, message: "Accepted ingestion has not started.", repairable: true });
       if (run.status === "running" && run.leaseExpiresAt && run.leaseExpiresAt.getTime() < now) issues.push({ code: "expired-worker-lease", severity: "error", sessionId: run.sessionId, runId: run.id, message: "Running ingestion worker lease expired.", repairable: true });
       if ((run.status === "failed" && run.retryable) || run.status === "retry_pending") issues.push({ code: "retryable-failure", severity: "warning", sessionId: run.sessionId, runId: run.id, message: "Ingestion can be retried safely.", repairable: true });
@@ -679,12 +780,12 @@ export class PostgresGraphStore implements GraphStore {
       if (row.cursor > row.max_index) issues.push({ code: "cursor-ahead-of-buffer", severity: "error", sessionId: row.session_id, message: "Cursor is ahead of the durable message buffer.", repairable: false });
     }
     const cursorBySession = new Map(cursorRows.map((row) => [row.session_id, row.cursor]));
-    for (const run of runs) if (["completed", "completed_with_warnings"].includes(run.status) && (cursorBySession.get(run.sessionId) ?? -1) < run.endIndex) issues.push({ code: "completed-cursor-behind", severity: "error", sessionId: run.sessionId, runId: run.id, message: "Completed run is not covered by the ingestion cursor.", repairable: false });
+    for (const run of runs) if (!run.supersededAt && ["completed", "completed_with_warnings"].includes(run.status) && (cursorBySession.get(run.sessionId) ?? -1) < run.endIndex) issues.push({ code: "completed-cursor-behind", severity: "error", sessionId: run.sessionId, runId: run.id, message: "Completed run is not covered by the ingestion cursor.", repairable: false });
     const orphanTopics = await this.sql<{ session_id: string }[]>`SELECT DISTINCT n.session_id FROM mg_topic_nodes n LEFT JOIN mg_segments s ON s.id=n.segment_id WHERE s.id IS NULL ${sessionId === undefined ? this.sql`` : this.sql`AND n.session_id=${sessionId}`}`;
     for (const row of orphanTopics) issues.push({ code: "topic-without-segment", severity: "error", sessionId: row.session_id, message: "Topic exists without its segment.", repairable: false });
-    const orphanSegments = await this.sql<{ session_id: string }[]>`SELECT DISTINCT s.session_id FROM mg_segments s LEFT JOIN mg_topic_nodes n ON n.segment_id=s.id WHERE n.id IS NULL ${sessionId === undefined ? this.sql`` : this.sql`AND s.session_id=${sessionId}`}`;
+    const orphanSegments = await this.sql<{ session_id: string }[]>`SELECT DISTINCT s.session_id FROM mg_segments s LEFT JOIN mg_topic_nodes n ON n.segment_id=s.id LEFT JOIN mg_episodes e ON e.segment_id=s.id WHERE n.id IS NULL AND e.id IS NULL ${sessionId === undefined ? this.sql`` : this.sql`AND s.session_id=${sessionId}`}`;
     for (const row of orphanSegments) issues.push({ code: "segment-without-topic", severity: "error", sessionId: row.session_id, message: "Segment exists without its required topic.", repairable: false });
-    const duplicates = await this.sql<{ session_id: string }[]>`SELECT session_id FROM mg_ingestion_runs WHERE TRUE ${sessionId === undefined ? this.sql`` : this.sql`AND session_id=${sessionId}`} GROUP BY session_id,start_index,end_index,kind HAVING COUNT(*) > 1`;
+    const duplicates = await this.sql<{ session_id: string }[]>`SELECT session_id FROM mg_ingestion_runs WHERE TRUE ${sessionId === undefined ? this.sql`` : this.sql`AND session_id=${sessionId}`} AND document_payload IS NULL AND superseded_at IS NULL GROUP BY session_id,start_index,end_index,kind HAVING COUNT(*) > 1`;
     for (const row of duplicates) issues.push({ code: "duplicate-range", severity: "error", sessionId: row.session_id, message: "Duplicate ingestion processing range exists.", repairable: false });
     return issues;
   }
@@ -695,21 +796,25 @@ export class PostgresGraphStore implements GraphStore {
     const rows = await this.sql<IngestionRunRow[]>`
       UPDATE mg_ingestion_runs SET status = ${transition.to}, updated_at = NOW(),
         queued_at = CASE WHEN ${transition.to} = 'queued' THEN NOW() ELSE queued_at END,
-        started_at = CASE WHEN ${transition.to} = 'running' THEN NOW() ELSE started_at END,
+        started_at = CASE WHEN ${transition.to} = 'running' THEN COALESCE(started_at,NOW()) ELSE started_at END,
         completed_at = CASE WHEN ${transition.to} IN ('completed','completed_with_warnings') THEN NOW() ELSE completed_at END,
-        failed_at = CASE WHEN ${transition.to} IN ('failed','abandoned') THEN NOW() ELSE failed_at END,
+        failed_at = CASE WHEN ${transition.to} IN ('failed','abandoned','cancelled') THEN NOW() ELSE failed_at END,
         attempt_count = attempt_count + CASE WHEN ${transition.to} = 'running' THEN 1 ELSE 0 END,
         worker_id = COALESCE(${transition.workerId ?? null}, worker_id),
         lease_expires_at = ${transition.leaseExpiresAt ?? null}, heartbeat_at = CASE WHEN ${transition.to} = 'running' THEN NOW() ELSE heartbeat_at END,
         last_error_code = ${error?.code ?? null}, last_error_stage = ${error?.stage ?? null},
         last_error_safe_message = ${error?.message.slice(0, 500) ?? null}, retryable = ${error?.retryable ?? null}
-      WHERE id = ${transition.runId} AND status = ANY(${transition.from}) RETURNING *`;
+      WHERE id = ${transition.runId} AND status = ANY(${transition.from})
+        AND (${transition.expectedWorkerId ?? null}::text IS NULL OR worker_id=${transition.expectedWorkerId ?? null})
+        AND (${transition.expectedAttemptCount ?? null}::int IS NULL OR attempt_count=${transition.expectedAttemptCount ?? null})
+        AND (${transition.leaseExpiredBefore ?? null}::timestamptz IS NULL OR lease_expires_at <= ${transition.leaseExpiredBefore ?? null})
+        AND superseded_at IS NULL RETURNING *`;
     if (!rows[0]) throw this.ingestionInvariant(`Illegal ingestion transition to ${transition.to}.`, undefined, transition.runId);
     return this.rowToIngestionRun(rows[0]);
   }
 
   async renewIngestionRunLease(runId: string, workerId: string, leaseExpiresAt: Date): Promise<void> {
-    const rows = await this.sql<{ id: string }[]>`UPDATE mg_ingestion_runs SET heartbeat_at=NOW(),lease_expires_at=${leaseExpiresAt},updated_at=NOW() WHERE id=${runId} AND status='running' AND worker_id=${workerId} RETURNING id`;
+    const rows = await this.sql<{ id: string }[]>`UPDATE mg_ingestion_runs SET heartbeat_at=NOW(),lease_expires_at=${leaseExpiresAt},updated_at=NOW() WHERE id=${runId} AND status='running' AND worker_id=${workerId} AND lease_expires_at > clock_timestamp() RETURNING id`;
     if (!rows[0]) throw this.ingestionInvariant("Running ingestion lease could not be renewed.", undefined, runId);
   }
 
@@ -718,22 +823,57 @@ export class PostgresGraphStore implements GraphStore {
       await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${prepared.sessionId}`}))`;
       const runRows = await transaction<IngestionRunRow[]>`SELECT * FROM mg_ingestion_runs WHERE id = ${prepared.runId} FOR UPDATE`;
       const run = runRows[0];
-      if (!run || run.status !== "running" || run.session_id !== prepared.sessionId || run.start_index !== prepared.startIndex || run.end_index !== prepared.endIndex) throw this.ingestionInvariant("Ingestion run does not match the prepared commit.", prepared.sessionId, prepared.runId);
+      if (!run || run.status !== "running" || run.superseded_at || run.session_id !== prepared.sessionId || run.start_index !== prepared.startIndex || run.end_index !== prepared.endIndex) throw this.ingestionInvariant("Ingestion run does not match the prepared commit.", prepared.sessionId, prepared.runId);
+      if (run.document_payload) {
+        if (run.document_payload.version !== 1 || run.cancel_requested_at || run.worker_id !== prepared.workerId || run.attempt_count !== prepared.attemptCount || !run.lease_expires_at || run.lease_expires_at.getTime() <= Date.now() || run.document_payload.baseCursor !== prepared.expectedCursor || !run.prepared_payload) throw this.ingestionInvariant("Document commit lost its worker lease or staged operation.", prepared.sessionId, prepared.runId);
+        const deadlineRows = await transaction<{ expired: boolean }[]>`SELECT (document_payload->>'deadlineAt')::timestamptz <= clock_timestamp() AS expired FROM mg_ingestion_runs WHERE id=${run.id}`;
+        if (deadlineRows[0]?.expired) throw new MemoGrafterError("Document deadline expired before commit.", { code: "OPERATION_TIMEOUT", operation: "ingest" });
+        const stagedRows = await transaction<{ matches: boolean }[]>`SELECT prepared_payload=${transaction.json(JSON.parse(JSON.stringify(prepared)))}::jsonb AS matches FROM mg_ingestion_runs WHERE id=${run.id}`;
+        if (!stagedRows[0]?.matches) throw this.ingestionInvariant("Document commit differs from its durable stage.", prepared.sessionId, prepared.runId);
+        const endRows = await transaction<{ last: number }[]>`SELECT COALESCE(MAX(message_index),-1)::int AS last FROM mg_message_buffer WHERE session_id=${prepared.sessionId}`;
+        if ((endRows[0]?.last ?? -1) !== run.document_payload.baseEnd) throw this.ingestionInvariant("Session changed after document acceptance.", prepared.sessionId, prepared.runId);
+      }
       const cursorRows = await transaction<{ last_ingested_message_index: number }[]>`SELECT last_ingested_message_index FROM mg_session_ingest_state WHERE session_id = ${prepared.sessionId} FOR UPDATE`;
       const cursor = cursorRows[0]?.last_ingested_message_index ?? -1;
       if (cursor !== prepared.expectedCursor) throw this.ingestionInvariant(`Expected cursor ${prepared.expectedCursor}, found ${cursor}.`, prepared.sessionId, prepared.runId);
+      if (run.document_payload) {
+        if (run.document_payload.options.replace) {
+          await transaction`UPDATE mg_ingestion_runs SET superseded_at=NOW() WHERE session_id=${prepared.sessionId} AND id<>${run.id} AND superseded_at IS NULL`;
+          await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${`topic-clusters:${prepared.sessionId}`},0))`;
+          await transaction`DELETE FROM mg_topic_clusters WHERE session_id=${prepared.sessionId}`;
+          await transaction`DELETE FROM mg_topic_edges WHERE src_id IN (SELECT id FROM mg_topic_nodes WHERE session_id=${prepared.sessionId}) OR dst_id IN (SELECT id FROM mg_topic_nodes WHERE session_id=${prepared.sessionId})`;
+          await transaction`DELETE FROM mg_topic_nodes WHERE session_id=${prepared.sessionId}`;
+          await transaction`DELETE FROM mg_segments WHERE session_id=${prepared.sessionId}`;
+          await transaction`DELETE FROM mg_message_buffer WHERE session_id=${prepared.sessionId}`;
+        }
+        for (const [offset, chunk] of run.document_payload.chunks.entries()) await transaction`INSERT INTO mg_message_buffer (session_id,message_index,role,content) VALUES (${prepared.sessionId},${prepared.startIndex + offset},'user',${chunk.content})`;
+      }
       for (const segment of prepared.segments) await transaction`INSERT INTO mg_segments (id,session_id,start_index,end_index,topic_order,drift_score,created_at) VALUES (${segment.id},${segment.sessionId},${segment.startIndex},${segment.endIndex},${segment.topicOrder},${segment.driftScore},${segment.createdAt}) ON CONFLICT (session_id,start_index,end_index) DO UPDATE SET topic_order=EXCLUDED.topic_order,drift_score=EXCLUDED.drift_score`;
       for (const node of prepared.nodes) await transaction`INSERT INTO mg_topic_nodes (id,session_id,segment_id,label,summary,embedding,tags,source,message_range,topic_order,drift_score,agent_color,fleet_id,agent_id,episode_count,embedding_count,first_active_at,last_active_at,last_episode_id,revision,created_at) VALUES (${node.id},${node.sessionId},${node.segmentId},${node.label},${node.summary},${toVectorLiteral(node.embedding)}::vector,${transaction.array(normalizeTags(node.tags))}::text[],${node.source ?? null},${node.messageRange},${node.topicOrder},${node.driftScore},${node.agentColor},${node.fleetId},${node.agentId},${node.episodeCount ?? 1},${node.embeddingCount ?? 1},${node.firstActiveAt ?? node.createdAt},${node.lastActiveAt ?? node.createdAt},${node.lastEpisodeId ?? null}::uuid,${node.revision ?? 1},${node.createdAt}) ON CONFLICT (segment_id) DO NOTHING`;
       for (const episode of prepared.episodes ?? []) await transaction`INSERT INTO mg_episodes (id,session_id,segment_id,topic_id,summary,intent,outcome,open_question,embedding,message_range,episode_order,source_type,source,tags,assignment_method,assignment_similarity,assignment_version,created_at)
         VALUES (${episode.id}::uuid,${episode.sessionId},${episode.segmentId},${episode.topicId},${episode.summary},${episode.intent},${episode.outcome},${episode.openQuestion},${toVectorLiteral(episode.embedding)}::vector,${episode.messageRange},${episode.episodeOrder},${episode.sourceType},${episode.source ?? null},${transaction.array(normalizeTags(episode.tags))}::text[],${episode.assignmentMethod},${episode.assignmentSimilarity},${episode.assignmentVersion},${episode.createdAt}) ON CONFLICT (segment_id) DO NOTHING`;
       for (const node of prepared.topicUpdates ?? []) await transaction`UPDATE mg_topic_nodes SET summary=${node.summary},embedding=${toVectorLiteral(node.embedding)}::vector,tags=${transaction.array(normalizeTags(node.tags))}::text[],episode_count=${node.episodeCount ?? 1},embedding_count=${node.embeddingCount ?? 1},first_active_at=${node.firstActiveAt ?? node.createdAt},last_active_at=${node.lastActiveAt ?? node.createdAt},last_episode_id=${node.lastEpisodeId ?? null}::uuid,revision=${node.revision ?? 1} WHERE id=${node.id} AND session_id=${node.sessionId}`;
-      await this.reconcileAndInsertMemories(transaction, prepared.memories);
+      const inserted = await this.reconcileAndInsertMemories(transaction, prepared.memories);
       for (const edge of prepared.requiredEdges) await transaction`INSERT INTO mg_topic_edges (src_id,dst_id,weight,type) VALUES (${edge.srcId},${edge.dstId},${edge.weight},${edge.type}) ON CONFLICT (src_id,dst_id) DO UPDATE SET weight=EXCLUDED.weight,type=EXCLUDED.type`;
       await transaction`INSERT INTO mg_session_ingest_state (session_id,last_ingested_message_index,updated_at) VALUES (${prepared.sessionId},${prepared.endIndex},NOW()) ON CONFLICT (session_id) DO UPDATE SET last_ingested_message_index=EXCLUDED.last_ingested_message_index,updated_at=NOW()`;
-      const completed = await transaction<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET status='completed',completed_at=NOW(),lease_expires_at=NULL,updated_at=NOW() WHERE id=${prepared.runId} AND status='running' RETURNING *`;
-      if (!completed[0]) throw this.ingestionInvariant("Ingestion run could not be completed.", prepared.sessionId, prepared.runId);
       const committedNodes = [...new Map([...prepared.nodes, ...(prepared.topicUpdates ?? [])].map((node) => [node.id, node])).values()];
-      return { nodes: committedNodes, run: this.rowToIngestionRun(completed[0]) };
+      const warnings = prepared.warnings ?? [];
+      const status = run.document_payload && warnings.length ? "completed_with_warnings" : "completed";
+      if (run.document_payload) {
+        const bounds = await transaction<{ expired: boolean; leased: boolean }[]>`SELECT (document_payload->>'deadlineAt')::timestamptz <= clock_timestamp() AS expired,lease_expires_at>clock_timestamp() AS leased FROM mg_ingestion_runs WHERE id=${run.id}`;
+        if (bounds[0]?.expired) throw new MemoGrafterError("Document deadline expired during commit.", { code: "OPERATION_TIMEOUT", operation: "ingest" });
+        if (!bounds[0]?.leased) throw new MemoGrafterError("Document worker lease expired during commit.", { code: "INGESTION_ORDER_PENDING", operation: "ingest", retryable: true });
+      }
+      const completed = await transaction<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET status=${status},completed_at=NOW(),lease_expires_at=NULL,updated_at=NOW() WHERE id=${prepared.runId} AND status='running' RETURNING *`;
+      if (!completed[0]) throw this.ingestionInvariant("Ingestion run could not be completed.", prepared.sessionId, prepared.runId);
+      let completedRun = this.rowToIngestionRun(completed[0]);
+      if (run.document_payload) {
+        const receipt = { ...documentReceipt(completedRun), phase: "committed", postProcessing: "pending", segmentCount: prepared.segments.length, topicCount: committedNodes.length, nodes: committedNodes, warnings,
+          ...(prepared.documentCounts ? { counts: { ...prepared.documentCounts, acknowledged: prepared.memories.length, persisted: inserted } } : {}) };
+        const saved = await transaction<IngestionRunRow[]>`UPDATE mg_ingestion_runs SET result_payload=${transaction.json(JSON.parse(JSON.stringify(receipt)))} WHERE id=${run.id} RETURNING *`;
+        completedRun = this.rowToIngestionRun(saved[0]!);
+      }
+      return { nodes: committedNodes, run: completedRun };
     });
   }
 
@@ -1018,6 +1158,8 @@ export class PostgresGraphStore implements GraphStore {
 
   async clearSession(sessionId: string): Promise<void> {
     await this.sql.begin(async transaction => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtext(${`memo-grafter-session:${sessionId}`}))`;
+      await this.assertNoDocumentRun(transaction, sessionId);
       await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${`topic-clusters:${sessionId}`}, 0))`;
       await transaction`DELETE FROM mg_topic_clusters WHERE session_id=${sessionId}`;
       const nodeRows = await transaction<{ id: string }[]>`
@@ -2593,7 +2735,7 @@ export class PostgresGraphStore implements GraphStore {
     const rows = await this.sql<{ table_name: string }[]>`
       SELECT table_name
       FROM information_schema.tables
-      WHERE table_schema = 'public'
+      WHERE table_schema = current_schema()
     `;
     const expected = new Set(tableNames);
 
@@ -2606,7 +2748,7 @@ export class PostgresGraphStore implements GraphStore {
     const rows = await this.sql<{ indexname: string }[]>`
       SELECT indexname
       FROM pg_indexes
-      WHERE schemaname = 'public'
+      WHERE schemaname = current_schema()
     `;
     const expected = new Set(indexNames);
 
@@ -2964,14 +3106,19 @@ export class PostgresGraphStore implements GraphStore {
   }
 
   private rowToIngestionRun(row: IngestionRunRow): IngestionRun {
-    return { id: row.id, sessionId: row.session_id, kind: row.kind, startIndex: row.start_index, endIndex: row.end_index,
+    return hydrateDocumentRun({ id: row.id, sessionId: row.session_id, kind: row.kind, startIndex: row.start_index, endIndex: row.end_index,
+      ...(row.document_payload ? { document: row.document_payload } : {}),
+      ...(row.prepared_payload ? { prepared: row.prepared_payload } : {}),
+      ...(row.result_payload ? { result: row.result_payload } : {}),
+      ...(row.cancel_requested_at ? { cancelRequestedAt: row.cancel_requested_at } : {}),
+      ...(row.superseded_at ? { supersededAt: row.superseded_at } : {}),
       ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key } : {}), status: row.status, attemptCount: row.attempt_count,
       ...(row.queued_at ? { queuedAt: row.queued_at } : {}), ...(row.started_at ? { startedAt: row.started_at } : {}),
       ...(row.completed_at ? { completedAt: row.completed_at } : {}), ...(row.failed_at ? { failedAt: row.failed_at } : {}),
       ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}), ...(row.heartbeat_at ? { heartbeatAt: row.heartbeat_at } : {}),
       ...(row.last_error_code ? { lastErrorCode: row.last_error_code } : {}), ...(row.last_error_stage ? { lastErrorStage: row.last_error_stage } : {}),
       ...(row.last_error_safe_message ? { lastErrorSafeMessage: row.last_error_safe_message } : {}), ...(row.retryable !== null ? { retryable: row.retryable } : {}),
-      ...(row.worker_id ? { workerId: row.worker_id } : {}), createdAt: row.created_at, updatedAt: row.updated_at };
+      ...(row.worker_id ? { workerId: row.worker_id } : {}), createdAt: row.created_at, updatedAt: row.updated_at });
   }
 
   private ingestionInvariant(message: string, sessionId?: string, runId?: string): MemoGrafterError {

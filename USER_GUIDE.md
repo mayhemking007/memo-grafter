@@ -550,9 +550,9 @@ The same options work on `agent.ingestText(text, options)` and queued ingestion.
 
 The drift minimum resolves from `segmentation.minChunks`, then `minSegmentMessages`, then the instance configuration when chunking/segmentation controls are present; otherwise the legacy minimum is one. Conflicting explicit minimums are rejected. Minimums apply only to drift mode; a trailing remainder can be shorter. Chunk caps and topic caps take precedence over soft targets and boundaries.
 
-Chunk preparation retains original source offsets and heading hierarchy internally. `preserveHeadings: false` disables the additional heading-context metadata; source heading text is always retained. Offsets and heading metadata are not yet persisted or exposed through memory provenance. This is Markdown-aware splitting, not a full Markdown parser.
+Chunk preparation retains original source offsets and heading hierarchy internally. `preserveHeadings: false` disables the additional heading-context metadata; source heading text is always retained. `ingestTextDetailed()` persists these mappings on the ingestion run; legacy `ingestText()` does not persist them. This is Markdown-aware splitting, not a full Markdown parser.
 
-Validation and chunk planning occur before replacement clears a session. `replace: true` still replaces the entire session; this phase does not change persistence or rollback semantics.
+Validation and chunk planning occur before replacement clears a session. Legacy `ingestText()` retains its existing persistence and rollback behavior. Use `ingestTextDetailed()` below for staged, atomic replacement.
 
 
 Options:
@@ -566,6 +566,47 @@ Use `replace: true` for autosave workflows where each call represents the comple
 Without `replace`, each text call appends to the current session memory. Later `invoke()` calls continue to work normally and can recall facts extracted from the ingested text.
 
 In queue mode, `await agent.ingestText()` confirms that the ingestion job was queued. Reads may need to wait for the worker to finish before the new graph content is visible.
+
+### Durable Document Ingestion
+
+Use the initialized `MemoGrafter` instance for the detailed API:
+
+```ts
+const receipt = await memo.ingestTextDetailed(markdown, sessionId, {
+  idempotencyKey: "handbook-revision-12",
+  source: "handbook.md",
+  replace: true,
+  chunking: { strategy: "section", maxCharacters: 3000, maxChunks: 40 },
+  segmentation: { strategy: "per-chunk", maxTopics: 40 },
+  memoryBudget: { maxPerSegment: 8, maxPerDocument: 60, deduplicate: true },
+  concurrency: { extraction: 2, embedding: 4 },
+}, { timeoutMs: 300_000 });
+
+const run = await memo.getIngestionRun(receipt.ingestionRunId);
+console.log(run?.status, run?.result?.phase, run?.result?.counts);
+// To cancel a queued or running document from another process:
+await memo.cancelIngestionRun(receipt.ingestionRunId);
+```
+
+The receipt includes `ingestionRunId`, `sessionId`, durable `status`, `chunkCount`, warnings, and available segment/topic counts, memory counters, duration, and completed nodes. `getIngestionRun(id).result` exposes the same receipt for queued work. `phase` tracks segmenting, extraction, selection, embedding, staging, and commit. Counters are checkpointed; unavailable counters are omitted rather than reported as zero. Processing duration starts at the first worker attempt. Persisted warnings contain codes and stages, without provider exceptions or raw responses.
+
+`run.document` is a versioned snapshot of the source text, prepared chunks, resolved ingestion settings, and deadline. Each chunk has half-open UTF-16 `start`/`end` offsets and optional heading hierarchy. A memory's absolute message index maps to `run.document.chunks[index - run.startIndex]`. Legacy sentence normalization can change whitespace within a chunk; the offsets still identify its original source span. The run retains its source and staged/result snapshots after completion, including after a later replacement supersedes it.
+
+`idempotencyKey` is scoped to the session. Repeating the same text, options, and timeout returns or resumes the same run; changing those inputs under that key fails. Retry execution uses persisted options and chunks, not options in a queue job or a new worker's ingestion configuration. Once preparation is staged, retries reuse it without repeating extraction or embedding. Before that checkpoint, failed preparation may need to call providers again; provider/model behavior itself is not snapshotted. The deadline is not extended by retries. Terminal failed or cancelled documents require a new key to start a new operation.
+
+`timeoutMs` defaults to five minutes and persists an absolute deadline covering queue wait and processing. A queued worker checks the deadline before provider work; commits also check it. An in-process `AbortSignal` cancels an active inline call and records cancellation, but is never serialized into Redis or treated as durable state after the method returns. Use `cancelIngestionRun()` for later cancellation. Cancellation and replacement commits serialize on the session: if cancellation wins, the old session remains; if commit wins, cancellation returns the completed run and does not undo it. Adapters receive a signal; adapters that ignore it may finish an already-started request, but cannot subsequently commit a cancelled document.
+
+Detailed `replace: true` replaces **all ingestion content in the session**, including conversations and earlier documents, not only content with the same `source`. Extraction, selection, and embedding happen before any old messages or graph data are removed. PostgreSQL commits replacement messages, segments, topics, episodes, memories, required edges, cursor, and run results in one transaction. Failed preparation or a rolled-back commit leaves old content intact. Session metadata and agent public history remain unchanged. Without `replace`, the prepared document appends atomically.
+
+Only one active detailed document is accepted per session, and existing message runs must finish first. Buffered but unprocessed messages also block acceptance with retryable `INGESTION_ORDER_PENDING`. While a document is staged, ordinary message writes and session clearing reject with the same error until it finishes or is cancelled. This prevents a replacement from silently discarding concurrent ingestion.
+
+Optional semantic edges and clustering follow the commit and serialize against session replacement. Their failures produce `completed_with_warnings`; they cannot roll back committed content. A crash can leave `postProcessing: "pending"` on a completed run. Replay the same idempotent request or use `reconcileSession(sessionId, { mode: "repair", repairs: ["finish-document"] })` to finish that work without repeating extraction. Reconciliation is inspect-only unless explicitly requested; existing accepted/retry/expired-lease repairs also apply to document runs. Superseded runs retain their historical receipt and are not replayed into the new session.
+
+Invalid text, limits, budgets, concurrency, or metadata fail before provider calls or storage mutations. Unlike legacy blank-text no-ops, the detailed API requires nonblank text. Provider or storage failures can reject with a typed error; after acceptance, `error.context.jobId` identifies the durable run for inspection or retry. Cancellation and deadline expiry return terminal receipts. Queue enqueue failure leaves accepted input recoverable as `retry_pending`.
+
+Upgrade the database using the normal migration command before using this API. The runtime migration and standalone `migrations/013_document_ingestion.sql` add document/stage/result payloads, cancellation state, and replacement-aware range uniqueness. Custom stores must implement the document staging, progress, cancellation, lease-fenced atomic commit, and serialized finalization methods in `GraphStore`; unsupported stores fail with `CONFIGURATION_INVALID` rather than attempting destructive replacement. `ingestText(): Promise<TopicNode[]>` and agent wrappers retain their existing behavior.
+
+The opt-in PostgreSQL tests use `MEMOGRAFTER_DOCUMENT_TEST_DB` and create/drop only a randomly named test schema. Run `npm run test:run -- tests/unit/store/documentIngestion.integration.test.ts` against a disposable PostgreSQL database with pgvector available.
 
 ### Remembering Explicit Facts
 
