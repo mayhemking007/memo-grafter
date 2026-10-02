@@ -113,29 +113,34 @@ export class SegmentProcessor {
     }
   }
 
-  async prepareDocument(segments: DriftSegment[], messages: Message[], sessionId: string, options: IngestPipelineOptions, messageOffset: number, stats: MemorySelectionStats): Promise<PreparedSegment[]> {
+  async prepareDocument(segments: DriftSegment[], messages: Message[], sessionId: string, options: IngestPipelineOptions, messageOffset: number, stats: MemorySelectionStats, memoriesRequired = false, report?: (phase: "extracted" | "selected" | "embedded", counts: Partial<MemorySelectionStats>, warnings: import("../../diagnostics.js").MemoGrafterWarning[]) => Promise<void>): Promise<PreparedSegment[]> {
     const { label, ...sharedOptions } = options;
     const results = await Promise.allSettled(segments.map((segment, index) => this.prepare(segment, messages, sessionId, { ...sharedOptions, ...(index === 0 && label ? { label } : {}) }, messageOffset, true, true, stats)));
+    await report?.("extracted", { sessionId, extracted: stats.extracted, rejected: stats.rejected }, []);
     const prepared = results.map((result) => { if (result.status === "rejected") throw result.reason; return result.value; });
     const selection = selectMemories(prepared.map((item) => item.memories), options.memoryBudget);
     stats.deduplicated = selection.deduplicated;
     stats.budgetExcluded = selection.budgetExcluded;
     stats.selected = selection.selected;
+    await report?.("selected", { ...stats }, []);
     prepared.forEach((item, index) => { item.memories = selection.groups[index]!; });
     const texts = prepared.map((item) => item.node.summary);
     const topicEmbeddings = await embedTexts(this.embedder, texts);
     prepared.forEach((item, index) => { item.node.embedding = topicEmbeddings[index]!; item.episode.embedding = topicEmbeddings[index]!; });
-    await Promise.all(prepared.map(async (item) => {
+    const embedded = await Promise.allSettled(prepared.map(async (item) => {
       try {
         const embeddings = await embedTexts(this.embedder, item.memories.map((memory) => formatMemoryEmbeddingText(memory)));
         item.memories.forEach((memory, index) => { memory.embedding = embeddings[index]!; });
       } catch (cause) {
+        if (memoriesRequired) throw cause;
         const warning = { code: "BEST_EFFORT_OPERATION_FAILED" as const, operation: "ingest" as const, stage: "embedding" as const, context: { sessionId }, cause };
         emitWarning(this.config.diagnostics, warning);
         item.memories = [];
         item.warnings.push(warning);
       }
     }));
+    await report?.("embedded", { ...stats }, prepared.flatMap(item => item.warnings));
+    for (const result of embedded) if (result.status === "rejected") throw result.reason;
     return prepared;
   }
 

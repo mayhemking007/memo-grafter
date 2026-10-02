@@ -16,12 +16,12 @@ export class TopicAssigner {
     private readonly config: { reuseThreshold?: number; candidateLimit?: number } = {},
   ) {}
 
-  async assign(episode: Episode, proposed: TopicNode, currentRunTopics: TopicNode[] = []): Promise<TopicAssignment> {
+  async assign(episode: Episode, proposed: TopicNode, currentRunTopics: TopicNode[] = [], includePersisted = true): Promise<TopicAssignment> {
     const limit = Math.max(1, this.config.candidateLimit ?? 8);
-    const persisted = await this.store.getSimilarNodes(episode.embedding, episode.sessionId, {
+    const persisted = includePersisted ? await this.store.getSimilarNodes(episode.embedding, episode.sessionId, {
       k: limit,
       minSimilarity: -1,
-    });
+    }) : [];
     const candidates = new Map<string, TopicNode>();
     for (const topic of [...persisted, ...currentRunTopics]) {
       if (topic.sessionId === episode.sessionId && !topic.suppressed) candidates.set(topic.id, topic);
