@@ -286,3 +286,18 @@ All notable changes to this project will be documented here.
 * Improved durable memory extraction with ownership and provenance validation to better distinguish attributable, persistent facts.
 * Improved memory reconciliation so related facts can be canonicalized and tracked across their lifecycle.
 * Updated memory organization to reuse stable topics instead of creating unnecessary duplicate topic structures.
+
+## [0.5.3] - 2026-10-03
+
+### Added
+
+- Added structured document ingestion for processing documents while preserving their structure and metadata.
+- Added durable document ingestion runs for tracking and recovering document ingestion workflows.
+- Added configurable document chunking for controlling how larger documents are split and processed.
+- Added agent identity, run tracking, and structured event capture for agent-based memory workflows.
+
+### Changed
+
+- Added configurable memory budgets to bound memory extraction during ingestion.
+- Added bounded ingestion metrics for improved visibility into ingestion behavior and resource usage.
+- Improved document ingestion reliability with durable run state and structured processing.
