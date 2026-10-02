@@ -67,6 +67,9 @@ try {
   ).href;
   const rootModule = await import(rootModuleUrl);
   assert.equal(typeof rootModule.MemoGrafterAgent, "function");
+  for (const method of ["ingestText", "ingestTextDetailed", "ingestDocument", "ingestDocumentDetailed"]) {
+    assert.equal(typeof rootModule.MemoGrafter.prototype[method], "function", `packed API must expose ${method}`);
+  }
 
   const adapters = [
     new rootModule.OpenAILLMAdapter(),

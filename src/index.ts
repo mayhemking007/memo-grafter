@@ -152,3 +152,4 @@ export { normalizeMemoryQuality, computePersistenceScore } from "./utils/memoryQ
 export type { QualityAdmissionPolicy } from "./utils/memoryQuality.js";
 
 export type { IngestTextDetailedOptions, TextIngestionReceipt, DocumentIngestionPayload } from "./ingestion/types.js";
+export type { DocumentInput, DocumentSection, DocumentSource, DocumentSourceSpan, DocumentJSON, IngestDocumentOptions, DocumentIngestionReceipt } from "./ingestion/structuredDocument.js";

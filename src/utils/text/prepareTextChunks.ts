@@ -4,7 +4,7 @@ import { MemoGrafterError } from "../../diagnostics.js";
 import { splitTextForIngestion } from "./splitTextForIngestion.js";
 
 /** Half-open UTF-16 offsets into the original input. */
-export interface TextChunk { content: string; start: number; end: number; headings?: string[]; }
+export interface TextChunk { content: string; start: number; end: number; headings?: string[]; sourceSpans?: import("../../ingestion/structuredDocument.js").DocumentSourceSpan[]; }
 
 function invalid(message: string): never {
   throw new MemoGrafterError(message, { code: "INPUT_INVALID", operation: "ingest", retryable: false });

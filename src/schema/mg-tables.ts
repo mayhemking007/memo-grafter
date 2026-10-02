@@ -2,7 +2,7 @@ import { mgExtension, mgIndex, mgTable } from "./builders.js";
 import { agentRunTables, agentRunIndexes } from "./agentRunSchema.js";
 
 export const memoGrafterMigrationTableName = "mg_migrations";
-export const memoGrafterCurrentMigrationVersion = 9;
+export const memoGrafterCurrentMigrationVersion = 10;
 
 export const memoGrafterExtensions = [
   mgExtension({
@@ -159,6 +159,7 @@ export const memoGrafterTables = [
       { name: "source", type: "text", nullable: true },
       { name: "source_url", type: "text", nullable: true },
       { name: "source_title", type: "text", nullable: true },
+      { name: "source_spans", type: "jsonb", default: "'[]'::jsonb" },
       { name: "provenance_speaker", type: "text", nullable: true, check: "user|assistant|system|document" },
       { name: "provenance_message_indexes", type: "int[]", nullable: true },
       { name: "provenance_session_id", type: "text", nullable: true },
@@ -194,6 +195,7 @@ export const memoGrafterTables = [
       { name: "quality_defaulted", type: "text[]", default: "'{explicitness,sourceReliability,stability,salience}'" },
       { name: "quality_origin", type: "text", default: "legacy" },
       { name: "quality_updated_at", type: "timestamptz", default: "now()" },
+      { name: "source_spans", type: "jsonb", default: "'[]'::jsonb" },
       { name: "provenance_speaker", type: "text", nullable: true },
       { name: "provenance_message_indexes", type: "int[]", nullable: true },
       { name: "provenance_session_id", type: "text", nullable: true },

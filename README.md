@@ -299,6 +299,22 @@ console.log(run?.status, run?.result?.counts);
 
 This API persists the run, options, source offsets, progress, and results; queue jobs reference the run ID. PostgreSQL replacement stages the new document before atomically replacing the **entire session**. Use `cancelIngestionRun(id)` to persist cancellation. Existing `ingestText()` calls retain their return type and behavior. See the [detailed ingestion guide](USER_GUIDE.md#durable-document-ingestion) for deadlines, retries, migration requirements, and replacement semantics.
 
+For sources that already have structure, use `ingestDocumentDetailed()` or the nodes-only `ingestDocument()` wrapper:
+
+```ts
+await memo.ingestDocumentDetailed({
+  id: "handbook",
+  title: "Engineering handbook",
+  url: "https://example.com/handbook",
+  sections: [
+    { id: "build", title: "Build policy", content: "Use TypeScript.", metadata: { revision: 3 } },
+    { id: "release", title: "Releases", content: "Retain release audit logs." },
+  ],
+}, "project-docs", { segmentation: { strategy: "per-chunk" } });
+```
+
+Supply either `content` or `sections`. Section references and source metadata survive chunk merging, memory deduplication, storage, and retrieval. See [structured documents](USER_GUIDE.md#structured-document-ingestion) for the provenance contract.
+
 ## Shared Fleet Memory
 
 Fleets can store common knowledge once and make it available to workers without copying it into each worker session.

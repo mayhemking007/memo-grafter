@@ -1,5 +1,6 @@
 import { processDocumentRun, safeWarnings, type DocumentRunControl } from "../documentRun.js";
 import { createOperationControl } from "../../utils/operationControl.js";
+import { saveGraphEdges } from "../storeBatch.js";
 import { IngestionProviderWork, embedTexts } from "../providerWork.js";
 import type { MemorySelectionStats } from "../../diagnostics.js";
 import type { GraphStore } from "../../store/index.js";
@@ -315,6 +316,7 @@ export class IngestPipeline {
   }
 
   private async prepareIngestion(run: IngestionRun, options: IngestPipelineOptions, control?: DocumentRunControl): Promise<PreparedIngestion> {
+    if (run.document) options = { ...options, documentContext: { chunks: run.document.chunks, startIndex: run.startIndex } };
     await control?.report({ phase: "segmenting", warnings: [] });
     const expectedCursor = run.document?.baseCursor ?? run.startIndex - 1;
     const currentCursor = (await this.store.getSessionIngestState(run.sessionId))?.lastIngestedMessageIndex ?? -1;
@@ -395,7 +397,8 @@ export class IngestPipeline {
       check?.();
       try {
         const similar = await this.store.getSimilarNodes(node.embedding, sessionId, { k: this.config.topK, excludeNodeId: node.id, minSimilarity: INCREMENTAL_SEMANTIC_THRESHOLD });
-        for (const target of similar) { check?.(); await this.store.saveEdge({ srcId: node.id, dstId: target.id, weight: cosineSimilarity(node.embedding, target.embedding), type: "semantic" }); }
+        check?.();
+        await saveGraphEdges(this.store, similar.map(target => ({ srcId: node.id, dstId: target.id, weight: cosineSimilarity(node.embedding, target.embedding), type: "semantic" })));
         check?.();
         await this.store.buildMemoryEdges(node.id, sessionId, INCREMENTAL_SEMANTIC_THRESHOLD);
       } catch (cause) {

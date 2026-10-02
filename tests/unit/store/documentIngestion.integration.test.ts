@@ -6,6 +6,8 @@ import { validateDocument } from "../../../src/ingestion/validateDocument.js";
 import type { IngestionRun, PreparedIngestion } from "../../../src/ingestion/types.js";
 import type { IngestTextOptions, TopicNode } from "../../../src/core/types.js";
 import { IngestPipeline } from "../../../src/ingestion/conversation/IngestPipeline.js";
+import { MemoGrafter } from "../../../src/core/MemoGrafter.js";
+import { formatFactBlock } from "../../../src/prompts/factRetrievalPrompt.js";
 
 // Opt-in: only a randomly generated schema is removed; never use a production database.
 const url = process.env.MEMOGRAFTER_DOCUMENT_TEST_DB;
@@ -89,7 +91,8 @@ describe.skipIf(!url)("durable documents on PostgreSQL/pgvector", () => {
 
   it("rolls back deletion, messages and cursor if an insert fails during replacement", async () => {
     const sessionId = randomUUID(), old = await seed(sessionId);
-    const run = await claim(await accept(sessionId));
+    const run = await claim(await accept(sessionId, "Replacement sentence. ".repeat(120)));
+    expect(run.document!.chunks.length).toBeGreaterThan(100);
     const prepared = prepare(run);
     prepared.nodes[0]!.embedding = [1, 0]; // pgvector rejects the wrong dimension after the deletes.
     await store.stageDocumentIngestion(run.id, prepared);
@@ -189,5 +192,45 @@ describe.skipIf(!url)("durable documents on PostgreSQL/pgvector", () => {
     const replay = await pipeline.processIngestionRun((await store.getIngestionRun(run.id))!);
     expect(replay.nodes.map(node => node.id)).toEqual(result.nodes.map(node => node.id));
     expect(extractions).toBe(2);
+  });
+
+  it("preserves structured sources in canonical memories, evidence and retrieval across document imports", async () => {
+    const sessionId = randomUUID();
+    const llm = { complete: async () => JSON.stringify({ label: "Project", user_intent: "Choose language", outcome: "Use TypeScript", open: null, memories: [{
+      memory_type: "fact", subject: "project", predicate: "uses", value: "TypeScript", quality: { explicitness: 1, sourceReliability: 1, stability: 1, salience: 1 },
+      provenance: { speaker: "document", message_indexes: [1], extraction_method: "document-extraction" },
+    }] }) };
+    const embedder = { embed: async () => vector(), dimensions: 1536 };
+    const pipeline = new IngestPipeline(store, llm, embedder, { windowSize: 2, topK: 2, minSegmentMessages: 1, mode: "intent", clustering: { enabled: false } });
+    const memo = new MemoGrafter({ db: { connectionString: url! }, llm, embedder });
+    Object.assign(memo, { store, ingestPipeline: pipeline, storageInitialized: true });
+    const input = { id: "handbook", title: "Handbook", url: "https://example.test/handbook", sections: [
+      { id: "language", title: "Language", content: "Use TypeScript.", metadata: { revision: 2 } },
+      { id: "build", title: "Build", content: "Use TypeScript." },
+    ] };
+    const options = { idempotencyKey: "handbook-v2", segmentation: { strategy: "per-chunk" as const }, memoryBudget: { deduplicate: true } };
+    const receipt = await memo.ingestDocumentDetailed(input, sessionId, options);
+    expect(receipt.status).toBe("completed");
+    expect((await memo.ingestDocumentDetailed(input, sessionId, options)).ingestionRunId).toBe(receipt.ingestionRunId);
+    await expect(memo.ingestDocumentDetailed({ ...input, title: "Changed" }, sessionId, options)).rejects.toMatchObject({ code: "INGESTION_INVARIANT_VIOLATION" });
+    await memo.ingestDocumentDetailed({ id: "spec", title: "Specification", content: "Use TypeScript." }, sessionId, { segmentation: { strategy: "single" } });
+    const memories = await store.searchMemories(vector(), sessionId, 10, 0.1);
+    expect(memories).toHaveLength(1);
+    expect(memories[0]!.sourceSpans?.map(span => span.document.id)).toEqual(["handbook", "handbook", "spec"]);
+    const evidence = await store.getMemoryEvidence(memories[0]!.id);
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0]!.sourceSpans).toHaveLength(2);
+    expect(evidence[0]!.sourceSpans![0]!.section.metadata).toEqual({ revision: 2 });
+    const context = formatFactBlock(memories, (await store.getNodesBySession(sessionId))[0]!);
+    expect(context).toContain("https://example.test/handbook");
+    expect(context).toContain("Language");
+    expect(context).toContain("Specification");
+  });
+
+  it("batches edge upserts without changing last-write-wins ordering", async () => {
+    const srcId = randomUUID(), dstId = randomUUID();
+    await store.saveEdges([{ srcId, dstId, weight: 1, type: "temporal" }, { srcId, dstId, weight: 0.5, type: "semantic" }]);
+    const rows = await sql`SELECT weight,type FROM mg_topic_edges WHERE src_id=${srcId} AND dst_id=${dstId}`;
+    expect(rows[0]).toMatchObject({ weight: 0.5, type: "semantic" });
   });
 });
