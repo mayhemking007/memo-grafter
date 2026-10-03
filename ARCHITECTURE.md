@@ -44,7 +44,7 @@ The default application flow starts with `MemoGrafterAgent.invoke()`:
 
 Applications that already own their LLM call use the split external-integration flow instead. Before generation they call `MemoGrafter.context({ sessionId, query, ...retrieverOptions })` to build fresh prompt-ready memory without invoking the configured LLM or consulting the recall cache. After generation they call `MemoGrafter.analyze({ sessionId, userMessage, assistantMessage, tags? })`; this atomically appends exactly that completed exchange after the durable message buffer and reuses the same drift, extraction, persistence, and edge-building stages. In queue mode the exchange is durably staged before its `append` job is submitted and `analyze()` returns an empty node array after enqueue, so graph visibility follows worker completion.
 
-`MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. The existing drift detector runs across the chunks, and the extraction LLM, topic segmentation, memory extraction, and edge-building stages are reused.
+`MemoGrafterAgent.ingestText()` is a separate write path for non-conversational content. It splits raw text into internal chunks using line, sentence, and maximum-size boundaries, then adds those chunks to the graph ingestion history without adding them to public chat history or running the assistant response-generation call. Drift segmentation remains the default; explicit per-chunk or single segmentation skips drift detection. Extraction, memory selection, and graph stages are shared with detailed and structured document ingestion.
 
 The node-count guard avoids an embed and memory search on the first turn or while async ingestion has not produced active graph content. This keeps the foreground chatbot turn simple while memory construction happens after the response. Read and lifecycle calls wait for the agent's local pending-ingest chain. Without queue mode that includes pipeline completion; with BullMQ it covers submission only, and durable graph visibility still depends on worker completion.
 
@@ -54,7 +54,7 @@ The memory hierarchy is now `session -> topic cluster (optional organization) ->
 
 `IngestPipeline` is responsible for turning a session message history into graph state.
 
-Memory extraction is selective rather than a transcript-to-facts conversion. Conversation memories must be supported by one or more user messages; assistant suggestions, questions, generated content, and acknowledgements do not become durable user state unless a later user message explicitly adopts them. Document ingestion uses document ownership. Before embedding, a deterministic validator checks the claimed speaker and supporting one-based prompt message indexes, converts them to absolute originating-session indexes, and rejects unsupported candidates. Persisted memory provenance contains the speaker, originating session, supporting message indexes, and extraction method. After validation, each memory is embedded and passed to canonical reconciliation during persistence. Legacy memory rows may have null provenance or canonical fields; reconciliation canonicalizes active legacy candidates lazily when it encounters them.
+Memory extraction is selective rather than a transcript-to-facts conversion. Conversation memories must be supported by one or more user messages; assistant suggestions, questions, generated content, and acknowledgements do not become durable user state unless a later user message explicitly adopts them. Document ingestion uses document ownership. Before embedding, a deterministic validator checks the claimed speaker and supporting one-based prompt message indexes, converts them to absolute originating-session indexes, and rejects unsupported candidates. Persisted memory provenance contains the speaker, originating session, supporting message indexes, and extraction method. After validation and quality admission, document candidates pass ranking, optional textual deduplication, and budgets before selected memories are embedded and passed to canonical reconciliation during persistence. Legacy memory rows may have null provenance or canonical fields; reconciliation canonicalizes active legacy candidates lazily when it encounters them.
 
 ```text
 indexed messages + sessionId
@@ -354,12 +354,45 @@ During normal ingestion, existing graph state is not cleared. New topic nodes an
 - **Grafting is explicit and traceable:** memory transfer copies selected topic nodes and active atomic memories into a target session, records graph edges, and stores provenance in `mg_graft_registry` instead of silently mixing sessions.
 ## Durable Ingestion Boundary
 
-PostgreSQL-backed ingestion uses two phases. Preparation reads the immutable accepted message range, invokes providers, validates outputs, and constructs graph objects without graph writes. Commit locks the session and ingestion run, verifies the expected cursor, and atomically persists required segments and topics, reconciles canonical memories, records evidence and lifecycle edges, advances the cursor, and completes the run. Semantic edges and telemetry remain best effort and can produce `completed_with_warnings`.
+### Shared document pipeline
 
-`mg_ingestion_runs` is the durable authority for accepted, queued, running, retrying, completed, failed, cancelled, and abandoned work. Queue jobs carry only the stable run identity and range; workers reload messages from PostgreSQL, so retries cannot append the exchange again.
+The document entry points share chunk preparation and the existing extraction/graph pipeline; structured input is not a second ingestion implementation.
+
+| Entry point | Preparation and result | Replacement behavior |
+| --- | --- | --- |
+| `ingestText` / agent text wrappers | Legacy defaults, configurable chunks/segments; nodes or queue submission | Clears session before provider work |
+| `ingestTextDetailed` | Durable text snapshot, staged preparation, receipt | Atomic staged replacement on PostgreSQL |
+| `ingestDocument` / `ingestDocumentDetailed` | Structured source mapped onto the same durable pipeline; nodes / receipt | Same atomic staged replacement |
+
+```text
+raw text OR structured sections + source metadata
+  -> validate options and prepare chunks with offsets
+  -> accept immutable durable document run (detailed/structured APIs)
+  -> drift OR explicit segmentation
+  -> bounded extraction -> quality admission -> rank/deduplicate/budget
+  -> embed selected memories and topic summaries
+  -> persist prepared snapshot
+  -> atomic required commit -> optional resumable enrichment
+```
+
+Chunking controls document division (`sentence`, `paragraph`, `section`, `fixed`, `single`); segmentation controls extraction groups (`drift`, `per-chunk`, `single`). Legacy text keeps sentence chunks and a one-message minimum when new controls are absent. Structured documents default to paragraph chunks within explicit sections. Hard character/chunk/topic limits reject impossible combinations rather than discard content. Explicit segmentation skips drift embeddings. Fixed windows support overlap; headings, lists, paragraphs, and fenced code stay intact where they fit.
+
+Memory selection happens before memory embedding. Validated candidates pass quality admission, deterministic ranking, optional textual deduplication, and per-segment/document budgets. Equivalence preserves case, punctuation, negations, dates, numbers, and conflicting facts; semantic deduplication is not enabled. Selected results return to source order for topic assignment and persistence. Extraction and embedding have shared per-instance concurrency ceilings (defaults 2 and 8) across nested ingestion work. Optional `embedMany` uses batches of at most 32, with bounded singles only when the adapter lacks batch support. Counts distinguish rejected, deduplicated, budget-excluded, selected, acknowledged, and newly persisted memories.
+
+Structured input accepts exactly one of content or ordered sections, with document/section IDs, titles, URLs, and JSON metadata. Source spans survive merged chunks, candidate deduplication, canonical reinforcement, grafting, and retrieval. Each span records separate document/section descriptors and half-open UTF-16 section-relative offsets. These are supporting chunk ranges, not exact fact quotations. Run payloads retain immutable structured input (version 2); version-1 text runs remain readable.
+
+Detailed acceptance requires a caught-up session and excludes competing ingestion while active. A session-scoped idempotency key freezes chunks, source mappings, resolved options, and an absolute deadline (default five minutes, including queue wait). Workers reload that payload; a staged prepared snapshot avoids repeated provider calls on retry. Work before staging may run again. Live leases are renewed; worker identity and attempt fencing prevent stale workers from committing. An `AbortSignal` is in-process only; `cancelIngestionRun` and the persisted deadline provide cross-process cancellation semantics.
+
+Required commit locks the session and run, checks lease/deadline/cursor expectations, and atomically writes graph data, messages, cursor, and result. Replacement affects all session ingestion content, not just matching source IDs. Existing data survives preparation failure or transaction rollback. Historical runs retain their snapshots and become superseded after replacement. Cancellation cannot undo a winning commit. Optional semantic edges and clustering follow commit; failures yield `completed_with_warnings`, and `finish-document` resumes pending enrichment. Finalization serializes against replacement and may include provider work while holding its session guard; it is separate from the required commit transaction.
+
+PostgreSQL batches message, segment, and edge writes inside the existing commit transaction. Ordered canonical memory reconciliation and dependent topic/episode operations remain intact. Optional `GraphStore.saveEdges` falls back to ordered single-edge writes without adding atomicity. Unsupported custom stores cannot use detailed APIs without implementing their durable atomic capabilities. Migrations `013_document_ingestion.sql` and `014_structured_documents.sql` add document checkpoints and memory/evidence source spans.
+
+Durable PostgreSQL ingestion uses two phases. Preparation reads the immutable accepted message range or document payload, invokes providers, validates outputs, and constructs graph objects without graph writes. Commit locks the session and ingestion run, verifies the expected cursor, and atomically persists required segments and topics, reconciles canonical memories, records evidence and lifecycle edges, advances the cursor, and completes the run. Semantic edges and telemetry remain best effort and can produce `completed_with_warnings`.
+
+`mg_ingestion_runs` is the durable authority for accepted, queued, running, retrying, completed, failed, cancelled, and abandoned work. Durable run jobs carry stable run identity and range; workers reload accepted messages or document payloads from PostgreSQL. Legacy text queue jobs retain their existing payload contract.
 ## Resilience And Ingestion Transparency
 
-Long-running public boundaries use the shared `MemoGrafterOperationOptions` contract (`signal` and `timeoutMs`). Explicit cancellation is reported as `OPERATION_ABORTED` and is not automatically retryable; a configured deadline is reported as retryable `OPERATION_TIMEOUT`. Provider errors remain specific when no cancellation or framework deadline occurred.
+Long-running public boundaries use the shared `MemoGrafterOperationOptions` contract (`signal` and `timeoutMs`). Explicit cancellation is reported as `OPERATION_ABORTED` and is not automatically retryable; a general operation deadline is reported as retryable `OPERATION_TIMEOUT`. Detailed documents instead persist an absolute deadline whose expiry is terminal and non-retryable, returned in a receipt. Provider errors remain specific when no cancellation or framework deadline occurred.
 
 Optional cache failures do not fail retrieval. They produce a successful `RetrievalResult` with `degraded: true` and structured `warnings`. Durable ingestion, database writes, and provider/embedder failures remain fatal.
 

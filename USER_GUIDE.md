@@ -561,11 +561,54 @@ Options:
 - `label`: optional hint for the first topic label created by this ingestion.
 - `source`: optional arbitrary metadata stored on created topic and memory nodes, such as `"import"` or `"classic-editor"`.
 
-Use `replace: true` for autosave workflows where each call represents the complete current document. Replacement removes stored messages, topic nodes, memory nodes, graph edges, segments, grafted nodes, and the ingest cursor for the current session. It does not clear the agent's public conversational history or change the session ID.
+Use `replace: true` only when each call represents the complete ingestion content for the session. For autosave that must preserve old data if preparation fails, use `memo.ingestTextDetailed()` or the structured APIs below; legacy text replacement clears old data before provider work. Replacement removes stored messages, topic nodes, memory nodes, graph edges, segments, grafted nodes, and the ingest cursor for the current session. It does not clear the agent's public conversational history or change the session ID.
 
 Without `replace`, each text call appends to the current session memory. Later `invoke()` calls continue to work normally and can recall facts extracted from the ingested text.
 
 In queue mode, `await agent.ingestText()` confirms that the ingestion job was queued. Reads may need to wait for the worker to finish before the new graph content is visible.
+
+### Selecting document memories and limiting provider work
+
+Text ingestion extracts candidates across the current document before embedding memories. Opt into selection limits:
+
+```ts
+await memo.ingestText(markdown, sessionId, {
+  chunking: { strategy: "section", maxCharacters: 3000 },
+  segmentation: { strategy: "per-chunk" },
+  memoryBudget: {
+    maxPerSegment: 4,
+    maxPerDocument: 12,
+    deduplicate: true,
+    preferredTypes: ["task", "fact", "insight"],
+  },
+  concurrency: { extraction: 2, embedding: 4 },
+  qualityPolicy: { mode: "enforce", minExplicitness: 0.65 },
+});
+```
+
+Budgets are non-negative integers; zero means no memory embeddings or inserts, while topics are still produced. Omitted budgets are unlimited and deduplication defaults to off. Existing quality policies retain their observe/enforce behavior. Budget validation occurs before replacement clears a session. These controls also pass through agent text ingestion and queued text jobs.
+
+Candidates first pass schema/provenance validation and quality admission. Ranking uses salience × 0.4 + explicitness × 0.25 + stability × 0.2 + source reliability × 0.15. Type preferences break equal-score ties, followed by source order. Textual deduplication compares memory type, subject, predicate, and value after Unicode NFC and whitespace normalization. It intentionally preserves case, punctuation, negations, dates, numbers, decisions, and conflicting values; paraphrases are not deduplicated. The highest-ranked equivalent retains its message provenance; structured source spans from equivalent candidates are combined. Per-segment and document caps then select candidates, with embeddings and writes restored to source order. Rejected, duplicate, and over-budget memories incur no memory embedding calls.
+
+Instance-wide provider ceilings live in `MemoGrafterConfig.ingestion.concurrency` (defaults: extraction 2, embedding 8). Per-call concurrency can lower the effective limit; it cannot exceed the instance ceiling. Shared schedulers cover nested ingestion calls, drift ambiguity requests, topic classification, and overlapping imports on the same instance. Separate instances/processes have separate limits. Retrieval and other non-ingestion operations are outside this scheduler. Limits count in-flight requests, not tokens or requests per minute.
+
+Adapters may implement `embedMany(texts, operationOptions?)`, returning vectors in input order. Ingestion uses batches of at most 32 inputs and validates count, dimensions when declared, and finite vector values. OpenAI's adapter restores response indexes explicitly. Custom adapters must preserve input order. Without batch support, individual requests use the same embedding limiter. Batch failures are never retried as individual calls. Topic embedding failures fail ingestion; memory embedding failures in legacy ingestion retain best-effort behavior for the affected segment and emit a warning. Required memory preparation failures in detailed document runs are fatal before commit. Batch size bounds input count, not provider token limits.
+
+`diagnostics.onMemorySelection(stats)` receives an end-of-attempt snapshot for nonempty documents, including failed attempts:
+
+| Field | Meaning |
+| --- | --- |
+| `extracted` | Raw memory items returned by successful extraction responses |
+| `rejected` | Schema, provenance, or enforced quality rejections |
+| `deduplicated` | Equivalent candidates removed before budgets |
+| `budgetExcluded` | Remaining candidates excluded by either budget |
+| `selected` | Candidates selected for memory embedding |
+| `acknowledged` | Candidates submitted in successful memory insert calls, including reinforcement |
+| `persisted` | Newly inserted rows; PostgreSQL reports the exact count, custom stores returning void yield null after successful writes |
+
+Embedding or persistence failures can make acknowledged/persisted counts lower than selected. Legacy diagnostic counts describe this attempt. Detailed document runs also checkpoint available counts in their durable receipt (`run.result.counts`). Optional store insert results use `{ inserted: number }`; existing `Promise<void>` stores remain compatible. Budget controls alone require no migration; detailed and structured ingestion require the migrations described below.
+
+Run `npm run benchmark:document-ingestion` for a credential-free, deterministic provider simulation comparing sequential preparation with selection, bounded work, and batching. Its elapsed times are synthetic, not predictions of live provider latency.
 
 ### Durable Document Ingestion
 
@@ -602,7 +645,7 @@ Only one active detailed document is accepted per session, and existing message 
 
 Optional semantic edges and clustering follow the commit and serialize against session replacement. Their failures produce `completed_with_warnings`; they cannot roll back committed content. A crash can leave `postProcessing: "pending"` on a completed run. Replay the same idempotent request or use `reconcileSession(sessionId, { mode: "repair", repairs: ["finish-document"] })` to finish that work without repeating extraction. Reconciliation is inspect-only unless explicitly requested; existing accepted/retry/expired-lease repairs also apply to document runs. Superseded runs retain their historical receipt and are not replayed into the new session.
 
-Invalid text, limits, budgets, concurrency, or metadata fail before provider calls or storage mutations. Unlike legacy blank-text no-ops, the detailed API requires nonblank text. Provider or storage failures can reject with a typed error; after acceptance, `error.context.jobId` identifies the durable run for inspection or retry. Cancellation and deadline expiry return terminal receipts. Queue enqueue failure leaves accepted input recoverable as `retry_pending`.
+Invalid text, limits, budgets, concurrency, or metadata fail before provider calls or storage mutations. Unlike legacy blank-text no-ops, the detailed API requires nonblank text. Provider or storage failures can reject with a typed error; after acceptance, `error.context.jobId` identifies the durable run for inspection or retry. Cancellation and deadline expiry return terminal receipts; an expired document deadline is terminal and non-retryable (`OPERATION_TIMEOUT`). Queue enqueue failure leaves accepted input recoverable as `retry_pending`.
 
 Upgrade the database using the normal migration command before using this API. The runtime migration and standalone `migrations/013_document_ingestion.sql` add document/stage/result payloads, cancellation state, and replacement-aware range uniqueness. Custom stores must implement the document staging, progress, cancellation, lease-fenced atomic commit, and serialized finalization methods in `GraphStore`; unsupported stores fail with `CONFIGURATION_INVALID` rather than attempting destructive replacement. `ingestText(): Promise<TopicNode[]>` and agent wrappers retain their existing behavior.
 
@@ -610,7 +653,7 @@ The opt-in PostgreSQL tests use `MEMOGRAFTER_DOCUMENT_TEST_DB` and create/drop o
 
 ### Structured Document Ingestion
 
-`MemoGrafter.ingestDocument(input, sessionId, options?)` returns topic nodes; queued work returns an empty array. `ingestDocumentDetailed(input, sessionId, options?, operationOptions?)` returns the same durable receipt and supports the same idempotency, cancellation, deadline, queue, and replacement behavior as `ingestTextDetailed()`. The convenience wrapper throws for terminal failed/cancelled runs. These are APIs on the initialized `MemoGrafter` instance; existing agent/text methods are unchanged.
+`MemoGrafter.ingestDocument(input, sessionId, options?)` returns topic nodes; queued work returns an empty array. `ingestDocumentDetailed(input, sessionId, options?, operationOptions?)` returns the same durable receipt and supports the same idempotency, cancellation, deadline, queue, and replacement behavior as `ingestTextDetailed()`. The convenience wrapper throws for terminal failed, cancelled, or abandoned runs. These are APIs on the initialized `MemoGrafter` instance; existing agent/text methods are unchanged.
 
 ```ts
 const receipt = await memo.ingestDocumentDetailed({
@@ -640,7 +683,7 @@ Structured input defaults to paragraph chunking within each explicit section. La
 
 PostgreSQL persists source spans on both canonical memory nodes and immutable evidence rows. `memo.store.getMemoryEvidence?.(memoryId)` exposes those observations. Memory search results retain spans, and generated fact/pinned context includes source titles and URLs. `sourceTitle` and `sourceUrl` remain convenient primary-source fields; use `sourceSpans` for the complete set. Older rows have no source spans. Apply migration `014_structured_documents.sql` using the normal migration command before deploying.
 
-PostgreSQL batches document message inserts, segment inserts, and edge upserts within the existing commit transaction. Memory reconciliation, episode creation, and stable-topic updates retain their ordered dependency handling. The optional `GraphStore.saveEdges()` method accelerates graph enrichment; stores without it receive ordered `saveEdge()` calls, stopping on failure. This fallback does not claim atomicity. Required durable writes still require an atomic `commitPreparedIngestion()` implementation. `PostgresGraphStore` accepts `batchSize` (default 100, range 1–1000); setting it to 1 allows a comparable single-row-write benchmark. Replacement and deadline/lease checks remain unchanged. Semantic deduplication is not enabled by this API; textual deduplication remains opt-in through `memoryBudget.deduplicate`.
+PostgreSQL batches document message inserts, segment inserts, and edge upserts within the existing commit transaction. Memory reconciliation, episode creation, and stable-topic updates retain their ordered dependency handling. The optional `GraphStore.saveEdges()` method accelerates graph enrichment; stores without it receive ordered `saveEdge()` calls, stopping on failure. This fallback does not claim atomicity. Required durable writes still require an atomic `commitPreparedIngestion()` implementation. `new PostgresGraphStore(connectionString, { batchSize: 100 })` accepts `batchSize` (default 100, range 1–1000); setting it to 1 allows a comparable single-row-write benchmark. Replacement and deadline/lease checks remain unchanged. Semantic deduplication is not enabled by this API; textual deduplication remains opt-in through `memoryBudget.deduplicate`.
 
 Run `npm run benchmark:document-ingestion` for simulated-provider preparation measurements. For end-to-end provider requests, PostgreSQL operations, and wall time, set `MEMOGRAFTER_DOCUMENT_TEST_DB` to a disposable pgvector database and run `npm run benchmark:structured-ingestion`. It creates and drops an isolated schema, runs three samples per mode, and reports median timings. See [benchmark methodology and results](tests/manual/benchmarks/STRUCTURED_RESULTS.md).
 
@@ -2030,9 +2073,19 @@ Main exports:
 - `RetrieverConfig`
 - `TagFilterOptions`
 - `IngestOptions`
-- `IngestTextOptions`
+- `IngestTextOptions`, `TextChunkingOptions`, `TextSegmentationOptions`, `MemoryBudget`, and `IngestionConcurrency`
+- `IngestTextDetailedOptions` and `TextIngestionReceipt`
+- `DocumentInput`, `DocumentSection`, `DocumentSource`, `DocumentSourceSpan`, `IngestDocumentOptions`, and `DocumentIngestionReceipt`
 - `RememberOptions`
 - public shared and fleet types
+
+Document methods on initialized `MemoGrafter` (not agent wrappers):
+
+- `ingestText(text, sessionId, options?)`: legacy node-array result and replacement behavior.
+- `ingestTextDetailed(text, sessionId, options?, operationOptions?)`: durable text receipt.
+- `ingestDocument(input, sessionId, options?)`: structured durable ingestion with a node-array result.
+- `ingestDocumentDetailed(input, sessionId, options?, operationOptions?)`: structured durable receipt.
+- `getIngestionRun(runId)` and `cancelIngestionRun(runId)`: inspect and cancel document work.
 
 Useful `GraphStore` inspection methods:
 
@@ -2178,46 +2231,3 @@ Validation commands:
 - `npm run test:run` covers classification decisions, cooldowns, timeouts, ingestion failure isolation, retrieval invariance, and Studio grouping.
 - `npm run manual:clusters` uses `DATABASE_URL` for isolated PostgreSQL schema checks, including concurrent creation, foreign keys, upgrade migration, and graft isolation. No provider calls.
 - `npm run accuracy:clusters -- /path/to/mg.config.ts` evaluates the configured providers on labeled domain fixtures without database writes. It reports pair precision/recall, domain fragmentation, abstentions, provider calls, and classification latency. Run against your own representative data before enabling broadly; provider calls incur their usual costs.
-
-### Selecting document memories and limiting provider work
-
-Text ingestion extracts candidates across the current document before embedding memories. Opt into selection limits:
-
-```ts
-await memo.ingestText(markdown, sessionId, {
-  chunking: { strategy: "section", maxCharacters: 3000 },
-  segmentation: { strategy: "per-chunk" },
-  memoryBudget: {
-    maxPerSegment: 4,
-    maxPerDocument: 12,
-    deduplicate: true,
-    preferredTypes: ["task", "fact", "insight"],
-  },
-  concurrency: { extraction: 2, embedding: 4 },
-  qualityPolicy: { mode: "enforce", minExplicitness: 0.65 },
-});
-```
-
-Budgets are non-negative integers; zero means no memory embeddings or inserts, while topics are still produced. Omitted budgets are unlimited and deduplication defaults to off. Existing quality policies retain their observe/enforce behavior. Budget validation occurs before replacement clears a session. These controls also pass through agent text ingestion and queued text jobs.
-
-Candidates first pass schema/provenance validation and quality admission. Ranking uses salience × 0.4 + explicitness × 0.25 + stability × 0.2 + source reliability × 0.15. Type preferences break equal-score ties, followed by source order. Textual deduplication compares memory type, subject, predicate, and value after Unicode NFC and whitespace normalization. It intentionally preserves case, punctuation, negations, dates, numbers, decisions, and conflicting values; paraphrases are not deduplicated. The highest-ranked equivalent retains its original provenance. Per-segment and document caps then select candidates, with embeddings and writes restored to source order. Rejected, duplicate, and over-budget memories incur no memory embedding calls.
-
-Instance-wide provider ceilings live in `MemoGrafterConfig.ingestion.concurrency` (defaults: extraction 2, embedding 8). Per-call concurrency can lower the effective limit; it cannot exceed the instance ceiling. Shared schedulers cover nested ingestion calls, drift ambiguity requests, topic classification, and overlapping imports on the same instance. Separate instances/processes have separate limits. Retrieval and other non-ingestion operations are outside this scheduler. Limits count in-flight requests, not tokens or requests per minute.
-
-Adapters may implement `embedMany(texts, operationOptions?)`, returning vectors in input order. Ingestion uses batches of at most 32 inputs and validates count, dimensions when declared, and finite vector values. OpenAI's adapter restores response indexes explicitly. Custom adapters must preserve input order. Without batch support, individual requests use the same embedding limiter. Batch failures are never retried as individual calls. Topic embedding failures fail ingestion; memory embedding failures retain the existing best-effort behavior for the affected segment and emit a warning. Batch size bounds input count, not provider token limits.
-
-`diagnostics.onMemorySelection(stats)` receives an end-of-attempt snapshot for nonempty documents, including failed attempts:
-
-| Field | Meaning |
-| --- | --- |
-| `extracted` | Raw memory items returned by successful extraction responses |
-| `rejected` | Schema, provenance, or enforced quality rejections |
-| `deduplicated` | Equivalent candidates removed before budgets |
-| `budgetExcluded` | Remaining candidates excluded by either budget |
-| `selected` | Candidates selected for memory embedding |
-| `acknowledged` | Candidates submitted in successful memory insert calls, including reinforcement |
-| `persisted` | Newly inserted rows; PostgreSQL reports the exact count, custom stores returning void yield null after successful writes |
-
-Embedding or persistence failures can make acknowledged/persisted counts lower than selected. Counts describe this attempt and are not stored as durable receipts. Optional store insert results use `{ inserted: number }`; existing `Promise<void>` stores remain compatible. No database migration is required.
-
-Run `npm run benchmark:document-ingestion` for a credential-free, deterministic provider simulation comparing sequential preparation with selection, bounded work, and batching. Its elapsed times are synthetic, not predictions of live provider latency.
